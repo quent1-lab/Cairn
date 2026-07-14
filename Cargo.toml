@@ -1,0 +1,12 @@
+[workspace]
+resolver = "3"
+members = ["crates/core", "crates/worldgen"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+cairn-core = { path = "crates/core" }
+noise = "0.9"
+image = { version = "0.25", default-features = false, features = ["png"] }
