@@ -9,7 +9,7 @@ use cairn_worldgen::AltitudeField;
 /// Côté de l'image en pixels.
 const SIZE: u32 = 1024;
 /// 1 pixel = N tuiles : la carte couvre SIZE × N tuiles de côté.
-const TILES_PER_PX: i64 = 8;
+const TILES_PER_PX: i64 = 16;
 
 fn main() {
     let seed: u64 = std::env::args()
@@ -21,16 +21,22 @@ fn main() {
     let half = (SIZE as i64 * TILES_PER_PX) / 2;
 
     let mut img = image::RgbImage::new(SIZE, SIZE);
+    let mut land_px: u64 = 0;
     for (px, py, pixel) in img.enumerate_pixels_mut() {
         let x = px as i64 * TILES_PER_PX - half;
         let y = py as i64 * TILES_PER_PX - half;
-        *pixel = hypsometric(field.elevation(x, y));
+        let e = field.elevation(x, y);
+        if e > 0.0 {
+            land_px += 1;
+        }
+        *pixel = hypsometric(e);
     }
 
     std::fs::create_dir_all("out").expect("création du dossier out/");
     let path = format!("out/map_{seed}.png");
     img.save(&path).expect("écriture du PNG");
-    println!("carte écrite dans {path}");
+    let land_pct = 100.0 * land_px as f64 / (u64::from(SIZE) * u64::from(SIZE)) as f64;
+    println!("carte écrite dans {path} — terres émergées : {land_pct:.1} %");
 }
 
 /// Palette hypsométrique : gradient par morceaux entre points de contrôle,

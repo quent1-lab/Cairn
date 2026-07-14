@@ -34,7 +34,7 @@ impl Default for AltitudeConfig {
     fn default() -> Self {
         Self {
             continent_octaves: 3,
-            continent_frequency: 1.0 / 2048.0,
+            continent_frequency: 1.0 / 4096.0,
             relief_octaves: 6,
             relief_frequency: 1.0 / 512.0,
             sea_bias: 0.1,
