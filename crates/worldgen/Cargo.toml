@@ -1,0 +1,16 @@
+[package]
+name = "cairn-worldgen"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+cairn-core.workspace = true
+# Simplex 2D uniquement : les tables de gradients et le skewing sont le genre
+# de code subtil et pénible à déboguer qu'on délègue volontiers. Le fBm
+# par-dessus, lui, est à nous (src/fbm.rs) : c'est là que sont nos choix.
+noise = "0.9"
+
+[dev-dependencies]
+# Encodage PNG (DEFLATE) : très au-delà des 50 lignes maison. En
+# dev-dependency : seuls les exemples de debug en ont besoin, la lib non.
+image.workspace = true
