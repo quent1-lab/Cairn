@@ -24,8 +24,8 @@ Workspace cible (BRIEF §8) : `crates/{core, worldgen, sim, protocol, server, cl
 ## Commandes
 
 - `cargo check` / `cargo test` — vérification et tests.
-- `cargo run --release -p cairn-worldgen --example map_png -- <seed>` — rend la carte d'altitude en PNG dans `out/` (toujours en `--release` : le bruit est ~30× plus lent en debug).
-- **git : uniquement via Git Bash** — absent du PATH PowerShell.
+- `cargo run --release -p cairn-worldgen --example map_png -- <seed>` — rend une image PNG par couche du pipeline dans `out/` (`_alt`, `_temp`…) + % de terres émergées (toujours en `--release` : le bruit est ~30× plus lent en debug).
+- **git : uniquement via Git Bash** — absent du PATH PowerShell. Les commits sont gérés par Claude (demande explicite de l'utilisateur), messages en français, style conventional commits.
 
 ## Environnement
 
@@ -34,4 +34,4 @@ Workspace cible (BRIEF §8) : `crates/{core, worldgen, sim, protocol, server, cl
 
 ## État d'avancement
 
-- **Phase 1 en cours** : altitude (fBm + masque continental) + export PNG. Reste : température, vent, humidité (ombre pluviométrique), hydrologie, biomes, géologie, chunking, client WASM.
+- **Phase 1 en cours** : altitude (fBm + masque continental) et température (latitude périodique + adiabatique) faites, export PNG par couche. Reste : vent, humidité (ombre pluviométrique), hydrologie, biomes, géologie, chunking, client WASM. Amélioration en attente : montagnes en chaînes (ridged noise) plutôt qu'en taches.
