@@ -9,10 +9,7 @@
 use cairn_core::WorldSeed;
 
 use crate::fbm::Fbm;
-
-/// Salts identifiant chaque couche de bruit auprès de `WorldSeed::derive`.
-const SALT_CONTINENTS: u64 = 0x1;
-const SALT_RELIEF: u64 = 0x2;
+use crate::salt;
 
 /// Paramètres de forme du terrain, regroupés pour pouvoir itérer visuellement
 /// sans chercher des constantes éparpillées.
@@ -58,12 +55,12 @@ impl AltitudeField {
     pub fn with_config(seed: WorldSeed, cfg: AltitudeConfig) -> Self {
         Self {
             continents: Fbm::new(
-                seed.derive(SALT_CONTINENTS),
+                seed.derive(salt::CONTINENTS),
                 cfg.continent_octaves,
                 cfg.continent_frequency,
             ),
             relief: Fbm::new(
-                seed.derive(SALT_RELIEF),
+                seed.derive(salt::RELIEF),
                 cfg.relief_octaves,
                 cfg.relief_frequency,
             ),
