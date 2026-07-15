@@ -31,7 +31,10 @@ impl Default for AltitudeConfig {
     fn default() -> Self {
         Self {
             continent_octaves: 3,
-            continent_frequency: 1.0 / 4096.0,
+            // 1/6144 : mesuré (example analyze) comme le meilleur compromis —
+            // un continent principal dans chaque seed (médiane 24 % des
+            // terres, pire cas 12 %) sans basculer vers la Pangée.
+            continent_frequency: 1.0 / 6144.0,
             relief_octaves: 6,
             relief_frequency: 1.0 / 512.0,
             sea_bias: 0.1,

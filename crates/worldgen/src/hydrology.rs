@@ -155,6 +155,11 @@ fn fill_depressions(elev: &[f64], w: usize, h: usize) -> (Vec<f64>, Vec<usize>) 
     let mut filled = vec![0.0; n];
     let mut closed = vec![false; n];
     let mut order = Vec::with_capacity(n);
+    // Clé du tas : (altitude comblée, index de cellule). L'index n'est pas
+    // qu'une charge utile — il départage les altitudes égales par un ordre
+    // total strict, sinon le dépilement de deux cellules ex æquo dépendrait
+    // de l'ordre d'insertion et pourrait faire basculer des directions D8
+    // d'un run à l'autre. Invisible sur le PNG, fatal au déterminisme.
     let mut heap: BinaryHeap<Reverse<(OrdF64, u32)>> = BinaryHeap::new();
 
     // Amorçage : tout le bord du domaine est un exutoire, à son altitude.
