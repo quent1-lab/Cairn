@@ -1,22 +1,23 @@
 //! Rend une région du monde en PNG, une image par couche du pipeline :
-//! altitude (hypsométrique), température (thermique), humidité (aridité).
+//! altitude (hypsométrique), température (thermique), humidité (aridité),
+//! biomes (avec rivières et lacs superposés).
 //!
-//! Usage : cargo run --release -p cairn-worldgen --example map_png -- [seed]
-//! Sortie : out/map_<seed>_{alt,temp,hum}.png
+//! Usage : cargo run --release -p cairn-worldgen --example map_png -- [seed] [tuiles/pixel]
+//! Le second argument zoome : petit = gros plan, grand = vue planétaire.
+//! Sortie : out/map_<seed>_{alt,temp,hum,bio}.png
 
 use std::collections::BTreeMap;
 use std::time::Instant;
 
 use cairn_core::WorldSeed;
-use cairn_worldgen::{Biome, WorldGen};
+use cairn_worldgen::{Biome, Hydrology, HydrologyConfig, Region, Water, WorldGen};
 use rayon::prelude::*;
 
 /// Côté de l'image en pixels.
 const SIZE: u32 = 1024;
-/// 1 pixel = N tuiles : la carte couvre SIZE × N tuiles de côté.
-/// À 32, la carte couvre un demi-cycle de latitude complet : équateur au
-/// centre, pôles aux bords haut et bas.
-const TILES_PER_PX: i64 = 32;
+/// Échelle par défaut : 1 pixel = N tuiles. À 32, la carte couvre un
+/// demi-cycle de latitude (équateur au centre, pôles aux bords).
+const DEFAULT_TILES_PER_PX: i64 = 32;
 
 /// Palette hypsométrique, indexée par l'élévation normalisée. Rupture nette
 /// au niveau de la mer pour lire le trait de côte.
@@ -57,9 +58,14 @@ fn main() {
         .nth(1)
         .and_then(|s| s.parse().ok())
         .unwrap_or(42);
+    let tiles_per_px: i64 = std::env::args()
+        .nth(2)
+        .and_then(|s| s.parse().ok())
+        .filter(|&t| t > 0)
+        .unwrap_or(DEFAULT_TILES_PER_PX);
 
     let world = WorldGen::new(WorldSeed(seed));
-    let half = (SIZE as i64 * TILES_PER_PX) / 2;
+    let half = (SIZE as i64 * tiles_per_px) / 2;
     let start = Instant::now();
 
     // Calcul parallèle par rangées ; `map` préserve l'ordre, le résultat
@@ -69,8 +75,8 @@ fn main() {
         .map(|py| {
             (0..SIZE)
                 .map(|px| {
-                    let x = i64::from(px) * TILES_PER_PX - half;
-                    let y = i64::from(py) * TILES_PER_PX - half;
+                    let x = i64::from(px) * tiles_per_px - half;
+                    let y = i64::from(py) * tiles_per_px - half;
                     let e = world.elevation(x, y);
                     let t = world.mean_temperature(x, y, e);
                     let h = world.humidity(x, y);
@@ -81,6 +87,20 @@ fn main() {
         .collect();
 
     let elapsed = start.elapsed();
+
+    // Hydrologie sur la fenêtre rendue, une macro-cellule par pixel. Bornée
+    // par construction : les rivières venues de hors-champ n'existent pas
+    // (limite assumée du calcul en fenêtre, levée plus tard au chunking).
+    let region = Region {
+        origin_x: -half,
+        origin_y: -half,
+        width: SIZE as usize,
+        height: SIZE as usize,
+        tiles_per_cell: tiles_per_px,
+    };
+    let hydro = Hydrology::compute(region, &HydrologyConfig::default(), |x, y| {
+        world.elevation(x, y)
+    });
 
     let mut img_alt = image::RgbImage::new(SIZE, SIZE);
     let mut img_temp = image::RgbImage::new(SIZE, SIZE);
@@ -98,12 +118,22 @@ fn main() {
             let biome = Biome::classify(e, t, h);
             *biome_counts.entry(biome).or_insert(0) += 1;
 
+            // L'hydrologie prime sur le biome climatique : une rivière ou un
+            // lac recouvre la couleur de terrain.
+            let tile_x = i64::from(px) * tiles_per_px - half;
+            let tile_y = i64::from(py) * tiles_per_px - half;
+            let bio_rgb = match hydro.water_at(tile_x, tile_y) {
+                Water::River => [48, 96, 176],
+                Water::Lake => [40, 82, 150],
+                _ => biome_color(biome),
+            };
+
             img_alt.put_pixel(px, py, gradient(HYPSO_STOPS, e));
             // Océans assombris sur les cartes dérivées : le trait de côte
             // reste lisible sans masquer le champ affiché.
             img_temp.put_pixel(px, py, darken_if(e <= 0.0, gradient(THERMAL_STOPS, t)));
             img_hum.put_pixel(px, py, darken_if(e <= 0.0, gradient(MOISTURE_STOPS, h)));
-            img_bio.put_pixel(px, py, image::Rgb(biome_color(biome)));
+            img_bio.put_pixel(px, py, image::Rgb(bio_rgb));
         }
     }
 
