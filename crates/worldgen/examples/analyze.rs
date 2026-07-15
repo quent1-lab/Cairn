@@ -16,17 +16,28 @@
 //!             [nb_seeds] [longueur_onde_continent] [sea_bias]
 
 use cairn_core::WorldSeed;
+use cairn_core::scale::{km_to_tiles, tiles_to_km};
 use cairn_worldgen::{AltitudeConfig, AltitudeField, HumidityConfig, WorldGen, WorldGenConfig};
 use rayon::prelude::*;
 
 fn main() {
     let mut args = std::env::args().skip(1);
+    // Sans arguments, l'outil mesure exactement le monde par défaut : les
+    // valeurs viennent d'AltitudeConfig::default(), pas de constantes en dur.
+    let default_cfg = AltitudeConfig::default();
     let n_seeds: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(50);
-    let wavelength: f64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(4096.0);
-    let sea_bias: f64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(0.1);
+    let wavelength: f64 = args
+        .next()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1.0 / default_cfg.continent_frequency);
+    let sea_bias: f64 = args
+        .next()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(default_cfg.sea_bias);
 
     println!(
-        "Config : longueur d'onde continentale = {wavelength:.0} tuiles, sea_bias = {sea_bias}\n"
+        "Config : longueur d'onde continentale = {wavelength:.0} tuiles ({:.0} km), sea_bias = {sea_bias}\n",
+        tiles_to_km(wavelength),
     );
 
     connectivity(n_seeds, wavelength, sea_bias);
@@ -46,15 +57,12 @@ fn altitude_config(wavelength: f64, sea_bias: f64) -> AltitudeConfig {
 // ─────────────────────────── A. Connexité ───────────────────────────
 
 /// Grille d'échantillonnage : côté en cellules et pas en tuiles. La fenêtre
-/// couvre GRID·SPACING tuiles, soit ~6 longueurs d'onde continentales.
+/// couvre GRID·SPACING tuiles ≈ 18 000 km, soit ~6 continents.
 const GRID: usize = 384;
-const SPACING: i64 = 96;
+const SPACING: i64 = km_to_tiles(48.0) as i64;
 
-/// Échelle du monde, dérivée de la période de latitude : 16384 tuiles de
-/// l'équateur au pôle ≈ 10 000 km terrestres ⇒ ~0,61 km/tuile.
-const TILE_KM: f64 = 0.61;
 /// Distance cible d'une route commerciale (le « 300 km » du brief pour la
-/// séparation cuivre↔étain), en tuiles.
+/// séparation cuivre↔étain).
 const TRADE_ROUTE_KM: f64 = 300.0;
 
 fn connectivity(n_seeds: u64, wavelength: f64, sea_bias: f64) {
@@ -68,7 +76,7 @@ fn connectivity(n_seeds: u64, wavelength: f64, sea_bias: f64) {
             let field = AltitudeField::with_config(WorldSeed(seed), altitude_config(wavelength, sea_bias));
             let land = sample_land(&field);
             let (land_frac, largest_frac, span_tiles) = largest_component(&land);
-            (seed, land_frac, largest_frac, span_tiles * TILE_KM)
+            (seed, land_frac, largest_frac, tiles_to_km(span_tiles))
         })
         .collect();
 
@@ -188,11 +196,13 @@ fn largest_component(land: &[bool]) -> (f64, f64, f64) {
 
 // ─────────────────────────── B. Rain shadow ───────────────────────────
 
-/// Nombre de pas de la remontée au vent pour mesurer la barrière.
-const UPWIND_STEPS: usize = 40;
-const UPWIND_STEP_TILES: f64 = 32.0;
+/// Remontée au vent pour mesurer la barrière : ~150 km au pas de 3 km,
+/// aligné sur la portée d'advection de l'humidité.
+const UPWIND_STEPS: usize = 50;
+const UPWIND_STEP_TILES: f64 = km_to_tiles(3.0);
+/// Fenêtre rain shadow : ~4400 km, un continent aux reliefs variés.
 const RS_GRID: usize = 220;
-const RS_SPACING: i64 = 96;
+const RS_SPACING: i64 = km_to_tiles(20.0) as i64;
 const RS_SEEDS: u64 = 4;
 
 fn rain_shadow(wavelength: f64, sea_bias: f64) {

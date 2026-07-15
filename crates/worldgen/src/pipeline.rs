@@ -86,10 +86,14 @@ mod tests {
     fn l_ocean_est_plus_humide_que_l_interieur_des_terres() {
         let world = WorldGen::new(WorldSeed(42));
         let (mut ocean, mut inland) = (Vec::new(), Vec::new());
-        // Balayage large ; on classe chaque point par son élévation.
-        for i in 0..40i64 {
-            for j in 0..40i64 {
-                let (x, y) = (i * 800 - 16_000, j * 800 - 16_000);
+        // Balayage à l'échelle continentale : le pas de ~40 km sur 60×60
+        // points couvre ~2400 km, assez pour que l'intérieur profond dépasse
+        // la portée d'advection (~160 km) et soit réellement sec.
+        let step = cairn_core::scale::km_to_tiles(40.0) as i64;
+        let half = 30 * step;
+        for i in 0..60i64 {
+            for j in 0..60i64 {
+                let (x, y) = (i * step - half, j * step - half);
                 let e = world.elevation(x, y);
                 let h = world.humidity(x, y);
                 if e <= 0.0 {

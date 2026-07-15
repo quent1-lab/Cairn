@@ -68,6 +68,30 @@ pub enum Water {
     River,
 }
 
+/// Température moyenne (°C) sous laquelle la surface d'une **eau stagnante**
+/// (lac, mer) gèle.
+pub const FREEZE_STILL_C: f64 = 0.0;
+/// Idem pour l'**eau courante** : une rivière continue de couler sous la
+/// glace et ne prend en surface que par grand froid — d'où un seuil plus bas.
+pub const FREEZE_FLOWING_C: f64 = -6.0;
+
+impl Water {
+    /// La surface de cette eau est-elle gelée à cette température moyenne ?
+    ///
+    /// Choix de conception : le **débit** est une donnée géographique
+    /// permanente (l'hydrologie ne le recalcule pas). Le gel est seulement un
+    /// **état de surface** dérivé de la température. Résultat émergent : aux
+    /// hautes latitudes tempérées, les lacs et la mer gèlent tandis que les
+    /// rivières restent ouvertes ; aux pôles, tout gèle.
+    pub fn frozen(self, temp_c: f64) -> bool {
+        match self {
+            Water::River => temp_c < FREEZE_FLOWING_C,
+            Water::Ocean | Water::Lake => temp_c < FREEZE_STILL_C,
+            Water::None => false,
+        }
+    }
+}
+
 pub struct Hydrology {
     region: Region,
     accumulation: Vec<f32>,

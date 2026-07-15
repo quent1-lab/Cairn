@@ -3,21 +3,29 @@
 //! biomes (avec rivières et lacs superposés).
 //!
 //! Usage : cargo run --release -p cairn-worldgen --example map_png -- [seed] [tuiles/pixel]
-//! Le second argument zoome : petit = gros plan, grand = vue planétaire.
+//! Le second argument zoome (1 tuile = 2 m) :
+//!   ~8      → village (~16 km de côté)
+//!   ~256    → région  (~500 km)
+//!   ~4096   → monde   (~8000 km, pôle à pôle) — défaut
 //! Sortie : out/map_<seed>_{alt,temp,hum,bio}.png
 
 use std::collections::BTreeMap;
 use std::time::Instant;
 
 use cairn_core::WorldSeed;
-use cairn_worldgen::{Biome, Hydrology, HydrologyConfig, Region, Water, WorldGen};
+use cairn_core::scale::km_to_tiles;
+use cairn_worldgen::{Biome, FREEZE_STILL_C, Hydrology, HydrologyConfig, Region, Water, WorldGen};
 use rayon::prelude::*;
+
+/// Glace de surface sur eau courante/lac gelé, et banquise (mer gelée).
+const ICE: [u8; 3] = [206, 222, 236];
+const SEA_ICE: [u8; 3] = [176, 198, 220];
 
 /// Côté de l'image en pixels.
 const SIZE: u32 = 1024;
-/// Échelle par défaut : 1 pixel = N tuiles. À 32, la carte couvre un
-/// demi-cycle de latitude (équateur au centre, pôles aux bords).
-const DEFAULT_TILES_PER_PX: i64 = 32;
+/// Échelle par défaut : 1 pixel = N tuiles. À 4096 (× 1024 px × 2 m/tuile),
+/// la carte couvre ~8000 km, soit un cycle de latitude complet — vue monde.
+const DEFAULT_TILES_PER_PX: i64 = 4096;
 
 /// Palette hypsométrique, indexée par l'élévation normalisée. Rupture nette
 /// au niveau de la mer pour lire le trait de côte.
@@ -63,9 +71,15 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .filter(|&t| t > 0)
         .unwrap_or(DEFAULT_TILES_PER_PX);
+    // Centre de la vue en km (args 3 et 4) : par défaut l'origine. Permet
+    // d'inspecter un continent précis ou un pôle sans être coincé sur (0, 0).
+    let center_x = km_to_tiles(arg_f64(3).unwrap_or(0.0)) as i64;
+    let center_y = km_to_tiles(arg_f64(4).unwrap_or(0.0)) as i64;
 
     let world = WorldGen::new(WorldSeed(seed));
     let half = (SIZE as i64 * tiles_per_px) / 2;
+    let to_tile_x = |px: u32| center_x + i64::from(px) * tiles_per_px - half;
+    let to_tile_y = |py: u32| center_y + i64::from(py) * tiles_per_px - half;
     let start = Instant::now();
 
     // Calcul parallèle par rangées ; `map` préserve l'ordre, le résultat
@@ -75,8 +89,7 @@ fn main() {
         .map(|py| {
             (0..SIZE)
                 .map(|px| {
-                    let x = i64::from(px) * tiles_per_px - half;
-                    let y = i64::from(py) * tiles_per_px - half;
+                    let (x, y) = (to_tile_x(px), to_tile_y(py));
                     let e = world.elevation(x, y);
                     let t = world.mean_temperature(x, y, e);
                     let h = world.humidity(x, y);
@@ -92,8 +105,8 @@ fn main() {
     // par construction : les rivières venues de hors-champ n'existent pas
     // (limite assumée du calcul en fenêtre, levée plus tard au chunking).
     let region = Region {
-        origin_x: -half,
-        origin_y: -half,
+        origin_x: center_x - half,
+        origin_y: center_y - half,
         width: SIZE as usize,
         height: SIZE as usize,
         tiles_per_cell: tiles_per_px,
@@ -119,12 +132,17 @@ fn main() {
             *biome_counts.entry(biome).or_insert(0) += 1;
 
             // L'hydrologie prime sur le biome climatique : une rivière ou un
-            // lac recouvre la couleur de terrain.
-            let tile_x = i64::from(px) * tiles_per_px - half;
-            let tile_y = i64::from(py) * tiles_per_px - half;
-            let bio_rgb = match hydro.water_at(tile_x, tile_y) {
+            // lac recouvre la couleur de terrain. La surface gelée (dérivée de
+            // la température) recouvre à son tour l'eau liquide.
+            let water = hydro.water_at(to_tile_x(px), to_tile_y(py));
+            let ocean = matches!(biome, Biome::Ocean | Biome::Coast);
+            let bio_rgb = match water {
+                Water::River if water.frozen(t) => ICE,
                 Water::River => [48, 96, 176],
+                Water::Lake if water.frozen(t) => ICE,
                 Water::Lake => [40, 82, 150],
+                // La mer/côte : gel via le seuil « eau stagnante ».
+                _ if ocean && t < FREEZE_STILL_C => SEA_ICE,
                 _ => biome_color(biome),
             };
 
@@ -180,6 +198,11 @@ fn biome_color(biome: Biome) -> [u8; 3] {
         Biome::Savanna => [204, 182, 92],
         Biome::TropicalForest => [30, 96, 48],
     }
+}
+
+/// Argument de ligne de commande à la position `n`, parsé en f64.
+fn arg_f64(n: usize) -> Option<f64> {
+    std::env::args().nth(n).and_then(|s| s.parse().ok())
 }
 
 fn darken_if(condition: bool, c: image::Rgb<u8>) -> image::Rgb<u8> {

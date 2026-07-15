@@ -2,8 +2,10 @@
 //! seed du monde, RNG déterministe, et plus tard IDs, coordonnées, config.
 
 pub mod rng;
+pub mod scale;
 
 pub use rng::{Pcg32, splitmix64};
+pub use scale::{TILE_METERS, km_to_tiles, tiles_to_km};
 
 /// Graine globale du monde. Tout l'aléatoire de la simulation dérive de
 /// cette unique valeur : c'est la garantie du critère « même seed ⇒ monde

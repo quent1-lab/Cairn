@@ -7,6 +7,7 @@
 //!   des plaines, les chaînes de montagnes sont continentales.
 
 use cairn_core::WorldSeed;
+use cairn_core::scale::km_to_tiles;
 
 use crate::fbm::Fbm;
 use crate::salt;
@@ -30,13 +31,18 @@ pub struct AltitudeConfig {
 impl Default for AltitudeConfig {
     fn default() -> Self {
         Self {
+            // Continentalité : ~3000 km de longueur d'onde. 3 octaves + le
+            // sea_bias donnent la connexité mesurée (example analyze) : un
+            // continent principal par seed (médiane 24 % des terres, pire cas
+            // 12 %), sans basculer vers la Pangée.
             continent_octaves: 3,
-            // 1/6144 : mesuré (example analyze) comme le meilleur compromis —
-            // un continent principal dans chaque seed (médiane 24 % des
-            // terres, pire cas 12 %) sans basculer vers la Pangée.
-            continent_frequency: 1.0 / 6144.0,
-            relief_octaves: 6,
-            relief_frequency: 1.0 / 512.0,
+            continent_frequency: 1.0 / km_to_tiles(3000.0),
+            // Relief : de ~150 km (massifs) à ~300 m (détail visible au zoom
+            // village). 10 octaves pour couvrir tout ce spectre — c'est ce
+            // qui remplit le vide entre continents et sol local maintenant
+            // qu'on affiche jusqu'à l'échelle humaine.
+            relief_octaves: 10,
+            relief_frequency: 1.0 / km_to_tiles(150.0),
             sea_bias: 0.1,
             relief_base: 0.1,
             relief_mountain: 0.5,
@@ -114,9 +120,13 @@ mod tests {
 
     #[test]
     fn le_monde_contient_terre_et_mer() {
+        // Pas de ~60 km : 100 échantillons couvrent ~6000 km, soit plusieurs
+        // continents — sinon la fenêtre tiendrait dans une seule masse et le
+        // ratio serait 0 % ou 100 %.
         let field = AltitudeField::new(WorldSeed(42));
+        let step = km_to_tiles(60.0) as i64;
         let echantillons: Vec<f64> = (0..10_000)
-            .map(|i| field.elevation((i % 100) * 160, (i / 100) * 160))
+            .map(|i| field.elevation((i % 100) * step, (i / 100) * step))
             .collect();
         let terre = echantillons.iter().filter(|&&e| e > 0.0).count();
         let ratio = terre as f64 / echantillons.len() as f64;

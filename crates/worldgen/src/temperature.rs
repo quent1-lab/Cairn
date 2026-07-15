@@ -11,6 +11,7 @@
 //! répètent. Le monde reste ainsi infini dans les deux axes, sans « bord ».
 
 use cairn_core::WorldSeed;
+use cairn_core::scale::km_to_tiles;
 
 use crate::fbm::Fbm;
 use crate::latitude::Latitude;
@@ -38,11 +39,13 @@ impl Default for TemperatureConfig {
         Self {
             equator_temp_c: 30.0,
             pole_temp_c: -25.0,
-            planet_period: 32_768.0,
+            planet_period: crate::DEFAULT_PLANET_PERIOD,
             max_elevation_m: 4_000.0,
             lapse_rate_c_per_km: 6.5,
             noise_amplitude_c: 3.0,
-            noise_frequency: 1.0 / 1024.0,
+            // Perturbation régionale ~250 km : brise les isothermes sans
+            // gommer les bandes de latitude.
+            noise_frequency: 1.0 / km_to_tiles(250.0),
             noise_octaves: 2,
         }
     }

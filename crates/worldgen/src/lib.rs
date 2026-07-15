@@ -16,10 +16,17 @@ pub use altitude::{AltitudeConfig, AltitudeField};
 pub use biomes::Biome;
 pub use fbm::Fbm;
 pub use humidity::HumidityConfig;
-pub use hydrology::{Hydrology, HydrologyConfig, Region, Water};
+pub use hydrology::{FREEZE_FLOWING_C, FREEZE_STILL_C, Hydrology, HydrologyConfig, Region, Water};
 pub use pipeline::{WorldGen, WorldGenConfig};
 pub use temperature::{TemperatureConfig, TemperatureField};
 pub use wind::{WindConfig, WindField};
+
+/// Période de latitude par défaut (équateur → pôle → équateur), en tuiles.
+/// **Partagée entre température et vent** : les deux couches dérivent de la
+/// même latitude et doivent donc utiliser exactement cette valeur — d'où une
+/// constante unique plutôt que deux champs de config indépendants.
+/// 8000 km, soit une bande climatique (équateur → pôle) de 4000 km.
+pub const DEFAULT_PLANET_PERIOD: f64 = cairn_core::scale::km_to_tiles(8000.0);
 
 /// Salts des couches de bruit : chaque couche dérive sa seed de la seed du
 /// monde via `WorldSeed::derive(salt)`. Centralisés ici pour garantir leur

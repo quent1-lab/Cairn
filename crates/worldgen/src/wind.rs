@@ -18,7 +18,9 @@ use std::f64::consts::PI;
 use crate::latitude::Latitude;
 
 pub struct WindConfig {
-    /// Doit valoir la même chose que `TemperatureConfig::planet_period`.
+    /// Période de latitude. Doit coïncider avec
+    /// `TemperatureConfig::planet_period` — les deux valent
+    /// [`crate::DEFAULT_PLANET_PERIOD`] par défaut.
     pub planet_period: f64,
     /// Amplitude de la composante est-ouest (magnitude max ≈ 1).
     pub zonal_strength: f64,
@@ -29,7 +31,7 @@ pub struct WindConfig {
 impl Default for WindConfig {
     fn default() -> Self {
         Self {
-            planet_period: 32_768.0,
+            planet_period: crate::DEFAULT_PLANET_PERIOD,
             zonal_strength: 1.0,
             meridional_strength: 0.5,
         }

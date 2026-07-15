@@ -15,6 +15,8 @@
 //! altitude et vent. Coût : `steps` évaluations d'altitude par requête —
 //! cher ; sera calculé sur macro-grille et mis en cache au chunking.
 
+use cairn_core::scale::km_to_tiles;
+
 use crate::altitude::AltitudeField;
 use crate::wind::WindField;
 
@@ -49,18 +51,25 @@ pub struct HumidityConfig {
 impl Default for HumidityConfig {
     fn default() -> Self {
         Self {
+            // Portée = steps × step_tiles ≈ 256 km : distance de pénétration
+            // de l'humidité océanique dans les terres (intérieurs profonds
+            // secs). Le pas de 4 km reste assez fin pour résoudre les
+            // barrières montagneuses (larges de dizaines de km) — l'ombre
+            // pluviométrique en dépend.
             steps: 64,
-            step_tiles: 32.0,
+            step_tiles: km_to_tiles(4.0),
             ocean_evaporation: 0.15,
             land_evaporation: 0.015,
             base_rainout: 0.01,
             orographic_rainout: 2.5,
             orographic_threshold: 0.01,
-            // Diffusion « petite » par défaut (×3) : casse les stries sans
-            // trop coûter. La vraie diffusion sur grille viendra avec la
+            // Diffusion latérale : 5 trajets sur ±8 km. L'écart doit être à
+            // l'échelle des features de terrain (relief ~150 km) pour lisser
+            // les stries d'advection ; un écart sous-pixel ne fait rien.
+            // La vraie diffusion sur grille (moins chère) viendra avec le
             // précalcul macro-grille du chunking.
-            lateral_samples: 1,
-            lateral_step: 32.0,
+            lateral_samples: 2,
+            lateral_step: km_to_tiles(4.0),
         }
     }
 }
