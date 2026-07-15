@@ -5,6 +5,7 @@
 pub mod altitude;
 pub mod biomes;
 pub mod fbm;
+pub mod geology;
 pub mod humidity;
 pub mod hydrology;
 pub mod latitude;
@@ -15,6 +16,7 @@ pub mod wind;
 pub use altitude::{AltitudeConfig, AltitudeField};
 pub use biomes::Biome;
 pub use fbm::Fbm;
+pub use geology::{Deposit, Geology, GeologyConfig, RockType};
 pub use humidity::HumidityConfig;
 pub use hydrology::{FREEZE_FLOWING_C, FREEZE_STILL_C, Hydrology, HydrologyConfig, Region, Water};
 pub use pipeline::{WorldGen, WorldGenConfig};

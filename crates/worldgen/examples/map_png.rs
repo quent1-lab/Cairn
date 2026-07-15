@@ -14,7 +14,9 @@ use std::time::Instant;
 
 use cairn_core::WorldSeed;
 use cairn_core::scale::km_to_tiles;
-use cairn_worldgen::{Biome, FREEZE_STILL_C, Hydrology, HydrologyConfig, Region, Water, WorldGen};
+use cairn_worldgen::{
+    Biome, Deposit, FREEZE_STILL_C, Hydrology, HydrologyConfig, Region, RockType, Water, WorldGen,
+};
 use rayon::prelude::*;
 
 /// Glace de surface sur eau courante/lac gelé, et banquise (mer gelée).
@@ -119,12 +121,15 @@ fn main() {
     let mut img_temp = image::RgbImage::new(SIZE, SIZE);
     let mut img_hum = image::RgbImage::new(SIZE, SIZE);
     let mut img_bio = image::RgbImage::new(SIZE, SIZE);
+    let mut img_geo = image::RgbImage::new(SIZE, SIZE);
     let mut land_px: u64 = 0;
     let mut biome_counts: BTreeMap<Biome, u64> = BTreeMap::new();
+    let mut deposit_counts: BTreeMap<Deposit, u64> = BTreeMap::new();
 
     for (py, row) in rows.iter().enumerate() {
         for (px, &(e, t, h)) in row.iter().enumerate() {
             let (px, py) = (px as u32, py as u32);
+            let (tx, ty) = (to_tile_x(px), to_tile_y(py));
             if e > 0.0 {
                 land_px += 1;
             }
@@ -134,7 +139,7 @@ fn main() {
             // L'hydrologie prime sur le biome climatique : une rivière ou un
             // lac recouvre la couleur de terrain. La surface gelée (dérivée de
             // la température) recouvre à son tour l'eau liquide.
-            let water = hydro.water_at(to_tile_x(px), to_tile_y(py));
+            let water = hydro.water_at(tx, ty);
             let ocean = matches!(biome, Biome::Ocean | Biome::Coast);
             let bio_rgb = match water {
                 Water::River if water.frozen(t) => ICE,
@@ -146,12 +151,26 @@ fn main() {
                 _ => biome_color(biome),
             };
 
+            // Géologie : roche en fond, gisement en surimpression. En mer,
+            // fond sombre.
+            let geo_rgb = if e <= 0.0 {
+                [20, 32, 52]
+            } else {
+                let deposit = world.deposit(tx, ty, e);
+                *deposit_counts.entry(deposit).or_insert(0) += 1;
+                match deposit {
+                    Deposit::None => rock_color(world.rock_type(tx, ty)),
+                    d => deposit_color(d),
+                }
+            };
+
             img_alt.put_pixel(px, py, gradient(HYPSO_STOPS, e));
             // Océans assombris sur les cartes dérivées : le trait de côte
             // reste lisible sans masquer le champ affiché.
             img_temp.put_pixel(px, py, darken_if(e <= 0.0, gradient(THERMAL_STOPS, t)));
             img_hum.put_pixel(px, py, darken_if(e <= 0.0, gradient(MOISTURE_STOPS, h)));
             img_bio.put_pixel(px, py, image::Rgb(bio_rgb));
+            img_geo.put_pixel(px, py, image::Rgb(geo_rgb));
         }
     }
 
@@ -161,6 +180,7 @@ fn main() {
         (&img_temp, "temp"),
         (&img_hum, "hum"),
         (&img_bio, "bio"),
+        (&img_geo, "geo"),
     ] {
         img.save(format!("out/map_{seed}_{layer}.png"))
             .expect("écriture du PNG");
@@ -168,7 +188,7 @@ fn main() {
 
     let land_pct = 100.0 * land_px as f64 / (u64::from(SIZE) * u64::from(SIZE)) as f64;
     println!(
-        "out/map_{seed}_{{alt,temp,hum,bio}}.png — terres émergées : {land_pct:.1} % — calcul : {elapsed:.2?}"
+        "out/map_{seed}_{{alt,temp,hum,bio,geo}}.png — terres émergées : {land_pct:.1} % — calcul : {elapsed:.2?}"
     );
 
     // Répartition des biomes terrestres, en % des terres émergées.
@@ -179,6 +199,40 @@ fn main() {
     land_biomes.sort_by_key(|&(_, n)| std::cmp::Reverse(n));
     for (biome, n) in land_biomes {
         println!("  {:>5.1} %  {}", 100.0 * n as f64 / land_px as f64, biome.name());
+    }
+
+    // Gisements, en % des tuiles de terre.
+    println!("  gisements (% des terres) :");
+    let mut deposits: Vec<(Deposit, u64)> = deposit_counts
+        .into_iter()
+        .filter(|(d, _)| !matches!(d, Deposit::None))
+        .collect();
+    deposits.sort_by_key(|&(_, n)| std::cmp::Reverse(n));
+    for (deposit, n) in deposits {
+        println!("    {:>5.2} %  {}", 100.0 * n as f64 / land_px as f64, deposit.name());
+    }
+}
+
+/// Fond de roche (teintes sourdes) pour la couche géologie.
+fn rock_color(rock: RockType) -> [u8; 3] {
+    match rock {
+        RockType::Sedimentary => [150, 140, 116],
+        RockType::Metamorphic => [116, 116, 132],
+        RockType::Igneous => [96, 84, 84],
+    }
+}
+
+/// Couleur vive d'un gisement, en surimpression sur la roche.
+fn deposit_color(deposit: Deposit) -> [u8; 3] {
+    match deposit {
+        Deposit::None => [0, 0, 0],
+        Deposit::Flint => [60, 60, 66],
+        Deposit::Clay => [176, 122, 88],
+        Deposit::Obsidian => [24, 20, 32],
+        Deposit::Copper => [214, 128, 64],
+        Deposit::Tin => [180, 200, 210],
+        Deposit::Gold => [240, 208, 72],
+        Deposit::Iron => [150, 80, 60],
     }
 }
 

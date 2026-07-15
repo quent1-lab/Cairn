@@ -6,6 +6,7 @@ use cairn_core::WorldSeed;
 
 use crate::altitude::{AltitudeConfig, AltitudeField};
 use crate::biomes::Biome;
+use crate::geology::{Deposit, Geology, GeologyConfig, RockType};
 use crate::humidity::{self, HumidityConfig};
 use crate::temperature::{TemperatureConfig, TemperatureField};
 use crate::wind::{WindConfig, WindField};
@@ -16,12 +17,14 @@ pub struct WorldGenConfig {
     pub temperature: TemperatureConfig,
     pub wind: WindConfig,
     pub humidity: HumidityConfig,
+    pub geology: GeologyConfig,
 }
 
 pub struct WorldGen {
     pub altitude: AltitudeField,
     pub temperature: TemperatureField,
     pub wind: WindField,
+    pub geology: Geology,
     humidity_cfg: HumidityConfig,
 }
 
@@ -35,6 +38,7 @@ impl WorldGen {
             altitude: AltitudeField::with_config(seed, cfg.altitude),
             temperature: TemperatureField::with_config(seed, cfg.temperature),
             wind: WindField::new(cfg.wind),
+            geology: Geology::with_config(seed, cfg.geology),
             humidity_cfg: cfg.humidity,
         }
     }
@@ -63,6 +67,16 @@ impl WorldGen {
         let t = self.mean_temperature(x, y, e);
         let h = self.humidity(x, y);
         Biome::classify(e, t, h)
+    }
+
+    /// Type de roche en (x, y).
+    pub fn rock_type(&self, x: i64, y: i64) -> RockType {
+        self.geology.rock_type(x, y)
+    }
+
+    /// Gisement en (x, y). `elevation` est fournie par l'appelant.
+    pub fn deposit(&self, x: i64, y: i64, elevation: f64) -> Deposit {
+        self.geology.deposit(x, y, elevation)
     }
 }
 
