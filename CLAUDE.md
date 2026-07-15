@@ -24,7 +24,8 @@ Workspace cible (BRIEF §8) : `crates/{core, worldgen, sim, protocol, server, cl
 ## Commandes
 
 - `cargo check` / `cargo test` — vérification et tests.
-- `cargo run --release -p cairn-worldgen --example map_png -- <seed>` — rend une image PNG par couche du pipeline dans `out/` (`_alt`, `_temp`…) + % de terres émergées (toujours en `--release` : le bruit est ~30× plus lent en debug).
+- `cargo run --release -p cairn-worldgen --example map_png -- <seed> [tuiles/pixel]` — rend une image PNG par couche du pipeline dans `out/` (`_alt`, `_temp`, `_hum`, `_bio`) + % de terres émergées ; 2ᵉ arg = zoom (petit = gros plan). Toujours en `--release`.
+- `cargo run --release -p cairn-worldgen --example analyze -- [nb_seeds] [onde_continent] [sea_bias]` — vérifs statistiques : connexité des masses terrestres + preuve du rain shadow (humidité par barrière au vent).
 - **git : uniquement via Git Bash** — absent du PATH PowerShell. Les commits sont gérés par Claude (demande explicite de l'utilisateur), messages en français, style conventional commits.
 
 ## Environnement
@@ -34,4 +35,4 @@ Workspace cible (BRIEF §8) : `crates/{core, worldgen, sim, protocol, server, cl
 
 ## État d'avancement
 
-- **Phase 1 en cours** : altitude, température (gradient quadratique en latitude), vent (-sin(3πλ)), humidité par advection (ombre pluviométrique), biomes de Whittaker, hydrologie D8 (priority-flood + ε, rivières et lacs, sur région bornée `Region`) — couches point-à-point assemblées dans `WorldGen` (pipeline.rs) ; l'hydrologie est à part (bornée). Export PNG par couche + zoom, stats de répartition. Reste : géologie (cuivre/étain jamais co-localisés), chunking, client WASM. Améliorations en attente : montagnes en chaînes (ridged noise) ; humidité macro-grille + cache ; mangrove/marais (proximité eau) ; artefacts cosmétiques (stries diagonales advection/D8) ; hydrologie inter-chunks.
+- **Phase 1 en cours** : altitude (continents 1/6144, calé par mesure de connexité), température (gradient quadratique, latitude exacte sur tout l'axe i64), vent (-sin(3πλ)), humidité par advection (ombre pluviométrique **prouvée** chiffrée + diffusion latérale anti-stries), biomes de Whittaker, hydrologie D8 (priority-flood + ε, déterminisme du tas explicite, sur `Region` bornée). Couches point-à-point dans `WorldGen` (pipeline.rs), hydrologie à part. Outils : `map_png` (couches + zoom), `analyze` (connexité + rain shadow). Reste : géologie (cuivre/étain jamais co-localisés), chunking, client WASM. Améliorations en attente : montagnes en chaînes (ridged noise) ; humidité macro-grille + cache + vraie diffusion sur grille ; mangrove/marais ; hydrologie inter-chunks ; borne globale ~2⁵³ tuiles (bruit en x as f64).
