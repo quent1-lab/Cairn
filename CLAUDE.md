@@ -34,4 +34,4 @@ Workspace cible (BRIEF §8) : `crates/{core, worldgen, sim, protocol, server, cl
 
 ## État d'avancement
 
-- **Phase 1 en cours** : altitude (fBm + masque continental) et température (latitude périodique + adiabatique) faites, export PNG par couche. Reste : vent, humidité (ombre pluviométrique), hydrologie, biomes, géologie, chunking, client WASM. Amélioration en attente : montagnes en chaînes (ridged noise) plutôt qu'en taches.
+- **Phase 1 en cours** : altitude, température, vent (enveloppe -sin(3πλ), calmes subtropicaux), humidité par advection (ombre pluviométrique, seuil orographique) — assemblés dans `WorldGen` (pipeline.rs), export PNG par couche. Reste : hydrologie, biomes (Whittaker), géologie, chunking, client WASM. Améliorations en attente : montagnes en chaînes (ridged noise) ; humidité sur macro-grille + cache (coûteuse : ~64 évals d'altitude par requête).
