@@ -1,0 +1,12 @@
+[package]
+name = "cairn-sim"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+cairn-core.workspace = true
+cairn-worldgen.workspace = true
+
+[dev-dependencies]
+image.workspace = true
+rayon.workspace = true
