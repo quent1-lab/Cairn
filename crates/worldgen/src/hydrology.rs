@@ -54,7 +54,11 @@ pub struct HydrologyConfig {
 impl Default for HydrologyConfig {
     fn default() -> Self {
         Self {
-            river_threshold: 150.0,
+            // Seuil haut : seules les cellules à fort bassin versant sont des
+            // rivières. Trop bas, le moindre drain apparaît et le terrain
+            // prend un aspect « gruyère » — le relief fin (10 octaves) génère
+            // sinon un réseau de drainage très dense.
+            river_threshold: 800.0,
             lake_min_depth: 0.03,
         }
     }

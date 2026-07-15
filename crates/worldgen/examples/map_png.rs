@@ -294,12 +294,12 @@ fn arg_f64(n: usize) -> Option<f64> {
 
 /// Rayon d'élargissement d'une rivière (en pixels) selon son débit accumulé,
 /// exprimé en multiples du seuil de rivière. Ruisseau = 0 (1 px), grand
-/// fleuve = jusqu'à 3 px de plus de chaque côté.
+/// fleuve = jusqu'à 2 px de plus de chaque côté. Modéré : un élargissement
+/// trop fort accentue la géométrie anguleuse du D8.
 fn river_extra_width(accum: f32, threshold: f32) -> i64 {
     match accum / threshold {
-        r if r >= 16.0 => 3,
-        r if r >= 6.0 => 2,
-        r if r >= 2.5 => 1,
+        r if r >= 12.0 => 2,
+        r if r >= 4.0 => 1,
         _ => 0,
     }
 }
