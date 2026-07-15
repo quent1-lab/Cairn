@@ -113,9 +113,9 @@ fn main() {
         height: SIZE as usize,
         tiles_per_cell: tiles_per_px,
     };
-    let hydro = Hydrology::compute(region, &HydrologyConfig::default(), |x, y| {
-        world.elevation(x, y)
-    });
+    let hydro_cfg = HydrologyConfig::default();
+    let river_threshold = hydro_cfg.river_threshold;
+    let hydro = Hydrology::compute(region, &hydro_cfg, |x, y| world.elevation(x, y));
 
     let mut img_alt = image::RgbImage::new(SIZE, SIZE);
     let mut img_temp = image::RgbImage::new(SIZE, SIZE);
@@ -174,6 +174,35 @@ fn main() {
         }
     }
 
+    // Élargissement des rivières selon le débit : le D8 concentre le flux en
+    // une ligne d'une cellule. Un fleuve (forte accumulation) mérite d'être
+    // plus large qu'un ruisseau — on dilate les cellules-rivières d'un rayon
+    // croissant avec l'accumulation. L'état gelé suit la température locale.
+    for py in 0..SIZE {
+        for px in 0..SIZE {
+            let (tx, ty) = (to_tile_x(px), to_tile_y(py));
+            if hydro.water_at(tx, ty) != Water::River {
+                continue;
+            }
+            let extra = river_extra_width(hydro.accumulation_at(tx, ty), river_threshold);
+            if extra == 0 {
+                continue;
+            }
+            for dy in -extra..=extra {
+                for dx in -extra..=extra {
+                    let (nx, ny) = (px as i64 + dx, py as i64 + dy);
+                    if nx < 0 || ny < 0 || nx >= SIZE as i64 || ny >= SIZE as i64 {
+                        continue;
+                    }
+                    let (nx, ny) = (nx as u32, ny as u32);
+                    let t = rows[ny as usize][nx as usize].1;
+                    let color = if Water::River.frozen(t) { ICE } else { [48, 96, 176] };
+                    img_bio.put_pixel(nx, ny, image::Rgb(color));
+                }
+            }
+        }
+    }
+
     std::fs::create_dir_all("out").expect("création du dossier out/");
     for (img, layer) in [
         (&img_alt, "alt"),
@@ -185,6 +214,10 @@ fn main() {
         img.save(format!("out/map_{seed}_{layer}.png"))
             .expect("écriture du PNG");
     }
+
+    // Montage : toutes les couches d'un même continent dans une image, pour
+    // comparer les étages du pipeline d'un coup d'œil.
+    save_montage(seed, &[&img_alt, &img_temp, &img_hum, &img_bio, &img_geo]);
 
     let land_pct = 100.0 * land_px as f64 / (u64::from(SIZE) * u64::from(SIZE)) as f64;
     println!(
@@ -257,6 +290,35 @@ fn biome_color(biome: Biome) -> [u8; 3] {
 /// Argument de ligne de commande à la position `n`, parsé en f64.
 fn arg_f64(n: usize) -> Option<f64> {
     std::env::args().nth(n).and_then(|s| s.parse().ok())
+}
+
+/// Rayon d'élargissement d'une rivière (en pixels) selon son débit accumulé,
+/// exprimé en multiples du seuil de rivière. Ruisseau = 0 (1 px), grand
+/// fleuve = jusqu'à 3 px de plus de chaque côté.
+fn river_extra_width(accum: f32, threshold: f32) -> i64 {
+    match accum / threshold {
+        r if r >= 16.0 => 3,
+        r if r >= 6.0 => 2,
+        r if r >= 2.5 => 1,
+        _ => 0,
+    }
+}
+
+/// Assemble les couches en une seule image (grille 3×2), chacune réduite de
+/// moitié, pour visualiser tout le pipeline d'un continent d'un coup.
+fn save_montage(seed: u64, layers: &[&image::RgbImage]) {
+    use image::imageops::{FilterType, overlay, resize};
+    let (cw, ch) = (SIZE / 2, SIZE / 2);
+    let (cols, rows) = (3u32, 2u32);
+    let mut montage = image::RgbImage::from_pixel(cw * cols, ch * rows, image::Rgb([16, 16, 20]));
+    for (i, layer) in layers.iter().enumerate() {
+        let small = resize(*layer, cw, ch, FilterType::Nearest);
+        let (col, row) = (i as u32 % cols, i as u32 / cols);
+        overlay(&mut montage, &small, i64::from(col * cw), i64::from(row * ch));
+    }
+    montage
+        .save(format!("out/map_{seed}_montage.png"))
+        .expect("écriture du montage");
 }
 
 fn darken_if(condition: bool, c: image::Rgb<u8>) -> image::Rgb<u8> {
