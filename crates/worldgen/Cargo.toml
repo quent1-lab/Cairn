@@ -14,3 +14,7 @@ noise = "0.9"
 # Encodage PNG (DEFLATE) : très au-delà des 50 lignes maison. En
 # dev-dependency : seuls les exemples de debug en ont besoin, la lib non.
 image.workspace = true
+# Parallélise le rendu des cartes de debug (l'humidité coûte ~64 évaluations
+# d'altitude par pixel). La lib reste séquentielle : le parallélisme de la
+# simulation sera décidé en phase 2, après mesure.
+rayon.workspace = true

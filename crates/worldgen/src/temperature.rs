@@ -10,11 +10,10 @@
 //! équateur, y = ±période/2 des pôles, puis les bandes climatiques se
 //! répètent. Le monde reste ainsi infini dans les deux axes, sans « bord ».
 
-use std::f64::consts::TAU;
-
 use cairn_core::WorldSeed;
 
 use crate::fbm::Fbm;
+use crate::latitude::Latitude;
 use crate::salt;
 
 pub struct TemperatureConfig {
@@ -51,6 +50,7 @@ impl Default for TemperatureConfig {
 
 pub struct TemperatureField {
     variation: Fbm,
+    latitude: Latitude,
     cfg: TemperatureConfig,
 }
 
@@ -66,6 +66,7 @@ impl TemperatureField {
                 cfg.noise_octaves,
                 cfg.noise_frequency,
             ),
+            latitude: Latitude::new(cfg.planet_period),
             cfg,
         }
     }
@@ -79,7 +80,7 @@ impl TemperatureField {
     pub fn mean_temperature(&self, x: i64, y: i64, elevation: f64) -> f64 {
         let cfg = &self.cfg;
         // 1.0 à l'équateur, -1.0 aux pôles, périodique.
-        let lat = (TAU * y as f64 / cfg.planet_period).cos();
+        let lat = self.latitude.cosine(y);
         let t_sea = cfg.pole_temp_c + (cfg.equator_temp_c - cfg.pole_temp_c) * (lat + 1.0) / 2.0;
         // L'océan (élévation ≤ 0) reste à la température de surface.
         let alt_km = elevation.max(0.0) * cfg.max_elevation_m / 1000.0;

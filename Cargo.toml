@@ -10,3 +10,4 @@ edition = "2024"
 cairn-core = { path = "crates/core" }
 noise = "0.9"
 image = { version = "0.25", default-features = false, features = ["png"] }
+rayon = "1"

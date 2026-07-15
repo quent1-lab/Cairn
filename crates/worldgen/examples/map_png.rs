@@ -1,11 +1,14 @@
 //! Rend une région du monde en PNG, une image par couche du pipeline :
-//! altitude (teintes hypsométriques) et température (échelle thermique).
+//! altitude (hypsométrique), température (thermique), humidité (aridité).
 //!
 //! Usage : cargo run --release -p cairn-worldgen --example map_png -- [seed]
-//! Sortie : out/map_<seed>_alt.png, out/map_<seed>_temp.png
+//! Sortie : out/map_<seed>_{alt,temp,hum}.png
+
+use std::time::Instant;
 
 use cairn_core::WorldSeed;
-use cairn_worldgen::{AltitudeField, TemperatureField};
+use cairn_worldgen::WorldGen;
+use rayon::prelude::*;
 
 /// Côté de l'image en pixels.
 const SIZE: u32 = 1024;
@@ -36,50 +39,83 @@ const THERMAL_STOPS: &[(f64, [u8; 3])] = &[
     (38.0, [180, 30, 40]),   // rouge écrasant
 ];
 
+/// Échelle d'humidité, indexée dans [0, 1].
+const MOISTURE_STOPS: &[(f64, [u8; 3])] = &[
+    (0.0, [172, 132, 82]),  // aride
+    (0.2, [196, 172, 104]), // steppe
+    (0.4, [150, 168, 94]),  // herbeux
+    (0.6, [86, 142, 86]),   // humide
+    (0.8, [42, 112, 102]),  // très humide
+    (1.0, [18, 76, 122]),   // saturé
+];
+
 fn main() {
     let seed: u64 = std::env::args()
         .nth(1)
         .and_then(|s| s.parse().ok())
         .unwrap_or(42);
 
-    let world_seed = WorldSeed(seed);
-    let altitude = AltitudeField::new(world_seed);
-    let temperature = TemperatureField::new(world_seed);
+    let world = WorldGen::new(WorldSeed(seed));
     let half = (SIZE as i64 * TILES_PER_PX) / 2;
+    let start = Instant::now();
+
+    // Calcul parallèle par rangées ; `map` préserve l'ordre, le résultat
+    // est donc identique au calcul séquentiel — déterminisme conservé.
+    let rows: Vec<Vec<(f64, f64, f64)>> = (0..SIZE)
+        .into_par_iter()
+        .map(|py| {
+            (0..SIZE)
+                .map(|px| {
+                    let x = i64::from(px) * TILES_PER_PX - half;
+                    let y = i64::from(py) * TILES_PER_PX - half;
+                    let e = world.elevation(x, y);
+                    let t = world.mean_temperature(x, y, e);
+                    let h = world.humidity(x, y);
+                    (e, t, h)
+                })
+                .collect()
+        })
+        .collect();
+
+    let elapsed = start.elapsed();
 
     let mut img_alt = image::RgbImage::new(SIZE, SIZE);
     let mut img_temp = image::RgbImage::new(SIZE, SIZE);
+    let mut img_hum = image::RgbImage::new(SIZE, SIZE);
     let mut land_px: u64 = 0;
 
-    for py in 0..SIZE {
-        for px in 0..SIZE {
-            let x = i64::from(px) * TILES_PER_PX - half;
-            let y = i64::from(py) * TILES_PER_PX - half;
-            let e = altitude.elevation(x, y);
-            let t = temperature.mean_temperature(x, y, e);
-
+    for (py, row) in rows.iter().enumerate() {
+        for (px, &(e, t, h)) in row.iter().enumerate() {
+            let (px, py) = (px as u32, py as u32);
             if e > 0.0 {
                 land_px += 1;
             }
             img_alt.put_pixel(px, py, gradient(HYPSO_STOPS, e));
-            // Océans assombris sur la carte thermique : le trait de côte
-            // reste lisible sans masquer le champ de température.
-            let mut c = gradient(THERMAL_STOPS, t);
-            if e <= 0.0 {
-                c = image::Rgb(c.0.map(|v| (f64::from(v) * 0.55) as u8));
-            }
-            img_temp.put_pixel(px, py, c);
+            // Océans assombris sur les cartes dérivées : le trait de côte
+            // reste lisible sans masquer le champ affiché.
+            img_temp.put_pixel(px, py, darken_if(e <= 0.0, gradient(THERMAL_STOPS, t)));
+            img_hum.put_pixel(px, py, darken_if(e <= 0.0, gradient(MOISTURE_STOPS, h)));
         }
     }
 
     std::fs::create_dir_all("out").expect("création du dossier out/");
-    let path_alt = format!("out/map_{seed}_alt.png");
-    let path_temp = format!("out/map_{seed}_temp.png");
-    img_alt.save(&path_alt).expect("écriture du PNG altitude");
-    img_temp.save(&path_temp).expect("écriture du PNG température");
+    for (img, layer) in [(&img_alt, "alt"), (&img_temp, "temp"), (&img_hum, "hum")] {
+        img.save(format!("out/map_{seed}_{layer}.png"))
+            .expect("écriture du PNG");
+    }
 
     let land_pct = 100.0 * land_px as f64 / (u64::from(SIZE) * u64::from(SIZE)) as f64;
-    println!("{path_alt}, {path_temp} — terres émergées : {land_pct:.1} %");
+    println!(
+        "out/map_{seed}_{{alt,temp,hum}}.png — terres émergées : {land_pct:.1} % — calcul : {elapsed:.2?}"
+    );
+}
+
+fn darken_if(condition: bool, c: image::Rgb<u8>) -> image::Rgb<u8> {
+    if condition {
+        image::Rgb(c.0.map(|v| (f64::from(v) * 0.55) as u8))
+    } else {
+        c
+    }
 }
 
 /// Interpolation linéaire par morceaux dans une rampe de couleurs.

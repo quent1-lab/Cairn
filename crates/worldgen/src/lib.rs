@@ -1,14 +1,21 @@
-//! Génération procédurale du monde : altitude, température, puis (à venir)
-//! vent, humidité, hydrologie, biomes, géologie — chaque couche s'appuyant
-//! sur les précédentes (BRIEF §2.2).
+//! Génération procédurale du monde : altitude, température, vent, humidité,
+//! puis (à venir) hydrologie, biomes, géologie — chaque couche s'appuyant
+//! sur les précédentes (BRIEF §2.2). [`WorldGen`] assemble le pipeline.
 
 pub mod altitude;
 pub mod fbm;
+pub mod humidity;
+pub mod latitude;
+pub mod pipeline;
 pub mod temperature;
+pub mod wind;
 
 pub use altitude::{AltitudeConfig, AltitudeField};
 pub use fbm::Fbm;
+pub use humidity::HumidityConfig;
+pub use pipeline::{WorldGen, WorldGenConfig};
 pub use temperature::{TemperatureConfig, TemperatureField};
+pub use wind::{WindConfig, WindField};
 
 /// Salts des couches de bruit : chaque couche dérive sa seed de la seed du
 /// monde via `WorldSeed::derive(salt)`. Centralisés ici pour garantir leur
