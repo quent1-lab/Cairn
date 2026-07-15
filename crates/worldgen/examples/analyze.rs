@@ -46,27 +46,35 @@ fn altitude_config(wavelength: f64, sea_bias: f64) -> AltitudeConfig {
 // ─────────────────────────── A. Connexité ───────────────────────────
 
 /// Grille d'échantillonnage : côté en cellules et pas en tuiles. La fenêtre
-/// couvre GRID·SPACING tuiles, soit ~8 longueurs d'onde continentales.
+/// couvre GRID·SPACING tuiles, soit ~6 longueurs d'onde continentales.
 const GRID: usize = 384;
 const SPACING: i64 = 96;
+
+/// Échelle du monde, dérivée de la période de latitude : 16384 tuiles de
+/// l'équateur au pôle ≈ 10 000 km terrestres ⇒ ~0,61 km/tuile.
+const TILE_KM: f64 = 0.61;
+/// Distance cible d'une route commerciale (le « 300 km » du brief pour la
+/// séparation cuivre↔étain), en tuiles.
+const TRADE_ROUTE_KM: f64 = 300.0;
 
 fn connectivity(n_seeds: u64, wavelength: f64, sea_bias: f64) {
     println!("A. CONNEXITÉ DES TERRES — {n_seeds} seeds, fenêtre {} tuiles de côté", GRID as i64 * SPACING);
 
     // Chaque seed est indépendante : on parallélise sur les seeds.
-    let mut results: Vec<(u64, f64, f64)> = (0..n_seeds)
+    // Résultat par seed : (seed, % terres, % plus grande masse, étendue km).
+    let mut results: Vec<(u64, f64, f64, f64)> = (0..n_seeds)
         .into_par_iter()
         .map(|seed| {
             let field = AltitudeField::with_config(WorldSeed(seed), altitude_config(wavelength, sea_bias));
             let land = sample_land(&field);
-            let (land_frac, largest_frac) = largest_component(&land);
-            (seed, land_frac, largest_frac)
+            let (land_frac, largest_frac, span_tiles) = largest_component(&land);
+            (seed, land_frac, largest_frac, span_tiles * TILE_KM)
         })
         .collect();
 
-    // % de terres émergées, agrégé.
     let land_fracs: Vec<f64> = results.iter().map(|r| r.1).collect();
     let largest_fracs: Vec<f64> = results.iter().map(|r| r.2).collect();
+    let spans_km: Vec<f64> = results.iter().map(|r| r.3).collect();
 
     println!(
         "  Terres émergées   : moy {:.1} %  [min {:.1} %, max {:.1} %]",
@@ -75,28 +83,30 @@ fn connectivity(n_seeds: u64, wavelength: f64, sea_bias: f64) {
         100.0 * max(&land_fracs),
     );
     println!(
-        "  + grande masse    : moy {:.1} %  médiane {:.1} %  [min {:.1} %, max {:.1} %] des terres",
-        100.0 * mean(&largest_fracs),
+        "  + grande masse    : médiane {:.1} % des terres  [min {:.1} %, max {:.1} %]",
         100.0 * median(&largest_fracs),
         100.0 * min(&largest_fracs),
         100.0 * max(&largest_fracs),
     );
-    // La plus grande masse en valeur absolue (tuiles²), pour juger « peut-on
-    // y bâtir une civilisation ».
-    let largest_tiles: Vec<f64> = results
-        .iter()
-        .map(|r| r.1 * r.2 * (GRID * GRID) as f64 * (SPACING * SPACING) as f64)
-        .collect();
+    // Étendue = diagonale de la boîte englobante de la plus grande masse.
+    // C'est le vrai juge du « une route de 300 km tient-elle sur terre ? ».
     println!(
-        "  + grande masse    : médiane {:.0} M tuiles²",
-        median(&largest_tiles) / 1e6,
+        "  + grande masse    : étendue médiane {:.0} km  [min {:.0} km, max {:.0} km]",
+        median(&spans_km),
+        min(&spans_km),
+        max(&spans_km),
+    );
+    let ok = spans_km.iter().filter(|&&s| s >= TRADE_ROUTE_KM).count();
+    println!(
+        "  Route de {TRADE_ROUTE_KM:.0} km possible sur la + grande masse : {ok}/{n_seeds} seeds ({:.0} %)",
+        100.0 * ok as f64 / n_seeds as f64,
     );
 
-    // Les 3 seeds les plus morcelées : utiles à inspecter au PNG.
-    results.sort_by(|a, b| a.2.total_cmp(&b.2));
-    print!("  Seeds les + morcelées : ");
-    for (seed, _, frac) in results.iter().take(3) {
-        print!("{seed} ({:.0} %)  ", 100.0 * frac);
+    // Les 3 seeds les plus étroites : leur étendue en km est le vrai pire cas.
+    results.sort_by(|a, b| a.3.total_cmp(&b.3));
+    print!("  Seeds les + étroites : ");
+    for (seed, _, _, span) in results.iter().take(3) {
+        print!("{seed} ({span:.0} km)  ");
     }
     println!();
 }
@@ -115,30 +125,39 @@ fn sample_land(field: &AltitudeField) -> Vec<bool> {
 }
 
 /// Renvoie (fraction de terres, fraction que représente la plus grande masse
-/// connexe parmi ces terres). Composantes en 4-connexité, par remplissage.
-fn largest_component(land: &[bool]) -> (f64, f64) {
+/// connexe, étendue de cette masse en tuiles). L'étendue est la diagonale de
+/// la boîte englobante : le juge de « deux points distants de 300 km
+/// peuvent-ils tenir sur cette terre ? ». Composantes en 4-connexité.
+fn largest_component(land: &[bool]) -> (f64, f64, f64) {
     let total = GRID * GRID;
     let land_count = land.iter().filter(|&&l| l).count();
     if land_count == 0 {
-        return (0.0, 0.0);
+        return (0.0, 0.0, 0.0);
     }
 
     let mut visited = vec![false; total];
     let mut stack = Vec::new();
     let mut largest = 0usize;
+    let mut best_span_cells = 0.0f64;
 
     for start in 0..total {
         if !land[start] || visited[start] {
             continue;
         }
         // Remplissage itératif (pile explicite, pas de récursion : la grille
-        // fait 147 k cellules, la pile d'appels déborderait).
+        // fait 147 k cellules, la pile d'appels déborderait). On suit la
+        // boîte englobante de la composante au passage.
         let mut size = 0usize;
+        let (mut min_x, mut min_y, mut max_x, mut max_y) = (GRID, GRID, 0usize, 0usize);
         stack.push(start);
         visited[start] = true;
         while let Some(i) = stack.pop() {
             size += 1;
             let (cx, cy) = (i % GRID, i / GRID);
+            min_x = min_x.min(cx);
+            max_x = max_x.max(cx);
+            min_y = min_y.min(cy);
+            max_y = max_y.max(cy);
             let mut push = |nx: i64, ny: i64| {
                 if (0..GRID as i64).contains(&nx) && (0..GRID as i64).contains(&ny) {
                     let j = ny as usize * GRID + nx as usize;
@@ -153,12 +172,17 @@ fn largest_component(land: &[bool]) -> (f64, f64) {
             push(cx as i64, cy as i64 - 1);
             push(cx as i64, cy as i64 + 1);
         }
-        largest = largest.max(size);
+        if size > largest {
+            largest = size;
+            let (dx, dy) = ((max_x - min_x) as f64, (max_y - min_y) as f64);
+            best_span_cells = (dx * dx + dy * dy).sqrt();
+        }
     }
 
     (
         land_count as f64 / total as f64,
         largest as f64 / land_count as f64,
+        best_span_cells * SPACING as f64,
     )
 }
 
