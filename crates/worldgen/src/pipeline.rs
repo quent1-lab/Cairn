@@ -5,6 +5,7 @@
 use cairn_core::WorldSeed;
 
 use crate::altitude::{AltitudeConfig, AltitudeField};
+use crate::biomes::Biome;
 use crate::humidity::{self, HumidityConfig};
 use crate::temperature::{TemperatureConfig, TemperatureField};
 use crate::wind::{WindConfig, WindField};
@@ -53,6 +54,15 @@ impl WorldGen {
     /// vent) : voir [`crate::humidity`].
     pub fn humidity(&self, x: i64, y: i64) -> f64 {
         humidity::humidity(&self.altitude, &self.wind, &self.humidity_cfg, x, y)
+    }
+
+    /// Biome en (x, y) — évalue tout le pipeline. Si l'appelant a déjà
+    /// élévation, température et humidité, utiliser [`Biome::classify`].
+    pub fn biome(&self, x: i64, y: i64) -> Biome {
+        let e = self.elevation(x, y);
+        let t = self.mean_temperature(x, y, e);
+        let h = self.humidity(x, y);
+        Biome::classify(e, t, h)
     }
 }
 

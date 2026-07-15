@@ -5,8 +5,6 @@
 //! climatiques se répètent en miroir. Température et vent dérivent tous
 //! deux de ce même paramètre — ce module est leur source commune.
 
-use std::f64::consts::PI;
-
 #[derive(Debug, Clone, Copy)]
 pub struct Latitude {
     period: f64,
@@ -32,11 +30,6 @@ impl Latitude {
         if u < 1.0 { 1.0 } else { -1.0 }
     }
 
-    /// Cosinus de latitude : 1.0 à l'équateur, -1.0 au pôle. Pratique pour
-    /// les gradients (température).
-    pub fn cosine(&self, y: i64) -> f64 {
-        (PI * self.fraction(y)).cos()
-    }
 }
 
 #[cfg(test)]

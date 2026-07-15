@@ -4,16 +4,19 @@
 //! Usage : cargo run --release -p cairn-worldgen --example map_png -- [seed]
 //! Sortie : out/map_<seed>_{alt,temp,hum}.png
 
+use std::collections::BTreeMap;
 use std::time::Instant;
 
 use cairn_core::WorldSeed;
-use cairn_worldgen::WorldGen;
+use cairn_worldgen::{Biome, WorldGen};
 use rayon::prelude::*;
 
 /// Côté de l'image en pixels.
 const SIZE: u32 = 1024;
 /// 1 pixel = N tuiles : la carte couvre SIZE × N tuiles de côté.
-const TILES_PER_PX: i64 = 16;
+/// À 32, la carte couvre un demi-cycle de latitude complet : équateur au
+/// centre, pôles aux bords haut et bas.
+const TILES_PER_PX: i64 = 32;
 
 /// Palette hypsométrique, indexée par l'élévation normalisée. Rupture nette
 /// au niveau de la mer pour lire le trait de côte.
@@ -82,7 +85,9 @@ fn main() {
     let mut img_alt = image::RgbImage::new(SIZE, SIZE);
     let mut img_temp = image::RgbImage::new(SIZE, SIZE);
     let mut img_hum = image::RgbImage::new(SIZE, SIZE);
+    let mut img_bio = image::RgbImage::new(SIZE, SIZE);
     let mut land_px: u64 = 0;
+    let mut biome_counts: BTreeMap<Biome, u64> = BTreeMap::new();
 
     for (py, row) in rows.iter().enumerate() {
         for (px, &(e, t, h)) in row.iter().enumerate() {
@@ -90,24 +95,61 @@ fn main() {
             if e > 0.0 {
                 land_px += 1;
             }
+            let biome = Biome::classify(e, t, h);
+            *biome_counts.entry(biome).or_insert(0) += 1;
+
             img_alt.put_pixel(px, py, gradient(HYPSO_STOPS, e));
             // Océans assombris sur les cartes dérivées : le trait de côte
             // reste lisible sans masquer le champ affiché.
             img_temp.put_pixel(px, py, darken_if(e <= 0.0, gradient(THERMAL_STOPS, t)));
             img_hum.put_pixel(px, py, darken_if(e <= 0.0, gradient(MOISTURE_STOPS, h)));
+            img_bio.put_pixel(px, py, image::Rgb(biome_color(biome)));
         }
     }
 
     std::fs::create_dir_all("out").expect("création du dossier out/");
-    for (img, layer) in [(&img_alt, "alt"), (&img_temp, "temp"), (&img_hum, "hum")] {
+    for (img, layer) in [
+        (&img_alt, "alt"),
+        (&img_temp, "temp"),
+        (&img_hum, "hum"),
+        (&img_bio, "bio"),
+    ] {
         img.save(format!("out/map_{seed}_{layer}.png"))
             .expect("écriture du PNG");
     }
 
     let land_pct = 100.0 * land_px as f64 / (u64::from(SIZE) * u64::from(SIZE)) as f64;
     println!(
-        "out/map_{seed}_{{alt,temp,hum}}.png — terres émergées : {land_pct:.1} % — calcul : {elapsed:.2?}"
+        "out/map_{seed}_{{alt,temp,hum,bio}}.png — terres émergées : {land_pct:.1} % — calcul : {elapsed:.2?}"
     );
+
+    // Répartition des biomes terrestres, en % des terres émergées.
+    let mut land_biomes: Vec<(Biome, u64)> = biome_counts
+        .into_iter()
+        .filter(|(b, _)| !matches!(b, Biome::Ocean | Biome::Coast))
+        .collect();
+    land_biomes.sort_by_key(|&(_, n)| std::cmp::Reverse(n));
+    for (biome, n) in land_biomes {
+        println!("  {:>5.1} %  {}", 100.0 * n as f64 / land_px as f64, biome.name());
+    }
+}
+
+/// Couleur d'aplat par biome — préfiguration de la palette du tileset.
+fn biome_color(biome: Biome) -> [u8; 3] {
+    match biome {
+        Biome::Ocean => [24, 48, 96],
+        Biome::Coast => [56, 108, 160],
+        Biome::Glacier => [232, 238, 244],
+        Biome::Tundra => [150, 158, 144],
+        Biome::Taiga => [72, 106, 88],
+        Biome::ColdDesert => [168, 152, 122],
+        Biome::Steppe => [190, 174, 104],
+        Biome::Grassland => [140, 172, 90],
+        Biome::TemperateForest => [64, 122, 66],
+        Biome::HotDesert => [228, 198, 132],
+        Biome::Savanna => [204, 182, 92],
+        Biome::TropicalForest => [30, 96, 48],
+    }
 }
 
 fn darken_if(condition: bool, c: image::Rgb<u8>) -> image::Rgb<u8> {

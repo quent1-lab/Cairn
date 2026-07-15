@@ -3,6 +3,7 @@
 //! sur les précédentes (BRIEF §2.2). [`WorldGen`] assemble le pipeline.
 
 pub mod altitude;
+pub mod biomes;
 pub mod fbm;
 pub mod humidity;
 pub mod latitude;
@@ -11,6 +12,7 @@ pub mod temperature;
 pub mod wind;
 
 pub use altitude::{AltitudeConfig, AltitudeField};
+pub use biomes::Biome;
 pub use fbm::Fbm;
 pub use humidity::HumidityConfig;
 pub use pipeline::{WorldGen, WorldGenConfig};

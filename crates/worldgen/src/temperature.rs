@@ -79,9 +79,14 @@ impl TemperatureField {
     /// c'est le contrat du pipeline.
     pub fn mean_temperature(&self, x: i64, y: i64, elevation: f64) -> f64 {
         let cfg = &self.cfg;
-        // 1.0 à l'équateur, -1.0 aux pôles, périodique.
-        let lat = self.latitude.cosine(y);
-        let t_sea = cfg.pole_temp_c + (cfg.equator_temp_c - cfg.pole_temp_c) * (lat + 1.0) / 2.0;
+        // Moyenne annuelle quadratique en fraction de latitude : colle aux
+        // moyennes zonales terrestres (tropiques larges, chute rapide vers
+        // les pôles) là où un cosinus refroidit trop les latitudes moyennes
+        // (2,5 °C à 45° au lieu de ~12 °C) et couvre un tiers du monde de
+        // glaciers.
+        let lambda = self.latitude.fraction(y);
+        let t_sea =
+            cfg.equator_temp_c - (cfg.equator_temp_c - cfg.pole_temp_c) * lambda * lambda;
         // L'océan (élévation ≤ 0) reste à la température de surface.
         let alt_km = elevation.max(0.0) * cfg.max_elevation_m / 1000.0;
         let t = t_sea - alt_km * cfg.lapse_rate_c_per_km;
