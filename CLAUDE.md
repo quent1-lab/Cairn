@@ -21,6 +21,10 @@ Simulateur d'évolution culturelle et technologique **émergente** : monde infin
 
 Workspace cible (BRIEF §8) : `crates/{core, worldgen, sim, protocol, server, client}` — `protocol` partagé serveur↔client. Seuls `core` et `worldgen` existent pour l'instant.
 
+## Échelle
+
+**1 tuile = 2 m** (échelle humaine : une hutte = plusieurs tuiles, un agent sur une, un village se parcourt tuile à tuile). Source unique : `core::scale` (`TILE_METERS`, `km_to_tiles`, `tiles_to_km`). Tout le worldgen exprime ses tailles en km via ces helpers. Le monde est donc énorme en tuiles (continents ~3000 km ≈ 1,5 M tuiles) — sans coût car procédural/chunké. Le zoom monde↔village est un problème de **rendu (LOD)**, jamais de taille de tuile : proche = sprites/structures, loin = mode carte agrégé.
+
 ## Commandes
 
 - `cargo check` / `cargo test` — vérification et tests.
@@ -35,4 +39,4 @@ Workspace cible (BRIEF §8) : `crates/{core, worldgen, sim, protocol, server, cl
 
 ## État d'avancement
 
-- **Phase 1 en cours** : altitude (continents 1/6144, calé par mesure de connexité), température (gradient quadratique, latitude exacte sur tout l'axe i64), vent (-sin(3πλ)), humidité par advection (ombre pluviométrique **prouvée** chiffrée + diffusion latérale anti-stries), biomes de Whittaker, hydrologie D8 (priority-flood + ε, déterminisme du tas explicite, sur `Region` bornée). Couches point-à-point dans `WorldGen` (pipeline.rs), hydrologie à part. Outils : `map_png` (couches + zoom), `analyze` (connexité + rain shadow). Reste : géologie (cuivre/étain jamais co-localisés), chunking, client WASM. Améliorations en attente : montagnes en chaînes (ridged noise) ; humidité macro-grille + cache + vraie diffusion sur grille ; mangrove/marais ; hydrologie inter-chunks ; borne globale ~2⁵³ tuiles (bruit en x as f64).
+- **Phase 1 en cours** : altitude (continents ~3000 km + relief 150 km→300 m, 10 octaves), température (gradient quadratique, latitude exacte sur tout l'axe i64), vent (-sin(3πλ)), humidité par advection ~256 km (ombre pluviométrique prouvée + diffusion latérale ±8 km anti-stries), biomes de Whittaker, hydrologie D8 (priority-flood + ε, sur `Region` bornée), **eau gelée** (`Water::frozen(temp)` : stagnante 0 °C, courante -6 °C — le débit reste géographique permanent). Couches point-à-point dans `WorldGen` (pipeline.rs), hydrologie à part. Outils : `map_png` (couches + zoom + décalage centre en km), `analyze` (connexité + rain shadow). Reste : **géologie** (cuivre/étain jamais co-localisés), chunking, client WASM. Améliorations en attente : montagnes en chaînes (ridged noise) ; humidité macro-grille + cache + vraie diffusion sur grille (le ×5 de la diffusion par trajets est un stopgap) ; mangrove/marais ; hydrologie inter-chunks ; borne globale ~2⁵³ tuiles (bruit en x as f64).
