@@ -9,6 +9,11 @@
 //! pas besoin de matérialiser des tuiles mutables. L'humidité, coûteuse, tourne
 //! en config rapide pour rester interactive.
 
+// L'initialiseur du thread_local est déjà `const` ; ce lint le signale à tort
+// (comportement différent wasm/natif), et un `#[allow]` sur l'item ne couvre
+// pas l'expansion de la macro — d'où l'allow au niveau du crate.
+#![allow(clippy::missing_const_for_thread_local)]
+
 pub mod palette;
 pub mod render;
 
@@ -29,8 +34,6 @@ const MAX_SCALE: f64 = 32.0;
 
 // État global. WASM est mono-thread : `thread_local!` + `RefCell` est
 // l'idiome pour un état mutable partagé entre les closures d'événements.
-// L'initialiseur est déjà `const` ; le lint le signale à tort ici.
-#[allow(clippy::missing_const_for_thread_local)]
 thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
 }
