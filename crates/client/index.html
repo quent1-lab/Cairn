@@ -4,7 +4,6 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
   <title>Cairn</title>
-  <link data-trunk rel="rust" />
   <style>
     :root {
       --panel-bg: rgba(18, 22, 30, 0.86);
@@ -120,6 +119,15 @@
         panel.classList.toggle('collapsed');
       });
     })();
+  </script>
+
+  <!-- Charge le module WASM (généré par wasm-bindgen). init() exécute
+       automatiquement le point d'entrée #[wasm_bindgen(start)]. -->
+  <script type="module">
+    import init from './cairn.js';
+    init().catch((e) => {
+      document.getElementById('readout').textContent = 'Erreur de chargement : ' + e;
+    });
   </script>
 </body>
 </html>
