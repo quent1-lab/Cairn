@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/worldgen", "crates/sim"]
+members = ["crates/core", "crates/worldgen", "crates/sim", "crates/client"]
 
 [workspace.package]
 version = "0.1.0"
@@ -9,6 +9,7 @@ edition = "2024"
 [workspace.dependencies]
 cairn-core = { path = "crates/core" }
 cairn-worldgen = { path = "crates/worldgen" }
+cairn-sim = { path = "crates/sim" }
 noise = "0.9"
 image = { version = "0.25", default-features = false, features = ["png"] }
 rayon = "1"

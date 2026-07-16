@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <title>Cairn</title>
+  <link data-trunk rel="rust" />
+  <style>
+    :root {
+      --panel-bg: rgba(18, 22, 30, 0.86);
+      --panel-border: rgba(120, 140, 170, 0.25);
+      --text: #d6dbe4;
+      --text-dim: #8a93a3;
+      --accent: #6ea8fe;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0e14; }
+    /* La carte occupe tout l'écran ; l'UI flotte par-dessus. */
+    #view {
+      position: fixed; inset: 0; display: block;
+      width: 100vw; height: 100vh;
+      cursor: grab; image-rendering: pixelated;
+    }
+    #view:active { cursor: grabbing; }
+
+    /* Panneau flottant, déplaçable, repliable. */
+    #panel {
+      position: absolute; top: 16px; left: 16px;
+      min-width: 190px;
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 10px;
+      color: var(--text);
+      font: 13px/1.4 system-ui, sans-serif;
+      backdrop-filter: blur(6px);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+      user-select: none;
+      overflow: hidden;
+    }
+    #panel-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 9px 12px; cursor: move;
+      background: rgba(255, 255, 255, 0.04);
+      border-bottom: 1px solid var(--panel-border);
+    }
+    #panel-header .title { font-weight: 600; letter-spacing: 0.03em; }
+    #panel-toggle {
+      cursor: pointer; color: var(--text-dim); background: none; border: none;
+      font-size: 15px; line-height: 1;
+    }
+    #panel-body { padding: 10px 12px; display: grid; gap: 6px; }
+    #panel.collapsed #panel-body { display: none; }
+
+    .layer-btn {
+      text-align: left; padding: 7px 10px; border-radius: 6px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid transparent;
+      color: var(--text); font: inherit; cursor: pointer;
+      transition: background 0.12s, border-color 0.12s;
+    }
+    .layer-btn:hover { background: rgba(255, 255, 255, 0.09); }
+    .layer-btn.active {
+      border-color: var(--accent);
+      background: rgba(110, 168, 254, 0.16);
+      color: #fff;
+    }
+
+    #readout {
+      margin-top: 4px; padding-top: 8px;
+      border-top: 1px solid var(--panel-border);
+      color: var(--text-dim); font-size: 11px;
+    }
+    #hint {
+      position: absolute; bottom: 14px; left: 16px;
+      color: var(--text-dim); font: 11px system-ui, sans-serif;
+      background: var(--panel-bg); padding: 6px 10px; border-radius: 6px;
+      border: 1px solid var(--panel-border);
+    }
+  </style>
+</head>
+<body>
+  <canvas id="view"></canvas>
+
+  <div id="panel">
+    <div id="panel-header">
+      <span class="title">Cairn</span>
+      <button id="panel-toggle" title="Replier">▾</button>
+    </div>
+    <div id="panel-body">
+      <button class="layer-btn" data-layer="biome">Biomes</button>
+      <button class="layer-btn" data-layer="elevation">Altitude</button>
+      <button class="layer-btn" data-layer="temperature">Température</button>
+      <button class="layer-btn" data-layer="humidity">Humidité</button>
+      <button class="layer-btn" data-layer="geology">Géologie</button>
+      <div id="readout">chargement…</div>
+    </div>
+  </div>
+
+  <div id="hint">Glisser pour déplacer · molette pour zoomer</div>
+
+  <script>
+    // Chrome purement DOM (déplacement du panneau, repli) — la logique de
+    // rendu est en Rust/WASM.
+    (function () {
+      const panel = document.getElementById('panel');
+      const header = document.getElementById('panel-header');
+      let drag = null;
+      header.addEventListener('mousedown', (e) => {
+        if (e.target.id === 'panel-toggle') return;
+        drag = { x: e.clientX - panel.offsetLeft, y: e.clientY - panel.offsetTop };
+        e.preventDefault();
+      });
+      window.addEventListener('mousemove', (e) => {
+        if (!drag) return;
+        panel.style.left = (e.clientX - drag.x) + 'px';
+        panel.style.top = (e.clientY - drag.y) + 'px';
+      });
+      window.addEventListener('mouseup', () => { drag = null; });
+      document.getElementById('panel-toggle').addEventListener('click', () => {
+        panel.classList.toggle('collapsed');
+      });
+    })();
+  </script>
+</body>
+</html>

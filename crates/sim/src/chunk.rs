@@ -77,6 +77,7 @@ impl Chunk {
                     deposit: world.deposit(x, y, elevation),
                     elevation: elevation as f32,
                     temperature: temperature as f32,
+                    humidity: (humidity.clamp(0.0, 1.0) * 255.0) as u8,
                     soil_fertility: baseline_fertility(biome),
                     biomass: baseline_biomass(biome),
                     flags,

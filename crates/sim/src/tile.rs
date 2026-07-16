@@ -39,6 +39,9 @@ pub struct Tile {
     pub elevation: f32,
     /// Température moyenne annuelle, °C.
     pub temperature: f32,
+    /// Humidité de l'air, quantifiée 0–255 (depuis [0, 1]). Calculée
+    /// gratuitement à la génération du chunk ; sert les biomes et l'affichage.
+    pub humidity: u8,
 
     // — Mutable (évoluera en Phase 2 ; ici valeur de base) —
     /// Fertilité du sol, 0–255. Dégradable par la surexploitation.
