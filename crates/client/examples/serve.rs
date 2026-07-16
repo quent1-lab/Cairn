@@ -16,10 +16,8 @@ fn main() {
 
     let listener = TcpListener::bind(("127.0.0.1", port)).expect("bind");
     println!("Cairn servi sur http://localhost:{port}  (dossier {})", root.display());
-    for stream in listener.incoming() {
-        if let Ok(s) = stream {
-            let _ = handle(s, &root);
-        }
+    for s in listener.incoming().flatten() {
+        let _ = handle(s, &root);
     }
 }
 
