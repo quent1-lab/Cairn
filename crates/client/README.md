@@ -8,11 +8,15 @@ humidité, géologie) dans un panneau flottant.
 
 ```sh
 rustup target add wasm32-unknown-unknown
-cargo install wasm-bindgen-cli --version 0.2.126   # doit matcher le crate wasm-bindgen
 
 crates/client/build.sh                              # → crates/client/dist/
-python -m http.server -d crates/client/dist 8080    # puis http://localhost:8080
+cargo run --release -p cairn-client --example serve # sert dist/ sur :8080
+# puis ouvrir http://localhost:8080
 ```
+
+`build.sh` compile le wasm et lance `wasm-bindgen`. Le serveur `serve`
+(std pur, faute de `python`) sert `dist/` avec le bon type MIME
+`application/wasm`. Installation de `wasm-bindgen-cli` : voir la note d'env.
 
 Commandes : **glisser** pour déplacer la carte, **molette** pour zoomer
 (géométrique, centré sur le curseur). Le panneau se déplace par son en-tête et
@@ -27,19 +31,23 @@ cargo run --release -p cairn-client --example preview -- biome 80
 # → out/client_biome.png  (mêmes couleurs que le canvas)
 ```
 
-## Note d'environnement (toolchain windows-gnu)
+## Note d'environnement (toolchain windows-gnu) — RÉSOLU
 
-Sur une toolchain `x86_64-pc-windows-gnu` **sans mingw-w64 complet**,
-`cargo install wasm-bindgen-cli` (et `trunk`) échoue à compiler `windows-sys` :
-`dlltool` a besoin de l'assembleur `as.exe`, absent du set « self-contained »
-de rustup. Les binaires précompilés (MSVC) ne se lancent pas non plus si le
-runtime Visual C++ n'est pas installé (`STATUS_DLL_NOT_FOUND`).
+Installer `wasm-bindgen-cli` a demandé de contourner deux limites de cette
+machine (`x86_64-pc-windows-gnu`, pas de runtime VC++/UCRT complet) :
 
-Options pour débloquer :
-- installer **mingw-w64** (fournit `as.exe`, `dlltool`, `gcc`) et l'ajouter au
-  PATH, puis `cargo install wasm-bindgen-cli` ;
-- **ou** installer le *Microsoft Visual C++ Redistributable* et utiliser les
-  binaires précompilés de `trunk` / `wasm-bindgen` ;
-- **ou** produire le bundle sur une autre machine (le crate compile en wasm
-  partout : `cargo build --target wasm32-unknown-unknown -p cairn-client` passe
-  déjà ici).
+1. `windows-sys` (dép. de wasm-bindgen-cli) appelle `dlltool` → l'assembleur
+   `as.exe`, absent du set « self-contained » de rustup. Fourni depuis un
+   mingw-w64 winlibs : `as.exe`, `dlltool.exe` et `libwinpthread-1.dll` copiés
+   dans `~/.cargo/bin` (sur le PATH). **Ne pas** mettre tout le `bin/` de
+   winlibs sur le PATH : son `gcc` UCRT deviendrait le linker et produirait des
+   binaires liés UCRT qui ne tournent pas ici.
+2. `ring` (via `wasm-bindgen-test-runner`) veut un compilateur C → on l'écarte
+   avec `--no-default-features`. Rust linke alors avec son `gcc` self-contained
+   (MSVCRT, `msvcrt.dll` présent partout) et le binaire tourne.
+
+Commande qui marche ici :
+```sh
+cargo install --force wasm-bindgen-cli --version 0.2.126 --no-default-features
+```
+(avec `as.exe`/`dlltool.exe`/`libwinpthread-1.dll` dans `~/.cargo/bin`).
