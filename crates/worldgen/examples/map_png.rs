@@ -122,6 +122,7 @@ fn main() {
     let mut img_hum = image::RgbImage::new(SIZE, SIZE);
     let mut img_bio = image::RgbImage::new(SIZE, SIZE);
     let mut img_geo = image::RgbImage::new(SIZE, SIZE);
+    let mut img_dep = image::RgbImage::new(SIZE, SIZE);
     let mut land_px: u64 = 0;
     let mut biome_counts: BTreeMap<Biome, u64> = BTreeMap::new();
     let mut deposit_counts: BTreeMap<Deposit, u64> = BTreeMap::new();
@@ -153,13 +154,28 @@ fn main() {
 
             // Géologie : roche en fond, gisement en surimpression. En mer,
             // fond sombre.
+            let deposit = if e > 0.0 {
+                let d = world.deposit(tx, ty, e);
+                *deposit_counts.entry(d).or_insert(0) += 1;
+                d
+            } else {
+                Deposit::None
+            };
             let geo_rgb = if e <= 0.0 {
                 [20, 32, 52]
             } else {
-                let deposit = world.deposit(tx, ty, e);
-                *deposit_counts.entry(deposit).or_insert(0) += 1;
                 match deposit {
                     Deposit::None => rock_color(world.rock_type(tx, ty)),
+                    d => deposit_color(d),
+                }
+            };
+            // Overlay dépôts-seuls : fond neutre, gisements vifs — cuivre et
+            // étain doivent former des amas distincts et éloignés.
+            let dep_rgb = if e <= 0.0 {
+                [16, 22, 30]
+            } else {
+                match deposit {
+                    Deposit::None => [46, 48, 52],
                     d => deposit_color(d),
                 }
             };
@@ -171,6 +187,7 @@ fn main() {
             img_hum.put_pixel(px, py, darken_if(e <= 0.0, gradient(MOISTURE_STOPS, h)));
             img_bio.put_pixel(px, py, image::Rgb(bio_rgb));
             img_geo.put_pixel(px, py, image::Rgb(geo_rgb));
+            img_dep.put_pixel(px, py, image::Rgb(dep_rgb));
         }
     }
 
@@ -210,18 +227,20 @@ fn main() {
         (&img_hum, "hum"),
         (&img_bio, "bio"),
         (&img_geo, "geo"),
+        (&img_dep, "dep"),
     ] {
         img.save(format!("out/map_{seed}_{layer}.png"))
             .expect("écriture du PNG");
     }
 
     // Montage : toutes les couches d'un même continent dans une image, pour
-    // comparer les étages du pipeline d'un coup d'œil.
-    save_montage(seed, &[&img_alt, &img_temp, &img_hum, &img_bio, &img_geo]);
+    // comparer les étages du pipeline d'un coup d'œil. La 6ᵉ case est
+    // l'overlay dépôts-seuls (amas cuivre/étain).
+    save_montage(seed, &[&img_alt, &img_temp, &img_hum, &img_bio, &img_geo, &img_dep]);
 
     let land_pct = 100.0 * land_px as f64 / (u64::from(SIZE) * u64::from(SIZE)) as f64;
     println!(
-        "out/map_{seed}_{{alt,temp,hum,bio,geo}}.png — terres émergées : {land_pct:.1} % — calcul : {elapsed:.2?}"
+        "out/map_{seed}_{{alt,temp,hum,bio,geo,dep}}.png — terres émergées : {land_pct:.1} % — calcul : {elapsed:.2?}"
     );
 
     // Répartition des biomes terrestres, en % des terres émergées.

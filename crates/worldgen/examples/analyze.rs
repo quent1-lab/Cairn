@@ -16,8 +16,8 @@
 //!             [nb_seeds] [longueur_onde_continent] [sea_bias]
 
 use cairn_core::WorldSeed;
-use cairn_core::scale::{km_to_tiles, tiles_to_km};
-use cairn_worldgen::{AltitudeConfig, AltitudeField, HumidityConfig, WorldGen, WorldGenConfig};
+use cairn_core::scale::{TILE_METERS, km_to_tiles, tiles_to_km};
+use cairn_worldgen::{AltitudeConfig, AltitudeField, Deposit, HumidityConfig, WorldGen, WorldGenConfig};
 use rayon::prelude::*;
 
 fn main() {
@@ -36,13 +36,18 @@ fn main() {
         .unwrap_or(default_cfg.sea_bias);
 
     println!(
-        "Config : longueur d'onde continentale = {wavelength:.0} tuiles ({:.0} km), sea_bias = {sea_bias}\n",
+        "Échelle : 1 tuile = {TILE_METERS} m · continent ≈ {:.0} km ({:.0} k tuiles) · 300 km = {:.0} k tuiles",
         tiles_to_km(wavelength),
+        wavelength / 1000.0,
+        km_to_tiles(300.0) / 1000.0,
     );
+    println!("Config : sea_bias = {sea_bias}\n");
 
     connectivity(n_seeds, wavelength, sea_bias);
     println!();
     rain_shadow(wavelength, sea_bias);
+    println!();
+    metal_districts(wavelength, sea_bias);
 }
 
 /// Construit une config d'altitude avec les surcharges de test.
@@ -285,6 +290,142 @@ fn upwind_barrier(world: &WorldGen, x: i64, y: i64, e_here: f64) -> f64 {
         max_elev = max_elev.max(e);
     }
     (max_elev - e_here).max(0.0)
+}
+
+// ─────────────────────────── C. Districts métalliques ───────────────────────────
+
+const MD_SEEDS: u64 = 8;
+const MD_GRID: usize = 256;
+/// Pas ~14 km : la fenêtre (~3580 km) couvre un continent, assez fin pour
+/// capter des amas de ~50 km.
+const MD_SPACING: i64 = km_to_tiles(14.0) as i64;
+
+fn metal_districts(wavelength: f64, sea_bias: f64) {
+    println!("C. DISTRICTS MÉTALLIQUES — {MD_SEEDS} seeds, fenêtre {:.0} km", tiles_to_km(MD_GRID as f64 * MD_SPACING as f64));
+
+    // Bins de distance cuivre↔étain (au plus proche voisin), en km.
+    const BINS: usize = 8;
+    const BIN_KM: f64 = 100.0;
+    let mut nn_hist = [0u64; BINS];
+    let mut nn_all: Vec<f64> = Vec::new();
+    let (mut viable, mut both_present) = (0u32, 0u32);
+    let mut cu_frac_sum = 0.0;
+
+    for seed in 0..MD_SEEDS {
+        let cfg = WorldGenConfig {
+            altitude: altitude_config(wavelength, sea_bias),
+            ..WorldGenConfig::default()
+        };
+        let world = WorldGen::with_config(WorldSeed(seed), cfg);
+        let half = MD_GRID as i64 * MD_SPACING / 2;
+
+        let mut land = vec![false; MD_GRID * MD_GRID];
+        let mut coppers = Vec::new();
+        let mut tins = Vec::new();
+        let mut land_count = 0u64;
+        let mut cu_count = 0u64;
+        for gy in 0..MD_GRID {
+            for gx in 0..MD_GRID {
+                let x = gx as i64 * MD_SPACING - half;
+                let y = gy as i64 * MD_SPACING - half;
+                let e = world.elevation(x, y);
+                if e <= 0.0 {
+                    continue;
+                }
+                land[gy * MD_GRID + gx] = true;
+                land_count += 1;
+                match world.deposit(x, y, e) {
+                    Deposit::Copper => {
+                        coppers.push((gx, gy));
+                        cu_count += 1;
+                    }
+                    Deposit::Tin => tins.push((gx, gy)),
+                    _ => {}
+                }
+            }
+        }
+        cu_frac_sum += cu_count as f64 / land_count.max(1) as f64;
+
+        if coppers.is_empty() || tins.is_empty() {
+            continue;
+        }
+        both_present += 1;
+
+        // Distance au plus proche voisin cuivre → étain (en km).
+        let cell_km = tiles_to_km(MD_SPACING as f64);
+        for &(cx, cy) in &coppers {
+            let min_cells = tins
+                .iter()
+                .map(|&(tx, ty)| {
+                    let (dx, dy) = (cx as f64 - tx as f64, cy as f64 - ty as f64);
+                    (dx * dx + dy * dy).sqrt()
+                })
+                .fold(f64::INFINITY, f64::min);
+            let km = min_cells * cell_km;
+            nn_all.push(km);
+            nn_hist[((km / BIN_KM) as usize).min(BINS - 1)] += 1;
+        }
+
+        // Bronze viable ? Cuivre et étain sur la MÊME masse terrestre connexe.
+        let comp = label_components(&land);
+        let cu_comps: std::collections::BTreeSet<i32> =
+            coppers.iter().map(|&(x, y)| comp[y * MD_GRID + x]).collect();
+        let tin_comps: std::collections::BTreeSet<i32> =
+            tins.iter().map(|&(x, y)| comp[y * MD_GRID + x]).collect();
+        if cu_comps.intersection(&tin_comps).next().is_some() {
+            viable += 1;
+        }
+    }
+
+    println!("  cuivre : {:.2} % des terres (en amas, non dispersé)", 100.0 * cu_frac_sum / MD_SEEDS as f64);
+    println!("  distance cuivre→étain au plus proche voisin :");
+    for (b, &count) in nn_hist.iter().enumerate() {
+        if count == 0 {
+            continue;
+        }
+        let bar = "█".repeat(count as usize * 40 / nn_all.len().max(1));
+        println!("    {:>4}–{:<4} km  {count:>6}  {bar}", b as f64 * BIN_KM, (b + 1) as f64 * BIN_KM);
+    }
+    if !nn_all.is_empty() {
+        println!("    médiane {:.0} km", median(&nn_all));
+    }
+    println!(
+        "  bronze viable (cuivre+étain sur la même masse) : {viable}/{both_present} seeds où les deux existent",
+    );
+}
+
+/// Étiquette les composantes terrestres connexes (4-connexité). Renvoie l'id de
+/// composante par cellule (-1 pour l'eau).
+fn label_components(land: &[bool]) -> Vec<i32> {
+    let n = MD_GRID * MD_GRID;
+    let mut comp = vec![-1i32; n];
+    let mut next = 0i32;
+    let mut stack = Vec::new();
+    for start in 0..n {
+        if !land[start] || comp[start] >= 0 {
+            continue;
+        }
+        stack.push(start);
+        comp[start] = next;
+        while let Some(i) = stack.pop() {
+            let (cx, cy) = (i % MD_GRID, i / MD_GRID);
+            let push = |nx: i64, ny: i64, stack: &mut Vec<usize>, comp: &mut Vec<i32>| {
+                if (0..MD_GRID as i64).contains(&nx) && (0..MD_GRID as i64).contains(&ny) {
+                    let j = ny as usize * MD_GRID + nx as usize;
+                    if land[j] && comp[j] < 0 {
+                        comp[j] = next;
+                        stack.push(j);
+                    }
+                }
+            };
+            push(cx as i64 - 1, cy as i64, &mut stack, &mut comp);
+            push(cx as i64 + 1, cy as i64, &mut stack, &mut comp);
+            push(cx as i64, cy as i64 - 1, &mut stack, &mut comp);
+            push(cx as i64, cy as i64 + 1, &mut stack, &mut comp);
+        }
+        next += 1;
+    }
+    comp
 }
 
 // ─────────────────────────── stats ───────────────────────────

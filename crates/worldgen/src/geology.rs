@@ -81,7 +81,10 @@ impl Default for GeologyConfig {
             outcrop_wavelength: km_to_tiles(6.0),
             outcrop_threshold: 0.35,
             metal_margin: 0.15,
-            metal_presence: 0.35,
+            // Seuil haut : les métaux ne s'ancrent qu'aux pics de leur
+            // province → amas serrés (« montagnes de cuivre »), pas de
+            // poussière.
+            metal_presence: 0.5,
         }
     }
 }
@@ -132,28 +135,30 @@ impl Geology {
             return Deposit::None;
         }
         let (xf, yf) = (x as f64, y as f64);
-        // Un affleurement local est-il exposé ici ? Sinon, pas de gisement.
-        if self.outcrop.get(xf, yf) < self.cfg.outcrop_threshold {
-            return Deposit::None;
-        }
         let rock = self.rock_type(x, y);
+        let out = self.outcrop.get(xf, yf);
 
-        // Ordre : les gisements rares et spécifiques d'abord, le premier qui
-        // matche gagne.
+        // Deux régimes de placement :
+        // - **Corps minéralisés** (cuivre, étain, or, obsidienne) : amas
+        //   compacts près des pics d'un champ de province basse fréquence, SANS
+        //   gate d'affleurement — quelques « districts » identifiables par
+        //   continent, pas de la poussière. La séparation cuivre/étain vient de
+        //   la règle d'exclusion `cu - sn > marge` sur deux champs décorrélés.
+        // - **Minéraux communs** (fer, silex, argile) : dispersés, gérés par la
+        //   noise `outcrop` haute fréquence (affleurements épars).
+        let (p, m) = (self.cfg.metal_presence, self.cfg.metal_margin);
+        let has_outcrop = out > self.cfg.outcrop_threshold;
+
         match rock {
             RockType::Igneous => {
                 let (cu, sn) = (self.copper.get(xf, yf), self.tin.get(xf, yf));
-                // Séparation cuivre/étain : chacun n'apparaît que près des
-                // pics de sa province (`metal_presence`) ET là où elle domine
-                // l'autre d'au moins `metal_margin`.
-                let (p, m) = (self.cfg.metal_presence, self.cfg.metal_margin);
                 if cu > p && cu - sn > m {
                     Deposit::Copper
                 } else if sn > p && sn - cu > m {
                     Deposit::Tin
-                } else if elevation > 0.55 && self.minerals.get(xf, yf) > 0.4 {
+                } else if elevation > 0.55 && self.minerals.get(xf, yf) > 0.55 {
                     Deposit::Obsidian
-                } else if self.minerals.get(xf, yf) > 0.45 {
+                } else if has_outcrop && self.minerals.get(xf, yf) > 0.35 {
                     Deposit::Iron
                 } else {
                     Deposit::None
@@ -162,19 +167,21 @@ impl Geology {
             RockType::Metamorphic => {
                 if self.minerals.get(xf, yf) > 0.6 {
                     Deposit::Gold
-                } else if self.minerals.get(xf, yf) > 0.45 {
+                } else if has_outcrop && self.minerals.get(xf, yf) > 0.4 {
                     Deposit::Iron
                 } else {
                     Deposit::None
                 }
             }
-            RockType::Sedimentary => {
+            // Silex et argile : communs, dispersés par affleurements.
+            RockType::Sedimentary if has_outcrop => {
                 if elevation < 0.1 {
                     Deposit::Clay
                 } else {
                     Deposit::Flint
                 }
             }
+            RockType::Sedimentary => Deposit::None,
         }
     }
 }
