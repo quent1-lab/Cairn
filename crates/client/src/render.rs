@@ -44,9 +44,17 @@ fn sample(wg: &WorldGen, x: i64, y: i64, humidity: f64) -> Sample {
 
 /// Produit le tampon RGBA (w·h·4 octets) de la vue.
 ///
-/// On échantillonne le worldgen sur une grille (~1 point par tuile en zoom
-/// rapproché, élargie au dézoom pour tenir le budget), puis on l'étire aux
-/// pixels au plus proche voisin — rendu pixel-art, sans lissage.
+/// On échantillonne le worldgen sur un **maillage ancré au monde** dont le pas
+/// (en tuiles) est quantifié à une puissance de deux — un « palier de LOD ». Le
+/// pas est la plus petite puissance de deux qui tient le budget `MAX_SAMPLES`
+/// (jamais moins de 1 : au zoom fort, une tuile par nœud). Les nœuds tombent
+/// donc à des positions **fixes dans le monde**, indépendantes de la caméra :
+/// à l'intérieur d'un palier, ni le pan ni le zoom ne changent *quelles* tuiles
+/// sont échantillonnées. C'est ce qui supprime le scintillement — le
+/// sel-et-poivre des gisements qui « bougeait », les biomes qui « ondulaient ».
+/// Le pas ne double qu'aux frontières de palier (une octave de zoom), où la
+/// moitié des nœuds sont réutilisés : la transition est discrète et douce. On
+/// étire ensuite au plus proche voisin — rendu pixel-art, sans lissage.
 pub fn render_to_buffer(
     wg: &WorldGen,
     cx: f64,
@@ -56,69 +64,76 @@ pub fn render_to_buffer(
     w: usize,
     h: usize,
 ) -> Vec<u8> {
-    let mut stride = scale.max(1.0);
-    let count = (w as f64 / stride).ceil() * (h as f64 / stride).ceil();
-    if count > MAX_SAMPLES {
-        stride *= (count / MAX_SAMPLES).sqrt();
-    }
+    // Pas d'échantillonnage en tuiles = plus petite puissance de deux tenant le
+    // budget. `world_w·world_h / pas²` est le nombre de nœuds à l'écran ; on
+    // veut ≤ MAX_SAMPLES, d'où `pas ≥ √(world_w·world_h / MAX_SAMPLES)`.
+    let world_w = w as f64 / scale;
+    let world_h = h as f64 / scale;
+    let raw = ((world_w * world_h) / MAX_SAMPLES).sqrt().max(1.0);
+    let step = 1i64 << raw.log2().ceil().max(0.0) as u32;
+    let stepf = step as f64;
 
-    let gw = (w as f64 / stride).ceil() as usize + 1;
-    let gh = (h as f64 / stride).ceil() as usize + 1;
+    // Coin monde du pixel (0, 0), puis indice de nœud (⌊tuile / pas⌋) de chaque
+    // colonne et ligne — précalculés pour éviter un floor par pixel. Comme ces
+    // indices ne dépendent que de la position monde, un même point du monde
+    // retombe toujours sur le même nœud, quelle que soit la caméra.
+    let wx_min = cx - w as f64 / (2.0 * scale);
+    let wy_min = cy - h as f64 / (2.0 * scale);
+    let node_x: Vec<i64> = (0..w).map(|px| ((wx_min + px as f64 / scale) / stepf).floor() as i64).collect();
+    let node_y: Vec<i64> = (0..h).map(|py| ((wy_min + py as f64 / scale) / stepf).floor() as i64).collect();
+    let kx_min = node_x[0];
+    let ky_min = node_y[0];
+    let nx = (node_x[w - 1] - kx_min + 1) as usize;
+    let ny = (node_y[h - 1] - ky_min + 1) as usize;
 
-    // Macro-grille d'humidité **ancrée sur le monde** (et non sur l'écran) :
-    // ses nœuds sont à des positions fixes en tuiles, indépendantes de la
-    // caméra. Sinon, déplacer la vue ferait glisser le maillage sous le monde
-    // et l'humidité interpolée en une tuile donnée changerait à chaque pan —
-    // donc la classification des biomes « ondulerait ». L'espacement suit le
-    // zoom (≈ `HUMIDITY_LATTICE` cellules de rendu), donc le coût est le même
-    // que la version écran : ~un point d'humidité pour 64 cellules.
-    let world_step = stride / scale; // tuiles entre deux cellules de rendu
-    let node_tiles = (HUMIDITY_LATTICE as f64 * world_step).max(1.0);
-    let (wx0, wy0) = tile_at(0.0, 0.0, cx, cy, scale, w, h);
-    let (wx1, wy1) = tile_at(gw as f64 * stride, gh as f64 * stride, cx, cy, scale, w, h);
-    // Indices de nœud (monde ÷ espacement) couvrant l'écran, +1 nœud de marge.
-    let kx0 = (wx0 / node_tiles).floor() as i64;
-    let ky0 = (wy0 / node_tiles).floor() as i64;
-    let hw = ((wx1 / node_tiles).floor() as i64 - kx0 + 2) as usize;
-    let hh = ((wy1 / node_tiles).floor() as i64 - ky0 + 2) as usize;
-    let mut hum = vec![0f32; hw * hh];
-    for j in 0..hh {
-        for i in 0..hw {
-            let wx = ((kx0 + i as i64) as f64 * node_tiles).floor() as i64;
-            let wy = ((ky0 + j as i64) as f64 * node_tiles).floor() as i64;
-            hum[j * hw + i] = wg.humidity(wx, wy) as f32;
+    // Humidité sur un maillage encore ×HUMIDITY_LATTICE plus grossier (elle est
+    // lisse et coûteuse) : ses nœuds sont les nœuds principaux d'indice
+    // multiple de HUMIDITY_LATTICE — donc eux aussi figés dans le monde. On
+    // ancre sa base sur un tel multiple pour couvrir tout l'écran.
+    let hl = HUMIDITY_LATTICE as i64;
+    let hbx = kx_min.div_euclid(hl) * hl;
+    let hby = ky_min.div_euclid(hl) * hl;
+    let hnx = ((node_x[w - 1] - hbx) / hl + 2) as usize;
+    let hny = ((node_y[h - 1] - hby) / hl + 2) as usize;
+    let mut hum = vec![0f32; hnx * hny];
+    for j in 0..hny {
+        for i in 0..hnx {
+            let wx = (hbx + i as i64 * hl) * step;
+            let wy = (hby + j as i64 * hl) * step;
+            hum[j * hnx + i] = wg.humidity(wx, wy) as f32;
         }
     }
-    // Humidité interpolée bilinéairement à une position monde (continue).
-    let humidity_at = |wx: f64, wy: f64| -> f64 {
-        let fx = wx / node_tiles - kx0 as f64;
-        let fy = wy / node_tiles - ky0 as f64;
-        let i0 = (fx.max(0.0) as usize).min(hw - 2);
-        let j0 = (fy.max(0.0) as usize).min(hh - 2);
+    // Humidité bilinéaire au nœud principal (kx, ky).
+    let humidity_at = |kx: i64, ky: i64| -> f64 {
+        let fx = (kx - hbx) as f64 / HUMIDITY_LATTICE as f64;
+        let fy = (ky - hby) as f64 / HUMIDITY_LATTICE as f64;
+        let i0 = (fx as usize).min(hnx - 2);
+        let j0 = (fy as usize).min(hny - 2);
         let (tx, ty) = (fx - i0 as f64, fy - j0 as f64);
-        let at = |i: usize, j: usize| hum[j * hw + i] as f64;
+        let at = |i: usize, j: usize| hum[j * hnx + i] as f64;
         let top = at(i0, j0) + (at(i0 + 1, j0) - at(i0, j0)) * tx;
         let bot = at(i0, j0 + 1) + (at(i0 + 1, j0 + 1) - at(i0, j0 + 1)) * tx;
         top + (bot - top) * ty
     };
 
-    let mut grid = vec![[0u8; 4]; gw * gh];
-    for gy in 0..gh {
-        for gx in 0..gw {
-            let (wx, wy) = tile_at(gx as f64 * stride, gy as f64 * stride, cx, cy, scale, w, h);
-            let s = sample(wg, wx.floor() as i64, wy.floor() as i64, humidity_at(wx, wy));
-            grid[gy * gw + gx] = palette::color(layer, &s);
+    // Cache : une couleur par nœud monde. C'est ici que vit le budget.
+    let mut cache = vec![[0u8; 4]; nx * ny];
+    for j in 0..ny {
+        for i in 0..nx {
+            let (kx, ky) = (kx_min + i as i64, ky_min + j as i64);
+            let s = sample(wg, kx * step, ky * step, humidity_at(kx, ky));
+            cache[j * nx + i] = palette::color(layer, &s);
         }
     }
 
+    // Étirement : chaque pixel prend la couleur du nœud monde qui le contient.
     let mut buf = vec![0u8; w * h * 4];
-    for py in 0..h {
-        let gy = (py as f64 / stride) as usize;
-        for px in 0..w {
-            let gx = (px as f64 / stride) as usize;
-            let c = grid[gy * gw + gx];
-            let i = (py * w + px) * 4;
-            buf[i..i + 4].copy_from_slice(&c);
+    for (py, &ky) in node_y.iter().enumerate() {
+        let j = (ky - ky_min) as usize;
+        for (px, &kx) in node_x.iter().enumerate() {
+            let i = (kx - kx_min) as usize;
+            let o = (py * w + px) * 4;
+            buf[o..o + 4].copy_from_slice(&cache[j * nx + i]);
         }
     }
     buf
@@ -129,31 +144,56 @@ mod tests {
     use super::*;
     use cairn_core::WorldSeed;
 
-    /// À zoom fixe, un pan ne doit pas déformer la carte : le monde sous une
+    /// À zoom fixe, un pan ne doit que **glisser** la carte : le monde sous une
     /// tuile donnée rend la même couleur, où que tombe la caméra. C'est le
-    /// non-régression du maillage d'humidité ancré au monde — avec l'ancien
-    /// maillage ancré à l'écran, les biomes glissaient et ce test échouait.
-    #[test]
-    fn le_pan_ne_deforme_pas_les_biomes() {
+    /// non-régression du maillage ancré au monde. On le vérifie sur deux
+    /// couches : les biomes (dérivés de l'humidité) et la géologie (le
+    /// sel-et-poivre des gisements, le cas le plus sensible au scintillement).
+    fn pan_ne_deforme_pas(layer: Layer) {
         let wg = WorldGen::new(WorldSeed(42));
         let (w, h) = (64usize, 64usize);
-        // scale = 1 px/tuile : une cellule de rendu = une tuile exacte, donc
-        // un décalage entier de caméra est un simple glissement des pixels.
+        // scale = 1 px/tuile : une cellule = une tuile exacte, un décalage
+        // entier de caméra est un simple glissement des pixels.
         let scale = 1.0;
         let shift = 10; // tuiles
-        let a = render_to_buffer(&wg, 1000.0, 1000.0, scale, Layer::Biome, w, h);
-        let b = render_to_buffer(&wg, 1000.0 + shift as f64, 1000.0, scale, Layer::Biome, w, h);
+        let a = render_to_buffer(&wg, 1000.0, 1000.0, scale, layer, w, h);
+        let b = render_to_buffer(&wg, 1000.0 + shift as f64, 1000.0, scale, layer, w, h);
         // La tuile sous le pixel (px+shift) de A est celle sous le pixel px de B.
         for py in 0..h {
             for px in 0..(w - shift) {
                 let ia = (py * w + px + shift) * 4;
                 let ib = (py * w + px) * 4;
-                assert_eq!(
-                    a[ia..ia + 4],
-                    b[ib..ib + 4],
-                    "biome instable au pan en ({px}, {py})"
-                );
+                assert_eq!(a[ia..ia + 4], b[ib..ib + 4], "instable au pan en ({px}, {py})");
             }
         }
+    }
+
+    #[test]
+    fn le_pan_ne_deforme_pas_les_biomes() {
+        pan_ne_deforme_pas(Layer::Biome);
+    }
+
+    #[test]
+    fn le_pan_ne_fait_pas_bouger_les_minerais() {
+        pan_ne_deforme_pas(Layer::Geology);
+    }
+
+    /// Un zoom qui ne franchit pas de frontière de palier (même `step`) ne doit
+    /// pas rééchantillonner : au pixel central, le monde vaut exactement le
+    /// centre caméra, donc le même nœud est vu et la couleur est identique.
+    #[test]
+    fn le_zoom_dans_un_palier_est_stable() {
+        let wg = WorldGen::new(WorldSeed(42));
+        let (w, h) = (200usize, 200usize);
+        let (cx, cy) = (1000.0, 1000.0);
+        let center = ((h / 2) * w + w / 2) * 4;
+        // 0,30 et 0,40 px/tuile tombent dans le même palier (step = 2 ici).
+        let a = render_to_buffer(&wg, cx, cy, 0.30, Layer::Geology, w, h);
+        let b = render_to_buffer(&wg, cx, cy, 0.40, Layer::Geology, w, h);
+        assert_eq!(
+            a[center..center + 4],
+            b[center..center + 4],
+            "zoom instable dans un même palier de LOD"
+        );
     }
 }
