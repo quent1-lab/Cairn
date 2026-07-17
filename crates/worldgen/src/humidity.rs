@@ -15,10 +15,23 @@
 //! altitude et vent. Coût : `steps` évaluations d'altitude par requête —
 //! cher ; sera calculé sur macro-grille et mis en cache au chunking.
 
+use std::cell::RefCell;
+
 use cairn_core::scale::km_to_tiles;
 
 use crate::altitude::AltitudeField;
 use crate::wind::WindField;
+
+thread_local! {
+    // Tampon de travail de l'advection, réutilisé d'un appel à l'autre pour
+    // éviter une allocation tas par échantillon (le rendu du client en
+    // produirait des dizaines de milliers par image). `thread_local!` donne un
+    // tampon propre à chaque thread — donc pas de partage à synchroniser — et
+    // son contenu est intégralement réécrit à chaque appel, sans effet sur le
+    // déterminisme. Le `const { }` rend l'initialiseur constant (idiome depuis
+    // Rust 1.59, plus léger qu'un `lazy` à la première lecture).
+    static PATH_ELEVATIONS: RefCell<Vec<f64>> = const { RefCell::new(Vec::new()) };
+}
 
 pub struct HumidityConfig {
     /// Nombre de pas de la remontée au vent.
@@ -114,34 +127,40 @@ pub fn humidity(
 
 /// Une advection unique : remontée au vent puis transport de l'humidité.
 fn advect(altitude: &AltitudeField, wind: &WindField, cfg: &HumidityConfig, x: f64, y: f64) -> f64 {
-    // 1. Remontée au vent : le chemin qu'a suivi l'air pour arriver ici.
-    // Le déplacement est proportionnel au vent : dans les zones de calme,
-    // l'air ne vient pas de loin — les terres y restent sèches.
-    let mut path = Vec::with_capacity(cfg.steps + 1);
-    let (mut px, mut py) = (x, y);
-    path.push((px, py));
-    for _ in 0..cfg.steps {
-        let (vx, vy) = wind.wind(px.round() as i64, py.round() as i64);
-        px -= vx * cfg.step_tiles;
-        py -= vy * cfg.step_tiles;
-        path.push((px, py));
-    }
+    PATH_ELEVATIONS.with(|scratch| {
+        let elevations = &mut *scratch.borrow_mut();
+        elevations.clear();
 
-    // 2. Rejeu du trajet dans le sens du vent, humidité transportée.
-    let mut moisture: f64 = 0.0;
-    let mut prev_elevation: f64 = 0.0;
-    for &(sx, sy) in path.iter().rev() {
-        let e = altitude.elevation(sx.round() as i64, sy.round() as i64);
-        if e <= 0.0 {
-            moisture += cfg.ocean_evaporation * (1.0 - moisture);
-        } else {
-            moisture += cfg.land_evaporation * (1.0 - moisture);
-            let uplift =
-                (e - prev_elevation.max(0.0) - cfg.orographic_threshold).max(0.0);
-            let rainout = (cfg.base_rainout + cfg.orographic_rainout * uplift).min(1.0);
-            moisture -= moisture * rainout;
+        // 1. Remontée au vent : on retrace le chemin qu'a suivi l'air pour
+        // arriver ici, en relevant l'altitude à chaque pas. Le déplacement est
+        // proportionnel au vent : dans les zones de calme, l'air ne vient pas
+        // de loin — les terres y restent sèches. On mémorise les altitudes
+        // (et non les positions) : c'est tout ce dont le rejeu a besoin, et le
+        // tampon reste réutilisable tel quel.
+        let (mut px, mut py) = (x, y);
+        elevations.push(altitude.elevation(px.round() as i64, py.round() as i64));
+        for _ in 0..cfg.steps {
+            let (vx, vy) = wind.wind(px.round() as i64, py.round() as i64);
+            px -= vx * cfg.step_tiles;
+            py -= vy * cfg.step_tiles;
+            elevations.push(altitude.elevation(px.round() as i64, py.round() as i64));
         }
-        prev_elevation = e;
-    }
-    moisture.clamp(0.0, 1.0)
+
+        // 2. Rejeu du trajet dans le sens du vent (des altitudes les plus en
+        // amont vers le point courant), humidité transportée.
+        let mut moisture: f64 = 0.0;
+        let mut prev_elevation: f64 = 0.0;
+        for &e in elevations.iter().rev() {
+            if e <= 0.0 {
+                moisture += cfg.ocean_evaporation * (1.0 - moisture);
+            } else {
+                moisture += cfg.land_evaporation * (1.0 - moisture);
+                let uplift = (e - prev_elevation.max(0.0) - cfg.orographic_threshold).max(0.0);
+                let rainout = (cfg.base_rainout + cfg.orographic_rainout * uplift).min(1.0);
+                moisture -= moisture * rainout;
+            }
+            prev_elevation = e;
+        }
+        moisture.clamp(0.0, 1.0)
+    })
 }

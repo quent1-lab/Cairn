@@ -68,6 +68,9 @@ struct App {
     layer: Layer,
     /// Dernière position du curseur pendant un glisser (pan), en pixels.
     drag: Option<(f64, f64)>,
+    /// Un rendu est déjà programmé pour la prochaine frame : les événements
+    /// suivants ne font que mettre à jour la caméra, sans en empiler un autre.
+    render_pending: bool,
 }
 
 impl App {
@@ -107,6 +110,7 @@ impl App {
             },
             layer: Layer::Biome,
             drag: None,
+            render_pending: false,
         };
         app.resize();
         Ok(app)
@@ -156,6 +160,32 @@ impl App {
         self.update_readout();
     }
 
+    /// Programme un rendu pour la prochaine frame plutôt que de le faire tout
+    /// de suite. Sans ça, un glisser rapide déclenche bien plus de `mousemove`
+    /// qu'un rendu ne peut en absorber : ils s'empilent et la carte « traîne »
+    /// derrière le curseur. Ici on *coalesce* — quel que soit le nombre
+    /// d'événements, un seul rendu par frame, avec la caméra la plus à jour.
+    fn request_render(&mut self) {
+        if self.render_pending {
+            return;
+        }
+        self.render_pending = true;
+        // `once_into_js` : la closure ne sera appelée qu'une fois (rAF ne
+        // rappelle pas), puis libérée automatiquement par le shim wasm-bindgen
+        // — pas de `forget()` qui fuirait une closure par frame. Elle ne
+        // capture rien qui emprunte APP : le rendu passe par `with_app`, exécuté
+        // plus tard, une fois cet emprunt-ci relâché.
+        let cb = Closure::once_into_js(move || {
+            with_app(|a| {
+                a.render_pending = false;
+                a.render();
+            });
+        });
+        window()
+            .request_animation_frame(cb.unchecked_ref())
+            .expect("request_animation_frame");
+    }
+
     /// Met à jour le bandeau d'information (coordonnées, échelle, couche).
     fn update_readout(&self) {
         if let Some(el) = document().get_element_by_id("readout") {
@@ -180,7 +210,7 @@ impl App {
             self.camera.cx -= (px - lx) / self.camera.scale;
             self.camera.cy -= (py - ly) / self.camera.scale;
             self.drag = Some((px, py));
-            self.render();
+            self.request_render();
         }
     }
 
@@ -197,17 +227,17 @@ impl App {
         // Recale le centre pour que (wx, wy) retombe sous (mx, my).
         self.camera.cx = wx - (mx - self.width as f64 / 2.0) / self.camera.scale;
         self.camera.cy = wy - (my - self.height as f64 / 2.0) / self.camera.scale;
-        self.render();
+        self.request_render();
     }
 
     fn on_resize(&mut self) {
         self.resize();
-        self.render();
+        self.request_render();
     }
 
     fn set_layer(&mut self, layer: Layer) {
         self.layer = layer;
-        self.render();
+        self.request_render();
     }
 }
 

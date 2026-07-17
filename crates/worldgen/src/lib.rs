@@ -2,6 +2,12 @@
 //! puis (à venir) hydrologie, biomes, géologie — chaque couche s'appuyant
 //! sur les précédentes (BRIEF §2.2). [`WorldGen`] assemble le pipeline.
 
+// Le `thread_local!` d'humidité utilise déjà `const { }`, mais ce lint
+// (clippy 1.97) se déclenche à tort sur la macro elle-même ; un `#[allow]`
+// sur l'item ne couvre pas l'expansion, d'où l'allow au niveau du crate —
+// même décision que dans `cairn-client`.
+#![allow(clippy::missing_const_for_thread_local)]
+
 pub mod altitude;
 pub mod biomes;
 pub mod fbm;
