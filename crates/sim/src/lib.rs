@@ -19,6 +19,7 @@ pub mod chunk;
 pub mod climate;
 pub mod curves;
 pub mod ecology;
+pub mod fauna;
 pub mod sim;
 pub mod tile;
 pub mod world;
@@ -26,6 +27,7 @@ pub mod world;
 pub use agent::{Activity, AgentId, Behavior, DeathCause, Physiology, Position, Task, TaskKind};
 pub use chunk::{CHUNK_AREA, CHUNK_SIZE, Chunk, ChunkCoord};
 pub use climate::Climate;
+pub use fauna::{FaunaId, Herd, HerdState, Pack};
 pub use sim::{DeathRecord, Sim};
 pub use tile::{Tile, TileFlags};
 pub use world::World;
@@ -43,4 +45,6 @@ pub(crate) mod salt {
     pub const ECOLOGY: u64 = 1002;
     /// Errance : direction des déplacements exploratoires.
     pub const WANDER: u64 = 1003;
+    /// Faune : dispersion des migrations et des scissions de troupeaux.
+    pub const FAUNA: u64 = 1004;
 }

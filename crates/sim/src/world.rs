@@ -141,23 +141,43 @@ impl World {
     }
 
     /// Évince les chunks les moins récemment accédés jusqu'à revenir sous la
-    /// capacité. `keep` (celui qu'on vient de charger) n'est jamais évincé,
-    /// ni aucun chunk sale. Si tout est sale ou protégé, la capacité est
-    /// dépassée en silence : perdre de l'état simulé serait pire.
+    /// capacité. `keep` (celui qu'on vient de charger) n'est jamais évincé.
+    ///
+    /// **Politique en deux temps.** On sacrifie d'abord les chunks **propres**
+    /// (régénérables sans perte) ; ce n'est que si tous les résidents restants
+    /// sont sales qu'on évince un chunk sale, en LRU.
+    ///
+    /// Évincer un chunk sale « perd » sa biomasse broutée — mais c'est le
+    /// chunk le **moins récemment touché**, donc sans troupeau ni agent depuis
+    /// longtemps : sur ce laps, la repousse l'aurait de toute façon ramené
+    /// près du baseline. Le régénérer, c'est le **rattrapage analytique** du
+    /// LOD temporel (§8.2), en instantané plutôt que graduel. Ce qui compte
+    /// pour la surchasse — l'effectif des troupeaux — vit dans des entités,
+    /// jamais évincées. La mémoire reste ainsi **bornée** quoi qu'il arrive,
+    /// au lieu de déborder puis de thrasher (mesuré : 0,6 tick/s au débordement
+    /// contre 15 sous la capacité).
     fn evict_down_to_capacity(&mut self, keep: ChunkCoord) {
+        // 1er temps : les propres.
+        self.evict_pass(keep, false);
+        // 2e temps, si toujours au-dessus : les sales, à contrecœur.
+        self.evict_pass(keep, true);
+    }
+
+    fn evict_pass(&mut self, keep: ChunkCoord, allow_dirty: bool) {
         while self.chunks.len() > self.capacity {
             // Victime = plus petit tick d'accès. Les ex æquo sont départagés
             // par l'ordre du BTreeMap → déterministe.
             let victim = self
                 .last_access
                 .iter()
-                .filter(|(c, _)| **c != keep && !self.dirty.contains(c))
+                .filter(|(c, _)| **c != keep && (allow_dirty || !self.dirty.contains(c)))
                 .min_by_key(|(_, t)| **t)
                 .map(|(c, _)| *c);
             match victim {
                 Some(c) => {
                     self.chunks.remove(&c);
                     self.last_access.remove(&c);
+                    self.dirty.remove(&c);
                     self.evicted += 1;
                 }
                 None => break,
@@ -262,17 +282,30 @@ mod tests {
     }
 
     #[test]
-    fn un_chunk_modifie_n_est_jamais_evince() {
-        let mut world = World::new(WorldSeed(42), 4);
-        // Modifie une tuile : le chunk devient sale.
+    fn un_chunk_sale_est_prefere_aux_propres_a_l_eviction() {
+        // Capacité 8 : un chunk sale et assez de propres pour absorber la
+        // pression. Le sale doit survivre — on sacrifie les propres d'abord.
+        let mut world = World::new(WorldSeed(42), 8);
         world.tile_mut(100, 200).biomass = 7;
-        // Sature le LRU bien au-delà de la capacité.
-        for cx in 50..90 {
+        for cx in 50..70 {
             world.chunk(ChunkCoord { x: cx, y: cx });
         }
-        // La mutation a survécu : le chunk sale n'a pas été régénéré.
-        assert_eq!(world.tile(100, 200).biomass, 7);
+        assert_eq!(world.tile(100, 200).biomass, 7, "le sale a été régénéré à tort");
         assert_eq!(world.dirty_count(), 1);
+        assert!(world.loaded() <= 8, "mémoire non bornée : {}", world.loaded());
+    }
+
+    #[test]
+    fn sous_pression_maximale_la_memoire_reste_bornee() {
+        // Plus de chunks sales que la capacité : on ne peut pas tous les
+        // retenir sans déborder. La mémoire prime — on évince des sales.
+        let mut world = World::new(WorldSeed(42), 4);
+        for cx in 0..20 {
+            // Chaque tile_mut salit un chunk distinct.
+            world.tile_mut(cx * 64, 0).biomass = 1;
+        }
+        assert!(world.loaded() <= 4, "capacité dépassée : {}", world.loaded());
+        assert!(world.evicted >= 16, "des sales auraient dû être évincés");
     }
 
     #[test]

@@ -9,15 +9,17 @@
 //! Usage : cargo run --release -p cairn-sim --example life_demo -- [seed] [années] [agents]
 
 use cairn_core::{TICKS_PER_DAY, TICKS_PER_YEAR, WorldSeed, km_to_tiles};
-use cairn_sim::{AgentId, DeathCause, Physiology, Position, Sim};
+use cairn_sim::{AgentId, DeathCause, Herd, Pack, Physiology, Position, Sim, fauna};
 use cairn_worldgen::Biome;
 
-/// Chunks résidents : ~384 Mio. Doit dépasser le working set de la
-/// population (agents + fenêtres de fourrage) **plus** les chunks sales
-/// (retenus tant que la repousse ne les a pas ramenés au baseline), sinon le
-/// LRU thrash. Prochain incrément : évincer les sales en ne gardant que
-/// leurs deltas + rattrapage analytique à la régénération (LOD temporel).
-const CHUNK_CAPACITY: usize = 6144;
+/// Chunks résidents : ~520 Mio (dans la cible 2 Go du brief). Doit couvrir le
+/// **plateau** de chunks sales de la scène — mesuré : la biomasse broutée et
+/// fourragée sature vers ~8 500 chunks marqués, avec une croissance qui
+/// décélère (l'empreinte spatiale de la population se stabilise). Trop juste,
+/// et l'éviction bornée se met à sacrifier des chunks encore lus → thrash
+/// (0,8 tick/s contre 6). Prochain incrément perf : persister les deltas des
+/// chunks sales pour les évincer proprement (LOD temporel §8.2).
+const CHUNK_CAPACITY: usize = 16384;
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -59,11 +61,44 @@ fn main() {
             }
         }
     }
-    println!("{placed} agents lâchés dans un rayon de {} m\n", ring * 12 * 2);
+    println!("{placed} agents lâchés dans un rayon de {} m", ring * 12 * 2);
+
+    // Le gibier : semé sur une grille autour du foyer, à ~1,5 km de pas, sur
+    // les terres seulement. Densité de départ, pas plafond : la suite est
+    // affaire de pâture, de prédateurs et de chasseurs.
+    let pas = km_to_tiles(1.5) as i64;
+    let mut troupeaux = 0;
+    for gy in -3..=3i64 {
+        for gx in -3..=3i64 {
+            let (x, y) = (ox + gx * pas, oy + gy * pas);
+            if sim.world.tile(x, y).is_walkable() && sim.world.tile(x, y).biomass > 40 {
+                sim.spawn_herd(x as f64, y as f64, fauna::HERD_START);
+                troupeaux += 1;
+            }
+        }
+    }
+    // Quelques meutes, loin du campement : elles trouveront le gibier seules.
+    let mut meutes = 0;
+    for i in 0..4i64 {
+        let angle = i as f64 * 1.57;
+        let (x, y) = (
+            ox + (angle.cos() * km_to_tiles(4.0)) as i64,
+            oy + (angle.sin() * km_to_tiles(4.0)) as i64,
+        );
+        if sim.world.tile(x, y).is_walkable() {
+            sim.spawn_pack(x as f64, y as f64, fauna::PACK_START);
+            meutes += 1;
+        }
+    }
+    let (gibier0, predateurs0, _, _) = sim.fauna_census();
+    println!(
+        "{troupeaux} troupeaux ({gibier0:.0} têtes) et {meutes} meutes ({predateurs0:.0} bêtes) alentour\n"
+    );
 
     println!(
-        "{:>4} {:>6} | {:>5} {:>5} {:>5} | {:>5} {:>5} {:>5} | {:>7} {:>7}",
-        "mois", "pop", "faim", "soif", "froid", "†faim", "†soif", "†froid", "générés", "sales"
+        "{:>4} {:>5} | {:>5} {:>5} {:>5} | {:>5} {:>5} {:>5} | {:>6} {:>6} {:>6} | {:>6}",
+        "mois", "pop", "faim", "soif", "froid", "†faim", "†soif", "†froid",
+        "gibier", "loc3km", "prises", "préda"
     );
 
     let start = std::time::Instant::now();
@@ -71,7 +106,7 @@ fn main() {
     for tick in 0..total_ticks {
         sim.step();
         if (tick + 1) % (30 * TICKS_PER_DAY) == 0 {
-            report(&sim, (tick + 1) / (30 * TICKS_PER_DAY));
+            report(&sim, (tick + 1) / (30 * TICKS_PER_DAY), origin);
         }
     }
     let elapsed = start.elapsed();
@@ -82,6 +117,21 @@ fn main() {
         "\nBilan : {alive}/{placed} vivants après {years} an(s) — morts : {} faim, {} soif, {} froid",
         starved, dehydrated, frozen
     );
+    let (gibier, predateurs, troupeaux_fin, meutes_fin) = sim.fauna_census();
+    let local = local_herbivores(&sim, origin, 3.0);
+    println!(
+        "Faune : {gibier:.0} têtes en {troupeaux_fin} troupeaux (départ {gibier0:.0}), \
+         dont {local:.0} à moins de 3 km du foyer ; {predateurs:.0} prédateurs en {meutes_fin} meutes ; \
+         {:.0} têtes chassées",
+        sim.hunted_head
+    );
+    if gibier0 > 0.0 {
+        let pression = local / gibier0 * 100.0;
+        println!(
+            "Surchasse locale : le foyer retient {pression:.0} % du gibier initial \
+             (le reste est mort ou a fui hors de portée)"
+        );
+    }
     println!(
         "{} ticks en {:.1} s ({:.0} ticks/s) — {} chunks générés, {} évincés, {} sales",
         total_ticks,
@@ -155,7 +205,7 @@ fn death_counts(sim: &Sim) -> (usize, usize, usize) {
     c
 }
 
-fn report(sim: &Sim, month: u64) {
+fn report(sim: &Sim, month: u64, origin: (i64, i64)) {
     let mut n = 0usize;
     let (mut hunger, mut thirst, mut cold) = (0.0f32, 0.0, 0.0);
     for (_, phys) in sim.agents.query::<&Physiology>().iter() {
@@ -166,8 +216,9 @@ fn report(sim: &Sim, month: u64) {
     }
     let mean = |v: f32| if n > 0 { v / n as f32 } else { 0.0 };
     let (starved, dehydrated, frozen) = death_counts(sim);
+    let (gibier, predateurs, _, _) = sim.fauna_census();
     println!(
-        "{:>4} {:>6} | {:>5.2} {:>5.2} {:>5.2} | {:>5} {:>5} {:>5} | {:>7} {:>7}",
+        "{:>4} {:>5} | {:>5.2} {:>5.2} {:>5.2} | {:>5} {:>5} {:>5} | {:>6.0} {:>6.0} {:>6.0} | {:>6.0}",
         month,
         n,
         mean(hunger),
@@ -176,9 +227,23 @@ fn report(sim: &Sim, month: u64) {
         starved,
         dehydrated,
         frozen,
-        sim.world.generated,
-        sim.world.dirty_count(),
+        gibier,
+        local_herbivores(sim, origin, 3.0),
+        sim.hunted_head,
+        predateurs,
     );
+}
+
+/// Cheptel dans un rayon de `radius_km` autour d'un point — l'observable de
+/// la surchasse locale.
+fn local_herbivores(sim: &Sim, center: (i64, i64), radius_km: f64) -> f32 {
+    let r = km_to_tiles(radius_km);
+    sim.fauna
+        .query::<(&Herd, &Position)>()
+        .iter()
+        .filter(|(_, (_, p))| (p.x - center.0 as f64).hypot(p.y - center.1 as f64) < r)
+        .map(|(_, (h, _))| h.population)
+        .sum()
 }
 
 /// Carte PNG du campement : biomes assombris par la biomasse manquante,
@@ -239,6 +304,18 @@ fn render_map(sim: &mut Sim, origin: (i64, i64), seed: u64) {
     }
     for d in &sim.deaths {
         mark(d.pos.0, d.pos.1, [10, 10, 10], 1);
+    }
+    // Le gibier en fauve, les prédateurs en violet : la taille du carré suit
+    // l'effectif du groupe.
+    for (_, (herd, pos)) in sim.fauna.query::<(&Herd, &Position)>().iter() {
+        let (x, y) = pos.tile();
+        let size = 2 + (herd.population / 25.0) as i64;
+        mark(x, y, [200, 150, 60], size.min(5));
+    }
+    for (_, (pack, pos)) in sim.fauna.query::<(&Pack, &Position)>().iter() {
+        let (x, y) = pos.tile();
+        let size = 2 + (pack.population / 5.0) as i64;
+        mark(x, y, [170, 70, 200], size.min(5));
     }
     let agents: Vec<(AgentId, Position)> = sim
         .agents

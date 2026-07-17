@@ -12,11 +12,12 @@
 //! voisinage à chaque délibération. La carte mentale individuelle (savoir où
 //! était l'eau il y a dix jours) est le cœur de la Phase 3.
 
-use cairn_core::{Pcg32, SimTime, splitmix64};
+use cairn_core::{Pcg32, SimTime, km_to_tiles, splitmix64};
 use cairn_worldgen::Biome;
 
 use crate::agent::{AgentId, Physiology, Position, Task, TaskKind, WALK_TILES_PER_TICK};
 use crate::curves::{Curve, softmax_pick};
+use crate::fauna::HerdView;
 use crate::salt;
 use crate::world::World;
 
@@ -45,6 +46,9 @@ const SHELTER_STRIDE: i64 = 4;
 const WANDER_LEG_TILES: f64 = 250.0;
 /// En dessous de cette biomasse, une tuile ne vaut pas le déplacement.
 const FORAGE_MIN_BIOMASS: u8 = 5;
+/// Distance à laquelle un chasseur repère du gibier (~2 km). Large : c'est
+/// une bête de plusieurs centaines de kilos dans un paysage ouvert.
+const HERD_SIGHT_TILES: f64 = km_to_tiles(2.0);
 
 /// Choisit la prochaine tâche de l'agent. Déterministe : le tirage dérive de
 /// (seed, tick, id agent) — deux exécutions rejouent la même hésitation.
@@ -55,6 +59,7 @@ pub fn decide(
     pos: &Position,
     phys: &Physiology,
     current: Option<TaskKind>,
+    herds: &[HerdView],
 ) -> Option<Task> {
     let here = pos.tile();
     let mut candidates: Vec<(TaskKind, (i64, i64), f32)> = Vec::new();
@@ -77,6 +82,21 @@ pub fn decide(
         candidates.push((TaskKind::Forage, forage_target, score));
     }
 
+    // — Chasser : même pression de faim que la cueillette, mais une prise
+    //   nourrit bien davantage. Le gibier proche et nombreux attire ; quand
+    //   les troupeaux ont été décimés ou ont fui, ce candidat s'efface tout
+    //   seul et la faim repart sur la cueillette ou l'errance. C'est de là
+    //   que sort le suivi des troupeaux — rien ne dit « suis le gibier ».
+    let nearest_herd = nearest_herd(pos, herds);
+    if let Some(herd) = nearest_herd {
+        let target = (herd.pos.0.floor() as i64, herd.pos.1.floor() as i64);
+        let urgency = Curve::Logistic { steepness: 6.0, midpoint: 0.4 }.eval(phys.hunger);
+        // Un gros troupeau est une proie plus sûre (plus de bêtes à approcher).
+        let size = Curve::Power { k: 0.5 }.eval(herd.population / 60.0);
+        let score = urgency * (0.55 + 0.45 * size) * travel_discount(pos.distance_tiles(target));
+        candidates.push((TaskKind::Hunt, target, score));
+    }
+
     // — Dormir : sur place, surtout la nuit ; la fatigue extrême s'impose.
     let night_factor = if time.is_night() { 1.15 } else { 0.55 };
     let sleep_score = Curve::Power { k: 2.5 }.eval(phys.fatigue) * night_factor;
@@ -97,7 +117,9 @@ pub fn decide(
     if spring.is_none() {
         desperation += 0.6 * phys.thirst;
     }
-    if forage_biomass < 30 {
+    // La faim ne pousse à partir que si **ni** la cueillette **ni** le gibier
+    // ne répondent ici : c'est ce qui vide une zone surchassée et surpâturée.
+    if forage_biomass < 30 && nearest_herd.is_none() {
         desperation += 0.5 * phys.hunger;
     }
     let wander_score = (0.06 + desperation).min(1.0);
@@ -129,6 +151,19 @@ pub fn decide(
 /// Décote de trajet : 1 à distance nulle, ½ à une heure de marche.
 fn travel_discount(dist_tiles: f64) -> f32 {
     (1.0 / (1.0 + dist_tiles / WALK_TILES_PER_TICK)) as f32
+}
+
+/// Le troupeau visible le plus proche. Départage déterministe : distance,
+/// puis ordre de l'instantané.
+fn nearest_herd(pos: &Position, herds: &[HerdView]) -> Option<HerdView> {
+    let mut best: Option<(f64, HerdView)> = None;
+    for h in herds {
+        let d2 = (pos.x - h.pos.0).powi(2) + (pos.y - h.pos.1).powi(2);
+        if d2 <= HERD_SIGHT_TILES * HERD_SIGHT_TILES && best.is_none_or(|(bd, _)| d2 < bd) {
+            best = Some((d2, *h));
+        }
+    }
+    best.map(|(_, h)| h)
 }
 
 /// La tuile la plus fournie en biomasse autour de `from` (échantillonnage en

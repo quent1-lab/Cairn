@@ -83,6 +83,7 @@ pub enum Activity {
     Drinking,
     Sleeping,
     Sheltering,
+    Hunting,
 }
 
 /// Tâche persistante de moyen terme (BRIEF §4 : on ne re-délibère pas à
@@ -98,6 +99,9 @@ pub struct Task {
 pub enum TaskKind {
     Drink,
     Forage,
+    /// Chasser un troupeau : bien plus nourrissant que la cueillette, mais il
+    /// faut rejoindre du gibier qui fuit.
+    Hunt,
     Sleep,
     Shelter,
     Wander,
