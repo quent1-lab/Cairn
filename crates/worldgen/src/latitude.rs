@@ -42,6 +42,35 @@ impl Latitude {
         1.0 - (1.0 - u).abs()
     }
 
+    /// Latitude **signée** dans [-1, 1] : onde triangulaire de période
+    /// **double** de celle de [`fraction`](Self::fraction), qui alterne
+    /// bandes « nord » (pôle à +1) et « sud » (pôle à -1).
+    ///
+    /// C'est la donnée dont les **saisons** ont besoin : le décalage
+    /// saisonnier vaut `-ℓ·A·cos(2π·phase)`, donc deux bandes voisines (de
+    /// part et d'autre d'un équateur) ont des saisons **opposées** — comme
+    /// les hémisphères terrestres — tandis que la fonction reste continue en
+    /// franchissant un pôle (pas de saut d'hiver à été au point le plus
+    /// froid du monde). Invariant : `|signed_fraction(y)| == fraction(y)`.
+    pub fn signed_fraction(&self, y: i64) -> f64 {
+        let full = self.period * 2.0;
+        // Même précaution que half_cycle : réduction modulo en i64 quand la
+        // période est entière, pour rester exact sur tout l'axe.
+        let reduced = if self.period.fract() == 0.0 && self.period >= 1.0 {
+            (y.rem_euclid(2 * self.period as i64)) as f64
+        } else {
+            (y as f64).rem_euclid(full)
+        };
+        let t = reduced / full; // [0, 1) sur le cycle complet à deux bandes
+        if t < 0.25 {
+            4.0 * t
+        } else if t < 0.75 {
+            2.0 - 4.0 * t
+        } else {
+            4.0 * t - 4.0
+        }
+    }
+
     /// Direction du pôle le plus proche le long de y : +1.0 ou -1.0.
     pub fn pole_direction(&self, y: i64) -> f64 {
         if self.half_cycle(y) < 1.0 { 1.0 } else { -1.0 }
@@ -72,6 +101,28 @@ mod tests {
         assert_eq!(lat.pole_direction(-250), -1.0);
         // Au-delà du pôle, on redescend vers l'équateur suivant.
         assert_eq!(lat.pole_direction(750), -1.0);
+    }
+
+    #[test]
+    fn latitude_signee_alterne_les_bandes_et_reste_continue() {
+        let lat = Latitude::new(1000.0);
+        // Pôle de la bande « nord » : +1 ; pôle de la bande suivante : -1.
+        assert_eq!(lat.signed_fraction(500), 1.0);
+        assert_eq!(lat.signed_fraction(1500), -1.0);
+        // Nulle sur tous les équateurs.
+        assert_eq!(lat.signed_fraction(0), 0.0);
+        assert_eq!(lat.signed_fraction(1000), 0.0);
+        assert_eq!(lat.signed_fraction(2000), 0.0);
+        // |signée| == fraction, partout.
+        for y in [-1500, -250, 0, 137, 500, 999, 1001, 1750, 3250] {
+            assert!(
+                (lat.signed_fraction(y).abs() - lat.fraction(y)).abs() < 1e-12,
+                "désaccord en y={y}"
+            );
+        }
+        // Continue en franchissant un pôle : pas de saut de signe.
+        assert!((lat.signed_fraction(499) - lat.signed_fraction(501)).abs() < 0.01);
+        assert!((lat.signed_fraction(1499) - lat.signed_fraction(1501)).abs() < 0.01);
     }
 
     #[test]

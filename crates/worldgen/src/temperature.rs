@@ -74,6 +74,14 @@ impl TemperatureField {
         }
     }
 
+    /// La latitude dont dérive cette couche. Exposée pour que la simulation
+    /// calcule les **saisons** avec exactement la même géométrie du monde —
+    /// une deuxième `Latitude` construite ailleurs pourrait diverger de la
+    /// période réelle.
+    pub fn latitude(&self) -> Latitude {
+        self.latitude
+    }
+
     /// Température moyenne annuelle en °C au point (x, y).
     ///
     /// `elevation` est l'élévation normalisée fournie par

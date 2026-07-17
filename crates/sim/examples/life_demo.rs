@@ -1,0 +1,285 @@
+//! Démo de la Phase 2 : une population lâchée dans un coin tempéré du monde,
+//! un an de simulation, zéro intervention.
+//!
+//! C'est le banc de **calibrage** du brief : si tout le monde meurt, le monde
+//! est trop dur ; si personne ne meurt, il est trop mou. La sortie donne un
+//! rapport mensuel (population, morts par cause, besoins moyens) puis un
+//! verdict face au critère d'acceptation, et rend une carte PNG du campement.
+//!
+//! Usage : cargo run --release -p cairn-sim --example life_demo -- [seed] [années] [agents]
+
+use cairn_core::{TICKS_PER_DAY, TICKS_PER_YEAR, WorldSeed, km_to_tiles};
+use cairn_sim::{AgentId, DeathCause, Physiology, Position, Sim};
+use cairn_worldgen::Biome;
+
+/// Chunks résidents : ~384 Mio. Doit dépasser le working set de la
+/// population (agents + fenêtres de fourrage) **plus** les chunks sales
+/// (retenus tant que la repousse ne les a pas ramenés au baseline), sinon le
+/// LRU thrash. Prochain incrément : évincer les sales en ne gardant que
+/// leurs deltas + rattrapage analytique à la régénération (LOD temporel).
+const CHUNK_CAPACITY: usize = 6144;
+
+fn main() {
+    let mut args = std::env::args().skip(1);
+    let seed: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(42);
+    let years: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(1);
+    let n_agents: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(100);
+
+    println!("— Cairn, Phase 2 : LA VIE — seed {seed}, {years} an(s), {n_agents} agents\n");
+
+    let mut sim = Sim::new(WorldSeed(seed), CHUNK_CAPACITY);
+    let origin = find_home(&mut sim);
+    let (ox, oy) = origin;
+    let tile = sim.world.tile(ox, oy);
+    println!(
+        "Foyer retenu : ({ox}, {oy}) — {:?}, {:.1} °C de moyenne annuelle",
+        tile.biome, tile.temperature
+    );
+
+    // Semis déterministe : une grille de pas 12 tuiles autour du foyer, en
+    // sautant l'eau. Pas besoin d'aléa — le monde s'en charge.
+    let mut placed = 0;
+    let mut ring = 0i64;
+    'outer: while placed < n_agents {
+        ring += 1;
+        let r = ring * 12;
+        for dy in (-r..=r).step_by(12) {
+            for dx in (-r..=r).step_by(12) {
+                if dx.abs() < r && dy.abs() < r {
+                    continue; // seulement la couronne du ring courant
+                }
+                let (x, y) = (ox + dx, oy + dy);
+                if sim.world.tile(x, y).is_walkable() {
+                    sim.spawn_agent(x as f64 + 0.5, y as f64 + 0.5);
+                    placed += 1;
+                    if placed >= n_agents {
+                        break 'outer;
+                    }
+                }
+            }
+        }
+    }
+    println!("{placed} agents lâchés dans un rayon de {} m\n", ring * 12 * 2);
+
+    println!(
+        "{:>4} {:>6} | {:>5} {:>5} {:>5} | {:>5} {:>5} {:>5} | {:>7} {:>7}",
+        "mois", "pop", "faim", "soif", "froid", "†faim", "†soif", "†froid", "générés", "sales"
+    );
+
+    let start = std::time::Instant::now();
+    let total_ticks = years * TICKS_PER_YEAR;
+    for tick in 0..total_ticks {
+        sim.step();
+        if (tick + 1) % (30 * TICKS_PER_DAY) == 0 {
+            report(&sim, (tick + 1) / (30 * TICKS_PER_DAY));
+        }
+    }
+    let elapsed = start.elapsed();
+
+    let (starved, dehydrated, frozen) = death_counts(&sim);
+    let alive = sim.population();
+    println!(
+        "\nBilan : {alive}/{placed} vivants après {years} an(s) — morts : {} faim, {} soif, {} froid",
+        starved, dehydrated, frozen
+    );
+    println!(
+        "{} ticks en {:.1} s ({:.0} ticks/s) — {} chunks générés, {} évincés, {} sales",
+        total_ticks,
+        elapsed.as_secs_f64(),
+        total_ticks as f64 / elapsed.as_secs_f64(),
+        sim.world.generated,
+        sim.world.evicted,
+        sim.world.dirty_count(),
+    );
+
+    let dead = placed - alive;
+    let verdict = if alive == 0 {
+        "ÉCHEC : extinction — le monde est trop dur (ou le foyer mal choisi)."
+    } else if dead == 0 {
+        "TROP MOU : aucune mort — la pression de sélection est nulle."
+    } else {
+        "OK : mortalité non nulle et non totale — critère Phase 2 rempli."
+    };
+    println!("\nVerdict : {verdict}");
+
+    render_map(&mut sim, origin, seed);
+}
+
+/// Cherche un foyer tempéré : prairie ou forêt tempérée, douceur annuelle,
+/// et une source d'eau à portée. Balayage déterministe en anneaux de 20 km.
+fn find_home(sim: &mut Sim) -> (i64, i64) {
+    let step = km_to_tiles(20.0) as i64;
+    for ring in 0..120i64 {
+        let r = ring * step;
+        let mut candidates = Vec::new();
+        if ring == 0 {
+            candidates.push((0, 0));
+        } else {
+            for i in (-ring..=ring).map(|i| i * step) {
+                candidates.push((i, -r));
+                candidates.push((i, r));
+                candidates.push((-r, i));
+                candidates.push((r, i));
+            }
+        }
+        for (x, y) in candidates {
+            let wg = sim.world.worldgen();
+            let e = wg.elevation(x, y);
+            if e <= 0.0 {
+                continue;
+            }
+            let t = wg.mean_temperature(x, y, e);
+            if !(6.0..=18.0).contains(&t) {
+                continue;
+            }
+            if !matches!(wg.biome(x, y), Biome::Grassland | Biome::TemperateForest) {
+                continue;
+            }
+            if sim.world.nearest_spring((x, y), 4).is_some() {
+                return (x, y);
+            }
+        }
+    }
+    panic!("aucun foyer habitable trouvé avec cette seed — essayer une autre");
+}
+
+fn death_counts(sim: &Sim) -> (usize, usize, usize) {
+    let mut c = (0, 0, 0);
+    for d in &sim.deaths {
+        match d.cause {
+            DeathCause::Starvation => c.0 += 1,
+            DeathCause::Dehydration => c.1 += 1,
+            DeathCause::Hypothermia => c.2 += 1,
+        }
+    }
+    c
+}
+
+fn report(sim: &Sim, month: u64) {
+    let mut n = 0usize;
+    let (mut hunger, mut thirst, mut cold) = (0.0f32, 0.0, 0.0);
+    for (_, phys) in sim.agents.query::<&Physiology>().iter() {
+        hunger += phys.hunger;
+        thirst += phys.thirst;
+        cold += phys.cold;
+        n += 1;
+    }
+    let mean = |v: f32| if n > 0 { v / n as f32 } else { 0.0 };
+    let (starved, dehydrated, frozen) = death_counts(sim);
+    println!(
+        "{:>4} {:>6} | {:>5.2} {:>5.2} {:>5.2} | {:>5} {:>5} {:>5} | {:>7} {:>7}",
+        month,
+        n,
+        mean(hunger),
+        mean(thirst),
+        mean(cold),
+        starved,
+        dehydrated,
+        frozen,
+        sim.world.generated,
+        sim.world.dirty_count(),
+    );
+}
+
+/// Carte PNG du campement : biomes assombris par la biomasse manquante,
+/// sources en bleu, agents en rouge, lieux de mort en noir. Cadrée sur la
+/// **médiane des survivants** : après un an d'errances, la population peut
+/// s'être déplacée à des kilomètres du point de largage.
+fn render_map(sim: &mut Sim, origin: (i64, i64), seed: u64) {
+    const HALF: i64 = 512; // 1024×1024 tuiles ≈ 2 km de côté
+    let mut xs: Vec<i64> = Vec::new();
+    let mut ys: Vec<i64> = Vec::new();
+    for (_, pos) in sim.agents.query::<&Position>().iter() {
+        let (x, y) = pos.tile();
+        xs.push(x);
+        ys.push(y);
+    }
+    let origin = if xs.is_empty() {
+        origin
+    } else {
+        xs.sort_unstable();
+        ys.sort_unstable();
+        (xs[xs.len() / 2], ys[ys.len() / 2])
+    };
+    let mut img = image::RgbImage::new((2 * HALF) as u32, (2 * HALF) as u32);
+    for py in 0..2 * HALF {
+        for px in 0..2 * HALF {
+            let (x, y) = (origin.0 - HALF + px, origin.1 - HALF + py);
+            let tile = sim.world.tile(x, y);
+            let mut rgb = biome_color(tile.biome);
+            // La consommation se voit : moins de biomasse = plus terne.
+            let k = cairn_sim::tile::baseline_biomass(tile.biome).max(1);
+            let ratio = 0.45 + 0.55 * f32::from(tile.biomass) / f32::from(k);
+            for c in &mut rgb {
+                *c = (f32::from(*c) * ratio.min(1.0)) as u8;
+            }
+            img.put_pixel(px as u32, py as u32, image::Rgb(rgb));
+        }
+    }
+    let mut mark = |x: i64, y: i64, color: [u8; 3], size: i64| {
+        for dy in -size..=size {
+            for dx in -size..=size {
+                let (px, py) = (x - origin.0 + HALF + dx, y - origin.1 + HALF + dy);
+                if (0..2 * HALF).contains(&px) && (0..2 * HALF).contains(&py) {
+                    img.put_pixel(px as u32, py as u32, image::Rgb(color));
+                }
+            }
+        }
+    };
+    // Les sources d'un pixel seraient invisibles : marquées en croix bleues.
+    for cy in (origin.1 - HALF) / 64 - 1..=(origin.1 + HALF) / 64 + 1 {
+        for cx in (origin.0 - HALF) / 64 - 1..=(origin.0 + HALF) / 64 + 1 {
+            let coord = cairn_sim::ChunkCoord { x: cx, y: cy };
+            let (ox, oy) = coord.origin();
+            let springs = sim.world.chunk(coord).springs.clone();
+            for (lx, ly) in springs {
+                mark(ox + lx as i64, oy + ly as i64, [40, 120, 255], 3);
+            }
+        }
+    }
+    for d in &sim.deaths {
+        mark(d.pos.0, d.pos.1, [10, 10, 10], 1);
+    }
+    let agents: Vec<(AgentId, Position)> = sim
+        .agents
+        .query::<(&AgentId, &Position)>()
+        .iter()
+        .map(|(_, (id, p))| (*id, *p))
+        .collect();
+    for (_, p) in &agents {
+        let (x, y) = p.tile();
+        mark(x, y, [230, 40, 40], 2);
+    }
+    if !agents.is_empty() {
+        let xs: Vec<i64> = agents.iter().map(|(_, p)| p.tile().0).collect();
+        let ys: Vec<i64> = agents.iter().map(|(_, p)| p.tile().1).collect();
+        let span_x = xs.iter().max().unwrap() - xs.iter().min().unwrap();
+        let span_y = ys.iter().max().unwrap() - ys.iter().min().unwrap();
+        println!(
+            "Étendue de la population : {:.1} × {:.1} km (dispersion émergente autour des sources)",
+            span_x as f64 * 2.0 / 1000.0,
+            span_y as f64 * 2.0 / 1000.0,
+        );
+    }
+    std::fs::create_dir_all("out").ok();
+    let path = format!("out/life_{seed}.png");
+    img.save(&path).expect("écriture PNG");
+    println!("Carte du campement : {path} (agents en rouge, morts en noir, sources en bleu)");
+}
+
+fn biome_color(biome: Biome) -> [u8; 3] {
+    match biome {
+        Biome::Ocean => [12, 44, 96],
+        Biome::Coast => [24, 74, 140],
+        Biome::Glacier => [225, 235, 245],
+        Biome::Tundra => [150, 160, 145],
+        Biome::Taiga => [55, 95, 75],
+        Biome::ColdDesert => [170, 160, 130],
+        Biome::HotDesert => [210, 185, 120],
+        Biome::Steppe => [165, 160, 95],
+        Biome::Savanna => [180, 165, 80],
+        Biome::Grassland => [110, 150, 70],
+        Biome::TemperateForest => [60, 110, 55],
+        Biome::TropicalForest => [30, 90, 45],
+    }
+}

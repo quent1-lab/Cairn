@@ -2,18 +2,21 @@
 //! nombre borné de chunks, décharge les moins récemment utilisés (LRU).
 //!
 //! C'est la pièce qui rend le monde **infini de fait mais borné en mémoire**
-//! (BRIEF §2.1). L'éviction est sûre tant que les chunks sont du baseline pur :
-//! décharger puis régénérer redonne l'identique. Quand l'état mutable arrivera
-//! (Phase 2+), un chunk modifié devra être persisté avant éviction — sinon on
-//! perd les changements. Marqueur laissé pour ce moment-là.
+//! (BRIEF §2.1). L'éviction est sûre tant qu'un chunk est du baseline pur :
+//! décharger puis régénérer redonne l'identique. Depuis la Phase 2, une tuile
+//! peut être **modifiée** (biomasse consommée…) : le chunk est alors marqué
+//! **sale** et n'est plus jamais évincé — l'évincer perdrait l'état simulé.
+//! Il redevient évincable si la repousse le ramène exactement au baseline.
+//! La persistance des chunks sales (pour lever cette rétention) arrive en
+//! Phase 6.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use cairn_core::WorldSeed;
 use cairn_worldgen::WorldGen;
 
 use crate::chunk::{CHUNK_SIZE, Chunk, ChunkCoord};
-use crate::tile::Tile;
+use crate::tile::{Tile, baseline_biomass, baseline_fertility};
 
 pub struct World {
     worldgen: WorldGen,
@@ -22,6 +25,14 @@ pub struct World {
     chunks: BTreeMap<ChunkCoord, Chunk>,
     /// Tick d'accès le plus récent par chunk, pour le LRU.
     last_access: BTreeMap<ChunkCoord, u64>,
+    /// Chunks modifiés depuis leur génération : non régénérables, donc
+    /// protégés de l'éviction.
+    dirty: BTreeSet<ChunkCoord>,
+    /// Cache des sources d'eau par chunk, calculées **sans** générer le chunk
+    /// (voir `chunk::springs_for`). Jamais évincé : une entrée pèse quelques
+    /// dizaines d'octets, et la requête « où est l'eau ? » porte sur le
+    /// baseline pur — pas besoin de matérialiser des tuiles pour y répondre.
+    springs: BTreeMap<ChunkCoord, Vec<(u8, u8)>>,
     /// Horloge logique : incrémentée à chaque accès.
     clock: u64,
     /// Nombre maximal de chunks résidents.
@@ -37,6 +48,8 @@ impl World {
             worldgen: WorldGen::new(seed),
             chunks: BTreeMap::new(),
             last_access: BTreeMap::new(),
+            dirty: BTreeSet::new(),
+            springs: BTreeMap::new(),
             clock: 0,
             capacity: capacity.max(1),
             generated: 0,
@@ -47,6 +60,20 @@ impl World {
     /// Nombre de chunks actuellement en mémoire.
     pub fn loaded(&self) -> usize {
         self.chunks.len()
+    }
+
+    /// Nombre de chunks retenus car modifiés.
+    pub fn dirty_count(&self) -> usize {
+        self.dirty.len()
+    }
+
+    pub fn seed(&self) -> WorldSeed {
+        self.worldgen.seed()
+    }
+
+    /// Le baseline procédural sous-jacent (lecture seule — il est pur).
+    pub fn worldgen(&self) -> &WorldGen {
+        &self.worldgen
     }
 
     /// Renvoie le chunk demandé, le générant s'il est absent. Marque l'accès
@@ -71,8 +98,52 @@ impl World {
         *self.chunk(coord).tile(lx, ly)
     }
 
+    /// Accès **mutable** à une tuile : marque le chunk sale, donc protégé de
+    /// l'éviction. C'est l'unique porte d'entrée de la simulation vers l'état
+    /// du monde — tout ce qui évolue passe ici.
+    pub fn tile_mut(&mut self, x: i64, y: i64) -> &mut Tile {
+        let (coord, lx, ly) = split(x, y);
+        // S'assure que le chunk est résident (et paie l'éviction éventuelle)…
+        self.chunk(coord);
+        self.dirty.insert(coord);
+        // …puis le remprunte en mutable. `get_mut` ne peut pas échouer :
+        // le chunk vient d'être chargé et `keep` interdit son éviction.
+        self.chunks.get_mut(&coord).unwrap().tile_mut(lx, ly)
+    }
+
+    /// Les chunks actuellement sales, dans l'ordre déterministe du BTreeSet.
+    /// C'est le domaine de travail de l'écologie : seuls eux dévient du
+    /// baseline, donc seuls eux ont quelque chose à faire repousser.
+    pub fn dirty_coords(&self) -> Vec<ChunkCoord> {
+        self.dirty.iter().copied().collect()
+    }
+
+    /// Accès mutable direct à un chunk **déjà résident** (les chunks sales le
+    /// sont toujours). Réservé aux systèmes du crate ; ne marque pas sale.
+    pub(crate) fn chunk_mut(&mut self, coord: ChunkCoord) -> Option<&mut Chunk> {
+        self.chunks.get_mut(&coord)
+    }
+
+    /// Si le chunk est revenu exactement au baseline (repousse complète),
+    /// lève la protection : il redevient régénérable donc évincable.
+    pub(crate) fn clear_dirty_if_pristine(&mut self, coord: ChunkCoord) {
+        let Some(chunk) = self.chunks.get(&coord) else { return };
+        let pristine = (0..CHUNK_SIZE as usize).all(|ly| {
+            (0..CHUNK_SIZE as usize).all(|lx| {
+                let t = chunk.tile(lx, ly);
+                t.biomass == baseline_biomass(t.biome)
+                    && t.soil_fertility == baseline_fertility(t.biome)
+            })
+        });
+        if pristine {
+            self.dirty.remove(&coord);
+        }
+    }
+
     /// Évince les chunks les moins récemment accédés jusqu'à revenir sous la
-    /// capacité. `keep` (celui qu'on vient de charger) n'est jamais évincé.
+    /// capacité. `keep` (celui qu'on vient de charger) n'est jamais évincé,
+    /// ni aucun chunk sale. Si tout est sale ou protégé, la capacité est
+    /// dépassée en silence : perdre de l'état simulé serait pire.
     fn evict_down_to_capacity(&mut self, keep: ChunkCoord) {
         while self.chunks.len() > self.capacity {
             // Victime = plus petit tick d'accès. Les ex æquo sont départagés
@@ -80,7 +151,7 @@ impl World {
             let victim = self
                 .last_access
                 .iter()
-                .filter(|(c, _)| **c != keep)
+                .filter(|(c, _)| **c != keep && !self.dirty.contains(c))
                 .min_by_key(|(_, t)| **t)
                 .map(|(c, _)| *c);
             match victim {
@@ -92,6 +163,48 @@ impl World {
                 None => break,
             }
         }
+    }
+
+    /// Les sources d'eau du chunk, via le cache — sans générer le chunk.
+    fn springs_of(&mut self, coord: ChunkCoord) -> &[(u8, u8)] {
+        if !self.springs.contains_key(&coord) {
+            // Si le chunk est résident, sa liste fait foi (identique par
+            // construction — un test le garantit) ; sinon calcul rapide.
+            let list = match self.chunks.get(&coord) {
+                Some(chunk) => chunk.springs.clone(),
+                None => crate::chunk::springs_for(&self.worldgen, coord),
+            };
+            self.springs.insert(coord, list);
+        }
+        &self.springs[&coord]
+    }
+
+    /// La source d'eau douce la plus proche de `from`, cherchée dans un carré
+    /// de `radius_chunks` chunks autour — quelques listes courtes en cache,
+    /// ni tuiles matérialisées ni pression sur le LRU. Départage
+    /// déterministe : distance, puis (x, y).
+    pub fn nearest_spring(
+        &mut self,
+        from: (i64, i64),
+        radius_chunks: i64,
+    ) -> Option<(i64, i64)> {
+        let (center, _, _) = split(from.0, from.1);
+        let mut best: Option<(i64, (i64, i64))> = None;
+        for cy in (center.y - radius_chunks)..=(center.y + radius_chunks) {
+            for cx in (center.x - radius_chunks)..=(center.x + radius_chunks) {
+                let coord = ChunkCoord { x: cx, y: cy };
+                let (ox, oy) = coord.origin();
+                for &(lx, ly) in self.springs_of(coord) {
+                    let p = (ox + lx as i64, oy + ly as i64);
+                    let d2 = (p.0 - from.0).pow(2) + (p.1 - from.1).pow(2);
+                    let candidate = (d2, p);
+                    if best.is_none_or(|b| candidate < b) {
+                        best = Some(candidate);
+                    }
+                }
+            }
+        }
+        best.map(|(_, p)| p)
     }
 }
 
@@ -146,6 +259,33 @@ mod tests {
         }
         let apres = world.tile(100, 200);
         assert_eq!(avant, apres);
+    }
+
+    #[test]
+    fn un_chunk_modifie_n_est_jamais_evince() {
+        let mut world = World::new(WorldSeed(42), 4);
+        // Modifie une tuile : le chunk devient sale.
+        world.tile_mut(100, 200).biomass = 7;
+        // Sature le LRU bien au-delà de la capacité.
+        for cx in 50..90 {
+            world.chunk(ChunkCoord { x: cx, y: cx });
+        }
+        // La mutation a survécu : le chunk sale n'a pas été régénéré.
+        assert_eq!(world.tile(100, 200).biomass, 7);
+        assert_eq!(world.dirty_count(), 1);
+    }
+
+    #[test]
+    fn un_chunk_revenu_au_baseline_redevient_evincable() {
+        let mut world = World::new(WorldSeed(42), 4);
+        let baseline = world.tile(100, 200).biomass;
+        let (coord, _, _) = split(100, 200);
+        world.tile_mut(100, 200).biomass = 7;
+        world.clear_dirty_if_pristine(coord);
+        assert_eq!(world.dirty_count(), 1, "encore modifié : doit rester sale");
+        world.tile_mut(100, 200).biomass = baseline;
+        world.clear_dirty_if_pristine(coord);
+        assert_eq!(world.dirty_count(), 0, "revenu au baseline : plus sale");
     }
 
     #[test]

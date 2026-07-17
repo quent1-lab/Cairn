@@ -26,6 +26,7 @@ pub struct WorldGen {
     pub wind: WindField,
     pub geology: Geology,
     humidity_cfg: HumidityConfig,
+    seed: WorldSeed,
 }
 
 impl WorldGen {
@@ -40,7 +41,14 @@ impl WorldGen {
             wind: WindField::new(cfg.wind),
             geology: Geology::with_config(seed, cfg.geology),
             humidity_cfg: cfg.humidity,
+            seed,
         }
+    }
+
+    /// La seed du monde. Les consommateurs (chunks, simulation) en dérivent
+    /// leurs propres flux aléatoires via `WorldSeed::derive`.
+    pub fn seed(&self) -> WorldSeed {
+        self.seed
     }
 
     /// Élévation normalisée : [-1, 0) océan, (0, 1] terres.

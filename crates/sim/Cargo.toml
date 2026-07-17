@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 cairn-core.workspace = true
 cairn-worldgen.workspace = true
+hecs.workspace = true
 
 [dev-dependencies]
 image.workspace = true

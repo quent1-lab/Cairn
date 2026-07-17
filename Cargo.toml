@@ -13,3 +13,8 @@ cairn-sim = { path = "crates/sim" }
 noise = "0.9"
 image = { version = "0.25", default-features = false, features = ["png"] }
 rayon = "1"
+# ECS minimaliste (Phase 2, arbitrage BRIEF §10.2 acté avec l'utilisateur) :
+# stockage d'entités spawn/despawn/requêtes — bien au-delà des ~50 lignes
+# maison — sans scheduler imposé : l'ordre des systèmes reste écrit par nous,
+# ce qui garantit le déterminisme.
+hecs = "0.10"

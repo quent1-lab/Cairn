@@ -3,9 +3,11 @@
 
 pub mod rng;
 pub mod scale;
+pub mod time;
 
 pub use rng::{Pcg32, splitmix64};
 pub use scale::{TILE_METERS, km_to_tiles, tiles_to_km};
+pub use time::{DAYS_PER_YEAR, SimTime, TICKS_PER_DAY, TICKS_PER_YEAR};
 
 /// Graine globale du monde. Tout l'aléatoire de la simulation dérive de
 /// cette unique valeur : c'est la garantie du critère « même seed ⇒ monde

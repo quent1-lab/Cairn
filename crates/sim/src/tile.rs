@@ -19,6 +19,9 @@ impl TileFlags {
     pub const COAST: u8 = 1 << 1;
     /// Surface d'eau gelée (mer prise par le froid).
     pub const FROZEN: u8 = 1 << 2;
+    /// Eau douce buvable : source (plus tard rivière, lac). Contrairement à
+    /// WATER (océan, salé), la tuile reste franchissable.
+    pub const FRESH_WATER: u8 = 1 << 3;
 
     pub fn has(self, flag: u8) -> bool {
         self.0 & flag != 0
@@ -55,6 +58,16 @@ pub struct Tile {
 impl Tile {
     pub fn is_water(self) -> bool {
         self.flags.has(TileFlags::WATER)
+    }
+
+    /// Un agent peut-il marcher ici ? L'océan bloque ; une source non.
+    pub fn is_walkable(self) -> bool {
+        !self.flags.has(TileFlags::WATER)
+    }
+
+    /// Peut-on y boire ?
+    pub fn has_fresh_water(self) -> bool {
+        self.flags.has(TileFlags::FRESH_WATER)
     }
 }
 
