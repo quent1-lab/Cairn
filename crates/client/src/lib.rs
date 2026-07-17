@@ -28,8 +28,12 @@ use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData};
 
 use palette::Layer;
 
-/// Zoom minimal et maximal, en pixels par tuile.
-const MIN_SCALE: f64 = 0.02;
+/// Zoom minimal et maximal, en pixels par tuile. Le minimum autorise une vue
+/// à l'échelle continentale (~7000 km de large) : le budget d'échantillons
+/// (`render::MAX_SAMPLES`) borne le coût quel que soit le dézoom, seule cette
+/// constante limitait la portée. Le maximum (32 px/tuile) va jusqu'au gros
+/// plan « village ».
+const MIN_SCALE: f64 = 0.0004;
 const MAX_SCALE: f64 = 32.0;
 
 // État global. WASM est mono-thread : `thread_local!` + `RefCell` est

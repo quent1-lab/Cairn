@@ -65,31 +65,36 @@ pub fn render_to_buffer(
     let gw = (w as f64 / stride).ceil() as usize + 1;
     let gh = (h as f64 / stride).ceil() as usize + 1;
 
-    // Macro-grille d'humidité : un point tous les `HUMIDITY_LATTICE`, avec une
-    // frange de +2 pour que l'interpolation dispose toujours de ses 4 coins,
-    // même sur la dernière cellule.
-    let hw = gw / HUMIDITY_LATTICE + 2;
-    let hh = gh / HUMIDITY_LATTICE + 2;
+    // Macro-grille d'humidité **ancrée sur le monde** (et non sur l'écran) :
+    // ses nœuds sont à des positions fixes en tuiles, indépendantes de la
+    // caméra. Sinon, déplacer la vue ferait glisser le maillage sous le monde
+    // et l'humidité interpolée en une tuile donnée changerait à chaque pan —
+    // donc la classification des biomes « ondulerait ». L'espacement suit le
+    // zoom (≈ `HUMIDITY_LATTICE` cellules de rendu), donc le coût est le même
+    // que la version écran : ~un point d'humidité pour 64 cellules.
+    let world_step = stride / scale; // tuiles entre deux cellules de rendu
+    let node_tiles = (HUMIDITY_LATTICE as f64 * world_step).max(1.0);
+    let (wx0, wy0) = tile_at(0.0, 0.0, cx, cy, scale, w, h);
+    let (wx1, wy1) = tile_at(gw as f64 * stride, gh as f64 * stride, cx, cy, scale, w, h);
+    // Indices de nœud (monde ÷ espacement) couvrant l'écran, +1 nœud de marge.
+    let kx0 = (wx0 / node_tiles).floor() as i64;
+    let ky0 = (wy0 / node_tiles).floor() as i64;
+    let hw = ((wx1 / node_tiles).floor() as i64 - kx0 + 2) as usize;
+    let hh = ((wy1 / node_tiles).floor() as i64 - ky0 + 2) as usize;
     let mut hum = vec![0f32; hw * hh];
-    for hj in 0..hh {
-        for hi in 0..hw {
-            let (wx, wy) = tile_at(
-                (hi * HUMIDITY_LATTICE) as f64 * stride,
-                (hj * HUMIDITY_LATTICE) as f64 * stride,
-                cx,
-                cy,
-                scale,
-                w,
-                h,
-            );
-            hum[hj * hw + hi] = wg.humidity(wx.floor() as i64, wy.floor() as i64) as f32;
+    for j in 0..hh {
+        for i in 0..hw {
+            let wx = ((kx0 + i as i64) as f64 * node_tiles).floor() as i64;
+            let wy = ((ky0 + j as i64) as f64 * node_tiles).floor() as i64;
+            hum[j * hw + i] = wg.humidity(wx, wy) as f32;
         }
     }
-    // Humidité interpolée bilinéairement pour une cellule de la grille de rendu.
-    let humidity_at = |gx: usize, gy: usize| -> f64 {
-        let fx = gx as f64 / HUMIDITY_LATTICE as f64;
-        let fy = gy as f64 / HUMIDITY_LATTICE as f64;
-        let (i0, j0) = (fx as usize, fy as usize);
+    // Humidité interpolée bilinéairement à une position monde (continue).
+    let humidity_at = |wx: f64, wy: f64| -> f64 {
+        let fx = wx / node_tiles - kx0 as f64;
+        let fy = wy / node_tiles - ky0 as f64;
+        let i0 = (fx.max(0.0) as usize).min(hw - 2);
+        let j0 = (fy.max(0.0) as usize).min(hh - 2);
         let (tx, ty) = (fx - i0 as f64, fy - j0 as f64);
         let at = |i: usize, j: usize| hum[j * hw + i] as f64;
         let top = at(i0, j0) + (at(i0 + 1, j0) - at(i0, j0)) * tx;
@@ -101,7 +106,7 @@ pub fn render_to_buffer(
     for gy in 0..gh {
         for gx in 0..gw {
             let (wx, wy) = tile_at(gx as f64 * stride, gy as f64 * stride, cx, cy, scale, w, h);
-            let s = sample(wg, wx.floor() as i64, wy.floor() as i64, humidity_at(gx, gy));
+            let s = sample(wg, wx.floor() as i64, wy.floor() as i64, humidity_at(wx, wy));
             grid[gy * gw + gx] = palette::color(layer, &s);
         }
     }
@@ -117,4 +122,38 @@ pub fn render_to_buffer(
         }
     }
     buf
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cairn_core::WorldSeed;
+
+    /// À zoom fixe, un pan ne doit pas déformer la carte : le monde sous une
+    /// tuile donnée rend la même couleur, où que tombe la caméra. C'est le
+    /// non-régression du maillage d'humidité ancré au monde — avec l'ancien
+    /// maillage ancré à l'écran, les biomes glissaient et ce test échouait.
+    #[test]
+    fn le_pan_ne_deforme_pas_les_biomes() {
+        let wg = WorldGen::new(WorldSeed(42));
+        let (w, h) = (64usize, 64usize);
+        // scale = 1 px/tuile : une cellule de rendu = une tuile exacte, donc
+        // un décalage entier de caméra est un simple glissement des pixels.
+        let scale = 1.0;
+        let shift = 10; // tuiles
+        let a = render_to_buffer(&wg, 1000.0, 1000.0, scale, Layer::Biome, w, h);
+        let b = render_to_buffer(&wg, 1000.0 + shift as f64, 1000.0, scale, Layer::Biome, w, h);
+        // La tuile sous le pixel (px+shift) de A est celle sous le pixel px de B.
+        for py in 0..h {
+            for px in 0..(w - shift) {
+                let ia = (py * w + px + shift) * 4;
+                let ib = (py * w + px) * 4;
+                assert_eq!(
+                    a[ia..ia + 4],
+                    b[ib..ib + 4],
+                    "biome instable au pan en ({px}, {py})"
+                );
+            }
+        }
+    }
 }
