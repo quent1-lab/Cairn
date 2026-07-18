@@ -102,6 +102,8 @@ pub struct Sim {
     pub hunted_head: f32,
     /// Nombre cumulé d'appels A* (observabilité du coût de pathfinding).
     pub path_calls: u64,
+    /// Agent-ticks passés à s'abriter (observabilité du comportement de froid).
+    pub shelter_ticks: u64,
     /// Trajets d'évitement d'eau en cours, par identifiant d'agent.
     routes: BTreeMap<u64, Route>,
     next_agent_id: u64,
@@ -129,6 +131,7 @@ impl Sim {
             deaths: Vec::new(),
             hunted_head: 0.0,
             path_calls: 0,
+            shelter_ticks: 0,
             routes: BTreeMap::new(),
             next_agent_id: 0,
             next_fauna_id: 0,
@@ -248,6 +251,7 @@ impl Sim {
         // 3. Physiologie et morts. On collecte d'abord (on ne peut pas
         // retirer une entité pendant qu'on itère dessus), on retire après.
         let mut dead = Vec::new();
+        let mut sheltered = 0u64;
         for (entity, (id, pos, phys, behavior)) in self
             .agents
             .query_mut::<(&AgentId, &Position, &mut Physiology, &Behavior)>()
@@ -265,6 +269,7 @@ impl Sim {
             }
             if behavior.activity == Activity::Sheltering {
                 felt += SHELTER_BONUS_C;
+                sheltered += 1;
             }
             phys.drift(felt, behavior.activity);
             if phys.is_dead() {
@@ -272,6 +277,7 @@ impl Sim {
                 dead.push((entity, *id, cause, (x, y)));
             }
         }
+        self.shelter_ticks += sheltered;
         for (entity, agent, cause, pos) in dead {
             // Le despawn est hors itération : l'emprunt de la requête est
             // rendu, l'ordre de retrait suit l'ordre de collecte.

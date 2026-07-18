@@ -46,8 +46,10 @@ const CHUNK_CAPACITY: usize = 2048;
 const START_AGENTS: usize = 40;
 
 /// Paliers de vitesse proposés, en **ticks de jeu par seconde réelle**. Un
-/// tick = une heure ; 24 ticks/s = un jour de jeu par seconde.
-const SPEEDS: [f64; 3] = [6.0, 24.0, 96.0];
+/// tick = une heure ; 24 ticks/s = un jour de jeu par seconde. Le plus lent
+/// (1,5) = un jour toutes les ~16 s, pour suivre un agent pas à pas
+/// (l'interpolation le fait glisser, d'autant plus lisse que c'est lent).
+const SPEEDS: [f64; 4] = [1.5, 6.0, 24.0, 96.0];
 /// Plafond de ticks simulés par frame : après un onglet en arrière-plan, on ne
 /// rattrape pas des heures de jeu d'un coup (ça figerait la page).
 const MAX_TICKS_PER_FRAME: u32 = 24;

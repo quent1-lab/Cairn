@@ -9,11 +9,24 @@ use crate::fauna;
 use crate::sim::Sim;
 
 /// Cherche un foyer tempéré (prairie ou forêt tempérée, climat doux, une
-/// source à portée) en spirale depuis `around`. Balayage déterministe en
-/// anneaux de 20 km ; sonde le worldgen sans matérialiser de chunks.
+/// source à portée) en spirale depuis `around`.
 pub fn find_home(sim: &mut Sim, around: (i64, i64)) -> (i64, i64) {
+    find_home_where(sim, around, 6.0..=18.0, &[Biome::Grassland, Biome::TemperateForest])
+        .unwrap_or(around)
+}
+
+/// Cherche un foyer répondant à un climat (fourchette de température moyenne
+/// annuelle) et à un ensemble de biomes, avec une source d'eau à portée. En
+/// spirale depuis `around`, en anneaux de 20 km ; sonde le worldgen sans
+/// matérialiser de chunks. `None` si rien de tel dans le rayon exploré.
+pub fn find_home_where(
+    sim: &mut Sim,
+    around: (i64, i64),
+    temp: std::ops::RangeInclusive<f64>,
+    biomes: &[Biome],
+) -> Option<(i64, i64)> {
     let step = km_to_tiles(20.0) as i64;
-    for ring in 0..200i64 {
+    for ring in 0..300i64 {
         let r = ring * step;
         let mut candidates = Vec::new();
         if ring == 0 {
@@ -32,19 +45,18 @@ pub fn find_home(sim: &mut Sim, around: (i64, i64)) -> (i64, i64) {
             if e <= 0.0 {
                 continue;
             }
-            let t = wg.mean_temperature(x, y, e);
-            if !(6.0..=18.0).contains(&t) {
+            if !temp.contains(&wg.mean_temperature(x, y, e)) {
                 continue;
             }
-            if !matches!(wg.biome(x, y), Biome::Grassland | Biome::TemperateForest) {
+            if !biomes.contains(&wg.biome(x, y)) {
                 continue;
             }
             if sim.world.nearest_spring((x, y), 4).is_some() {
-                return (x, y);
+                return Some((x, y));
             }
         }
     }
-    around
+    None
 }
 
 /// Lâche `agents` humains autour de `home` (grille de pas 12 tuiles, terres
@@ -53,7 +65,7 @@ pub fn find_home(sim: &mut Sim, around: (i64, i64)) -> (i64, i64) {
 pub fn populate(sim: &mut Sim, home: (i64, i64), agents: usize, herd_grid: i64) -> usize {
     let mut placed = 0;
     let mut ring = 0i64;
-    while placed < agents && ring < 200 {
+    'grow: while placed < agents && ring < 200 {
         ring += 1;
         let r = ring * 12;
         for dy in (-r..=r).step_by(12) {
@@ -66,7 +78,7 @@ pub fn populate(sim: &mut Sim, home: (i64, i64), agents: usize, herd_grid: i64) 
                     sim.spawn_agent(x as f64 + 0.5, y as f64 + 0.5);
                     placed += 1;
                     if placed >= agents {
-                        break;
+                        break 'grow; // sortir *toutes* les boucles, sans déborder
                     }
                 }
             }
