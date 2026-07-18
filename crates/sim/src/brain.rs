@@ -126,10 +126,21 @@ pub fn decide(
     let mut wander_rng =
         Pcg32::new(world.seed().derive(salt::WANDER) ^ splitmix64(time.tick), id.0);
     let angle = wander_rng.next_f64() * std::f64::consts::TAU;
-    let wander_target = (
-        (pos.x + angle.cos() * WANDER_LEG_TILES).floor() as i64,
-        (pos.y + angle.sin() * WANDER_LEG_TILES).floor() as i64,
-    );
+    // On vise la **terre** : on avance le long du rayon jusqu'à la dernière
+    // tuile ferme avant l'eau. Sans ça, errer vers l'océan déclenchait un A*
+    // (partiel, coûteux) pour un but inatteignable — cause n°1 de pathfinding
+    // inutile près des côtes.
+    let (dx, dy) = (angle.cos(), angle.sin());
+    let mut wander_target = here;
+    let mut d = 40.0;
+    while d <= WANDER_LEG_TILES {
+        let p = ((pos.x + dx * d).floor() as i64, (pos.y + dy * d).floor() as i64);
+        if world.worldgen().elevation(p.0, p.1) <= 0.0 {
+            break; // eau : on s'arrête à la dernière terre trouvée
+        }
+        wander_target = p;
+        d += 40.0;
+    }
     candidates.push((TaskKind::Wander, wander_target, wander_score));
 
     // — Engagement : la tâche en cours part avec une longueur d'avance.

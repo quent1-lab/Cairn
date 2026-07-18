@@ -22,6 +22,8 @@
 //! même type partagent leur jeu de composants (une seule archétype), l'ordre
 //! est l'ordre d'apparition, et les retraits sont eux-mêmes ordonnés.
 
+use std::collections::BTreeMap;
+
 use cairn_core::{SimTime, TICKS_PER_DAY, WorldSeed};
 use cairn_worldgen::WorldGenConfig;
 
@@ -33,6 +35,7 @@ use crate::brain::{self, DELIBERATION_PERIOD};
 use crate::climate::Climate;
 use crate::ecology;
 use crate::fauna::{self, FaunaId, Herd, HerdView, Kill, Pack};
+use crate::pathfind;
 use crate::world::World;
 
 /// Un agent est « arrivé » sous une tuile et demie de sa cible.
@@ -51,6 +54,31 @@ const HUNT_YIELD_HEAD: f32 = 1.0;
 /// Ce qu'une prise retire de faim : une bête nourrit bien mieux que des
 /// baies — c'est tout l'intérêt du risque et du trajet.
 const HUNT_NUTRITION: f32 = 0.7;
+/// Requêtes A* autorisées par tick (BRIEF §8.2 : « pathfinding budgété »).
+/// Seuls les agents que l'eau bloque en consomment ; les autres marchent en
+/// ligne droite pour rien.
+const PATH_REQUESTS_PER_TICK: u32 = 8;
+
+/// Trajet calculé par l'A* pour contourner l'eau : une suite d'étapes à
+/// rejoindre en ligne droite, vers un `goal` donné. Vit dans une table à côté
+/// de l'ECS (le composant `Behavior` doit rester `Copy`, or un chemin est un
+/// `Vec`).
+struct Route {
+    goal: (i64, i64),
+    waypoints: Vec<(i64, i64)>,
+    cursor: usize,
+}
+
+/// Issue d'un pas de déplacement.
+#[derive(PartialEq, Eq)]
+enum Move {
+    /// Arrivé à moins d'`ARRIVAL_TILES` de la cible.
+    Arrived,
+    /// A progressé ce tick.
+    Moved,
+    /// Bloqué : cerné par l'eau, ou budget d'A* épuisé pour ce tick.
+    Stuck,
+}
 
 /// Trace d'un décès, pour les statistiques — et, un jour, la Chronique.
 #[derive(Debug, Clone, Copy)]
@@ -72,6 +100,10 @@ pub struct Sim {
     /// Têtes de gibier prélevées par les humains depuis le début : le compteur
     /// de la pression de chasse.
     pub hunted_head: f32,
+    /// Nombre cumulé d'appels A* (observabilité du coût de pathfinding).
+    pub path_calls: u64,
+    /// Trajets d'évitement d'eau en cours, par identifiant d'agent.
+    routes: BTreeMap<u64, Route>,
     next_agent_id: u64,
     next_fauna_id: u64,
 }
@@ -96,6 +128,8 @@ impl Sim {
             time: SimTime::default(),
             deaths: Vec::new(),
             hunted_head: 0.0,
+            path_calls: 0,
+            routes: BTreeMap::new(),
             next_agent_id: 0,
             next_fauna_id: 0,
         }
@@ -186,16 +220,30 @@ impl Sim {
 
         // 2. Exécution des tâches. Les chasses réussies sont collectées : on
         // n'entame pas le gibier pendant que les autres délibèrent dessus.
+        // `path_budget` borne le nombre d'A* lancés ce tick (agents bloqués
+        // par l'eau).
         let mut kills: Vec<Kill> = Vec::new();
-        for (_, (pos, phys, behavior)) in self
+        let mut path_budget = PATH_REQUESTS_PER_TICK;
+        for (_, (id, pos, phys, behavior)) in self
             .agents
-            .query_mut::<(&mut Position, &mut Physiology, &mut Behavior)>()
+            .query_mut::<(&AgentId, &mut Position, &mut Physiology, &mut Behavior)>()
         {
-            if let Some(kill) = execute(&mut self.world, pos, phys, behavior, &herds) {
+            let outcome = execute(
+                &mut self.world,
+                &mut self.routes,
+                &mut path_budget,
+                *id,
+                pos,
+                phys,
+                behavior,
+                &herds,
+            );
+            if let Some(kill) = outcome {
                 kills.push(kill);
             }
         }
         self.hunted_head += kills.iter().map(|k| k.head).sum::<f32>();
+        self.path_calls += u64::from(PATH_REQUESTS_PER_TICK - path_budget);
 
         // 3. Physiologie et morts. On collecte d'abord (on ne peut pas
         // retirer une entité pendant qu'on itère dessus), on retire après.
@@ -228,6 +276,7 @@ impl Sim {
             // Le despawn est hors itération : l'emprunt de la requête est
             // rendu, l'ordre de retrait suit l'ordre de collecte.
             let _ = self.agents.despawn(entity);
+            self.routes.remove(&agent.0); // pas de trajet fantôme d'un mort
             self.deaths.push(DeathRecord { tick: time.tick, agent, cause, pos });
         }
 
@@ -281,10 +330,15 @@ impl Sim {
     }
 }
 
-/// Avance la tâche courante d'un agent : marche vers la cible, puis agit.
-/// Renvoie une prise si l'agent a abattu du gibier ce tick.
+/// Avance la tâche courante d'un agent : marche vers la cible (en contournant
+/// l'eau si besoin), puis agit. Renvoie une prise si l'agent a abattu du
+/// gibier ce tick.
+#[allow(clippy::too_many_arguments)]
 fn execute(
     world: &mut World,
+    routes: &mut BTreeMap<u64, Route>,
+    path_budget: &mut u32,
+    id: AgentId,
     pos: &mut Position,
     phys: &mut Physiology,
     behavior: &mut Behavior,
@@ -311,7 +365,7 @@ fn execute(
         let target = (prey.pos.0.floor() as i64, prey.pos.1.floor() as i64);
         if pos.distance_tiles(target) > HUNT_REACH_TILES {
             behavior.activity = Activity::Walking;
-            if !walk_towards(world, pos, target) {
+            if advance(world, routes, path_budget, id, pos, target) == Move::Stuck {
                 behavior.task = None;
             }
             return None;
@@ -325,8 +379,8 @@ fn execute(
     // Phase trajet : la cible est trop loin, on marche (budget d'une heure).
     if pos.distance_tiles(task.target) > ARRIVAL_TILES {
         behavior.activity = Activity::Walking;
-        if !walk_towards(world, pos, task.target) {
-            behavior.task = None; // bloqué (eau) : on re-délibérera
+        if advance(world, routes, path_budget, id, pos, task.target) == Move::Stuck {
+            behavior.task = None; // vraiment cerné : on re-délibérera
         }
         return None;
     }
@@ -391,33 +445,109 @@ fn closest_herd(pos: &Position, herds: &[HerdView]) -> Option<HerdView> {
     best.map(|(_, h)| h)
 }
 
+/// Fait avancer l'agent vers `target` pour ce tick, en gérant l'évitement de
+/// l'eau : ligne droite tant qu'elle passe, A* budgété (via une [`Route`]
+/// persistante) dès qu'elle bute.
+///
+/// Le cas courant — terrain ouvert — ne touche jamais l'A* : on ne paie le
+/// pathfinding que là où la géographie l'exige.
+fn advance(
+    world: &mut World,
+    routes: &mut BTreeMap<u64, Route>,
+    path_budget: &mut u32,
+    id: AgentId,
+    pos: &mut Position,
+    target: (i64, i64),
+) -> Move {
+    // 1. Un trajet en cours vers cette même cible ? On le suit.
+    if let Some(route) = routes.get_mut(&id.0) {
+        if route.goal == target {
+            let outcome = follow_route(world, route, pos, target);
+            if outcome != Move::Stuck {
+                return outcome;
+            }
+            routes.remove(&id.0); // trajet devenu inutile
+            return Move::Stuck;
+        }
+        routes.remove(&id.0); // la cible a changé : trajet périmé
+    }
+
+    // 2. Ligne droite.
+    match walk_line(world, pos, target) {
+        Move::Stuck => {}
+        moved => return moved,
+    }
+
+    // 3. Bloqué par l'eau : calculer un contournement, si le budget le permet.
+    if *path_budget == 0 {
+        return Move::Stuck; // pas ce tick — on retentera, la tâche est gardée
+    }
+    *path_budget -= 1;
+    let is_land = |x: i64, y: i64| world.worldgen().elevation(x, y) > 0.0;
+    match pathfind::astar(pos.tile(), target, is_land, pathfind::NODE_BUDGET) {
+        Some(waypoints) if !waypoints.is_empty() => {
+            let mut route = Route { goal: target, waypoints, cursor: 0 };
+            let outcome = follow_route(world, &mut route, pos, target);
+            routes.insert(id.0, route);
+            outcome
+        }
+        _ => Move::Stuck, // vraiment cerné
+    }
+}
+
+/// Suit un trajet A* : consomme les étapes déjà atteintes, marche vers la
+/// prochaine (ou vers le but exact une fois le trajet épuisé).
+fn follow_route(world: &mut World, route: &mut Route, pos: &mut Position, target: (i64, i64)) -> Move {
+    while route.cursor < route.waypoints.len()
+        && pos.distance_tiles(route.waypoints[route.cursor]) <= ARRIVAL_TILES
+    {
+        route.cursor += 1;
+    }
+    let heading_to_goal = route.cursor >= route.waypoints.len();
+    let step_target = if heading_to_goal {
+        target
+    } else {
+        route.waypoints[route.cursor]
+    };
+    match walk_line(world, pos, step_target) {
+        Move::Arrived if heading_to_goal => Move::Arrived,
+        Move::Arrived => {
+            route.cursor += 1; // étape atteinte, on enchaîne au prochain tick
+            Move::Moved
+        }
+        other => other,
+    }
+}
+
 /// Marche d'une heure vers `target` : jusqu'à [`WALK_TILES_PER_TICK`] tuiles,
 /// par segments échantillonnés — on s'arrête net devant l'eau (l'océan ne se
-/// traverse pas à pied). Renvoie `false` si bloqué.
+/// traverse pas à pied).
 ///
 /// La franchissabilité est sondée dans le **baseline** (élévation ≤ 0 = eau,
 /// exactement le critère du drapeau WATER à la génération) : matérialiser un
 /// chunk entier pour chaque point de passage écraserait le LRU — un agent
 /// en errance traverse des dizaines de chunks par heure.
-fn walk_towards(world: &mut World, pos: &mut Position, target: (i64, i64)) -> bool {
+fn walk_line(world: &mut World, pos: &mut Position, target: (i64, i64)) -> Move {
     let mut budget = WALK_TILES_PER_TICK;
+    let mut moved = false;
     while budget > 0.0 {
         let dx = target.0 as f64 + 0.5 - pos.x;
         let dy = target.1 as f64 + 0.5 - pos.y;
         let dist = (dx * dx + dy * dy).sqrt();
         if dist <= ARRIVAL_TILES {
-            return true;
+            return Move::Arrived;
         }
         let step = WALK_SAMPLE_TILES.min(dist).min(budget);
         let next = (pos.x + dx / dist * step, pos.y + dy / dist * step);
         if world.worldgen().elevation(next.0.floor() as i64, next.1.floor() as i64) <= 0.0 {
-            return false;
+            return if moved { Move::Moved } else { Move::Stuck };
         }
         pos.x = next.0;
         pos.y = next.1;
         budget -= step;
+        moved = true;
     }
-    true
+    Move::Moved
 }
 
 #[cfg(test)]
@@ -519,6 +649,60 @@ mod tests {
             );
         }
         (sim, home)
+    }
+
+    /// La ligne droite entre `a` et `b` traverse-t-elle de l'eau ? (échantillon
+    /// tous les 8 tuiles sur le baseline.)
+    fn straight_blocked(sim: &Sim, a: (i64, i64), b: (i64, i64)) -> bool {
+        let (dx, dy) = ((b.0 - a.0) as f64, (b.1 - a.1) as f64);
+        let dist = (dx * dx + dy * dy).sqrt();
+        let steps = (dist / 8.0).ceil() as i64;
+        (0..=steps).any(|i| {
+            let t = i as f64 / steps as f64;
+            let x = (a.0 as f64 + dx * t).floor() as i64;
+            let y = (a.1 as f64 + dy * t).floor() as i64;
+            sim.world.worldgen().elevation(x, y) <= 0.0
+        })
+    }
+
+    /// Intégration de l'A* : quand l'eau coupe la ligne droite, l'agent doit
+    /// **contourner** — c'est-à-dire créer une route et se déplacer — au lieu
+    /// de rester figé au bord de l'eau (l'ancien comportement).
+    #[test]
+    fn un_agent_contourne_l_eau_au_lieu_de_se_figer() {
+        let mut sim = Sim::new(WorldSeed(42), 512);
+        let home = find_land(&sim);
+        // Marche vers l'est jusqu'au premier rivage.
+        let mut sx = home.0;
+        while sim.world.worldgen().elevation(sx, home.1) > 0.0 && sx < home.0 + 200_000 {
+            sx += 8;
+        }
+        assert!(sx < home.0 + 200_000, "aucun océan à l'est du foyer (seed atypique)");
+        // Départ sur la terre juste avant le rivage ; cible au-delà de l'eau.
+        let start = (sx - 48, home.1);
+        let target = (sx + 800, home.1);
+        assert!(
+            sim.world.worldgen().elevation(start.0, start.1) > 0.0,
+            "le départ doit être sur la terre"
+        );
+        assert!(straight_blocked(&sim, start, target), "la ligne droite doit être coupée par l'eau");
+
+        let id = AgentId(0);
+        let mut pos = Position { x: start.0 as f64 + 0.5, y: start.1 as f64 + 0.5 };
+        let origin = (pos.x, pos.y);
+        let mut routes: BTreeMap<u64, Route> = BTreeMap::new();
+        for _ in 0..8 {
+            let mut budget = PATH_REQUESTS_PER_TICK;
+            advance(&mut sim.world, &mut routes, &mut budget, id, &mut pos, target);
+        }
+        assert!(routes.contains_key(&id.0), "un trajet A* d'évitement doit être créé");
+        let moved = (pos.x - origin.0).hypot(pos.y - origin.1);
+        assert!(moved > 1.0, "l'agent doit s'être déplacé le long de la route ({moved:.1} tuiles)");
+        // Et il reste sur la terre (jamais dans l'eau).
+        assert!(
+            sim.world.worldgen().elevation(pos.x.floor() as i64, pos.y.floor() as i64) > 0.0,
+            "l'agent ne doit jamais marcher dans l'eau"
+        );
     }
 
     #[test]

@@ -82,6 +82,10 @@ fn main() {
         "après {ticks} ticks (an {}, jour {}) : {} humains, {g1:.0} gibier, {p1:.0} prédateurs",
         sim.time.year(), sim.time.day_of_year(), sim.population(),
     );
+    println!(
+        "perf : {} chunks générés, {} appels A* ({:.1}/tick)",
+        sim.world.generated, sim.path_calls, sim.path_calls as f64 / ticks.max(1) as f64,
+    );
 
     std::fs::create_dir_all("out").ok();
     let img = image::RgbaImage::from_raw(W as u32, H as u32, buf).expect("buffer");
