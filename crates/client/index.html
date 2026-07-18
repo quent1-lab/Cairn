@@ -173,12 +173,15 @@
             <button class="speed-btn" data-speed="96">×16</button>
           </div>
           <button id="follow-toggle" class="layer-btn active">⊙ Suivre la population</button>
+          <button id="color-toggle" class="layer-btn">Couleur : activité</button>
           <div id="sim-readout">…</div>
           <div id="legend">
-            <div class="row"><span class="dot" style="background:#e8503a"></span>humain (en chemin)</div>
-            <div class="row"><span class="dot" style="background:#ff9a3c"></span>se nourrit / chasse</div>
-            <div class="row"><span class="dot" style="background:#46b4ff"></span>boit</div>
-            <div class="row"><span class="dot" style="background:#6a6ad0"></span>dort</div>
+            <div id="legend-activity" style="display:grid; gap:3px;">
+              <div class="row"><span class="dot" style="background:#e8503a"></span>humain (en chemin)</div>
+              <div class="row"><span class="dot" style="background:#ff9a3c"></span>se nourrit / chasse</div>
+              <div class="row"><span class="dot" style="background:#46b4ff"></span>boit</div>
+              <div class="row"><span class="dot" style="background:#6a6ad0"></span>dort</div>
+            </div>
             <div class="row"><span class="dot" style="background:#c8a24a"></span>troupeau</div>
             <div class="row"><span class="dot" style="background:#8b3fb0"></span>prédateurs</div>
           </div>

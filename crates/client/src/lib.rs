@@ -20,10 +20,11 @@ pub mod palette;
 pub mod render;
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 
 use cairn_core::WorldSeed;
 use cairn_core::scale::{km_to_tiles, tiles_to_km};
-use cairn_sim::{Activity, Behavior, Herd, Pack, Position, Sim};
+use cairn_sim::{Activity, AgentId, Behavior, FaunaId, Herd, Pack, Position, Sim};
 use cairn_worldgen::{HumidityConfig, WorldGenConfig};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{Clamped, JsCast};
@@ -119,6 +120,22 @@ struct App {
     placing: bool,
     /// La caméra suit le barycentre de la population (recadrage à seuil).
     follow: bool,
+    /// Humains colorés par activité (sinon une couleur fixe « humain »).
+    color_by_activity: bool,
+
+    // — Interpolation d'affichage —
+    /// Position de chaque entité **au tick précédent**, par identifiant stable
+    /// (humains et faune). Sert à interpoler le rendu entre deux ticks pour un
+    /// mouvement fluide (le brief §8.5 : « le client interpole »). Rendu
+    /// uniquement — pas de la simulation —, d'où une `HashMap` sans souci de
+    /// déterminisme.
+    prev_pos: HashMap<u64, (f64, f64)>,
+    prev_fauna: HashMap<u64, (f64, f64)>,
+    /// A-t-on au moins un tick de référence pour interpoler ?
+    has_prev: bool,
+    /// Fraction écoulée vers le prochain tick, dans [0, 1] : le curseur
+    /// d'interpolation de la frame courante.
+    render_alpha: f64,
 
     // — Cache du terrain —
     terrain: Vec<u8>,
@@ -160,6 +177,11 @@ impl App {
             seed,
             placing: false,
             follow: true,
+            color_by_activity: true,
+            prev_pos: HashMap::new(),
+            prev_fauna: HashMap::new(),
+            has_prev: false,
+            render_alpha: 1.0,
             terrain: Vec::new(),
             terrain_valid: false,
         };
@@ -227,6 +249,11 @@ impl App {
         self.camera.cx = home.0 as f64;
         self.camera.cy = home.1 as f64;
         self.tick_acc = 0.0;
+        // Les identifiants du nouveau monde n'ont rien à voir avec l'ancien :
+        // on repart sans référence d'interpolation.
+        self.prev_pos.clear();
+        self.prev_fauna.clear();
+        self.has_prev = false;
         self.invalidate_terrain();
     }
 
@@ -271,15 +298,42 @@ impl App {
 
         if self.playing {
             self.tick_acc += dt_s * self.speed;
-            let n = (self.tick_acc.floor() as u32).min(MAX_TICKS_PER_FRAME);
-            self.tick_acc -= n as f64;
-            for _ in 0..n {
+            let mut stepped = 0;
+            while self.tick_acc >= 1.0 && stepped < MAX_TICKS_PER_FRAME {
+                // On mémorise les positions **avant** de simuler : ce sont les
+                // « prev » depuis lesquels on interpolera jusqu'au nouvel état.
+                self.snapshot_positions();
                 self.sim.step();
+                self.tick_acc -= 1.0;
+                stepped += 1;
+            }
+            if stepped > 0 {
+                self.has_prev = true;
             }
         }
+        // Curseur d'interpolation : où en est-on entre le dernier tick et le
+        // prochain. À l'arrêt (ou sans référence), on colle à l'état courant.
+        self.render_alpha = if self.playing && self.has_prev {
+            self.tick_acc.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
 
         self.follow_population();
         self.render();
+    }
+
+    /// Capture la position courante de chaque entité (par identifiant stable)
+    /// dans les tables `prev`, pour l'interpolation du prochain intervalle.
+    fn snapshot_positions(&mut self) {
+        self.prev_pos.clear();
+        for (_, (id, pos)) in self.sim.agents.query::<(&AgentId, &Position)>().iter() {
+            self.prev_pos.insert(id.0, (pos.x, pos.y));
+        }
+        self.prev_fauna.clear();
+        for (_, (id, pos)) in self.sim.fauna.query::<(&FaunaId, &Position)>().iter() {
+            self.prev_fauna.insert(id.0, (pos.x, pos.y));
+        }
     }
 
     fn render(&mut self) {
@@ -307,18 +361,29 @@ impl App {
         self.update_readout();
     }
 
-    /// Dessine agents et faune par-dessus le terrain. Coordonnées monde →
+    /// Dessine agents et faune par-dessus le terrain. Chaque entité est
+    /// **interpolée** entre sa position au tick précédent (`prev_*`) et sa
+    /// position courante, selon `render_alpha` — c'est ce qui transforme les
+    /// sauts d'une heure de jeu en un glissement fluide. Coordonnées monde →
     /// écran, culling large, petits carrés.
     fn draw_entities(&self) {
         let (w, h) = (self.width as f64, self.height as f64);
         let (cx, cy, scale) = (self.camera.cx, self.camera.cy, self.camera.scale);
-        let project = |wx: f64, wy: f64| ((wx - cx) * scale + w / 2.0, (wy - cy) * scale + h / 2.0);
+        let a = self.render_alpha;
         let visible = |sx: f64, sy: f64| sx > -20.0 && sx < w + 20.0 && sy > -20.0 && sy < h + 20.0;
+        // Position interpolée → pixel écran. `prev` par défaut = position
+        // courante (entité nouvelle-née : pas de saut, on l'affiche sur place).
+        let place = |prev: Option<&(f64, f64)>, curx: f64, cury: f64| {
+            let (px, py) = prev.copied().unwrap_or((curx, cury));
+            let wx = px + (curx - px) * a;
+            let wy = py + (cury - py) * a;
+            ((wx - cx) * scale + w / 2.0, (wy - cy) * scale + h / 2.0)
+        };
 
         // Gibier (fauve) : la taille suit l'effectif du troupeau.
         self.ctx.set_fill_style_str("#c8a24a");
-        for (_, (herd, pos)) in self.sim.fauna.query::<(&Herd, &Position)>().iter() {
-            let (sx, sy) = project(pos.x, pos.y);
+        for (_, (id, herd, pos)) in self.sim.fauna.query::<(&FaunaId, &Herd, &Position)>().iter() {
+            let (sx, sy) = place(self.prev_fauna.get(&id.0), pos.x, pos.y);
             if !visible(sx, sy) {
                 continue;
             }
@@ -328,8 +393,8 @@ impl App {
 
         // Prédateurs (violet).
         self.ctx.set_fill_style_str("#8b3fb0");
-        for (_, (pack, pos)) in self.sim.fauna.query::<(&Pack, &Position)>().iter() {
-            let (sx, sy) = project(pos.x, pos.y);
+        for (_, (id, pack, pos)) in self.sim.fauna.query::<(&FaunaId, &Pack, &Position)>().iter() {
+            let (sx, sy) = place(self.prev_fauna.get(&id.0), pos.x, pos.y);
             if !visible(sx, sy) {
                 continue;
             }
@@ -337,15 +402,23 @@ impl App {
             self.ctx.fill_rect(sx - s / 2.0, sy - s / 2.0, s, s);
         }
 
-        // Humains : couleur selon l'activité — on lit d'un coup d'œil qui
-        // chasse, qui boit, qui dort.
+        // Humains. Deux modes : une couleur fixe, ou la couleur de l'activité
+        // (qui chasse, qui boit, qui dort). En couleur fixe on pose le style
+        // une seule fois.
         let s = scale.clamp(2.5, 8.0);
-        for (_, (pos, behavior)) in self.sim.agents.query::<(&Position, &Behavior)>().iter() {
-            let (sx, sy) = project(pos.x, pos.y);
+        if !self.color_by_activity {
+            self.ctx.set_fill_style_str(HUMAN_COLOR);
+        }
+        for (_, (id, pos, behavior)) in
+            self.sim.agents.query::<(&AgentId, &Position, &Behavior)>().iter()
+        {
+            let (sx, sy) = place(self.prev_pos.get(&id.0), pos.x, pos.y);
             if !visible(sx, sy) {
                 continue;
             }
-            self.ctx.set_fill_style_str(activity_color(behavior.activity));
+            if self.color_by_activity {
+                self.ctx.set_fill_style_str(activity_color(behavior.activity));
+            }
             self.ctx.fill_rect(sx - s / 2.0, sy - s / 2.0, s, s);
         }
     }
@@ -408,6 +481,23 @@ impl App {
             }
         }
         self.press = None;
+    }
+
+    fn toggle_color_mode(&mut self) {
+        self.color_by_activity = !self.color_by_activity;
+        if let Some(el) = document().get_element_by_id("color-toggle") {
+            el.set_text_content(Some(if self.color_by_activity {
+                "Couleur : activité"
+            } else {
+                "Couleur : humain"
+            }));
+        }
+        // La légende d'activité n'a de sens qu'en mode activité.
+        if let Some(el) = document().get_element_by_id("legend-activity") {
+            let _ = el
+                .dyn_ref::<web_sys::HtmlElement>()
+                .map(|h| h.style().set_property("display", if self.color_by_activity { "grid" } else { "none" }));
+        }
     }
 
     fn set_follow(&mut self, on: bool) {
@@ -530,6 +620,9 @@ fn read_u64(id: &str, fallback: u64) -> u64 {
         .unwrap_or(fallback)
 }
 
+/// Couleur unique des humains en mode « couleur fixe ».
+const HUMAN_COLOR: &str = "#e8503a";
+
 /// Couleur d'un agent selon ce qu'il fait — la lisibilité du « pourquoi »
 /// chère au brief, en un coup d'œil.
 fn activity_color(activity: Activity) -> &'static str {
@@ -616,6 +709,12 @@ fn install_event_handlers() -> Result<(), JsValue> {
     if let Some(btn) = document().get_element_by_id("follow-toggle") {
         listen!(btn, "click", web_sys::MouseEvent, move |_e: web_sys::MouseEvent| {
             with_app(|a| a.set_follow(!a.follow));
+        });
+    }
+    // Mode de couleur des humains (activité ↔ couleur fixe).
+    if let Some(btn) = document().get_element_by_id("color-toggle") {
+        listen!(btn, "click", web_sys::MouseEvent, move |_e: web_sys::MouseEvent| {
+            with_app(App::toggle_color_mode);
         });
     }
 
