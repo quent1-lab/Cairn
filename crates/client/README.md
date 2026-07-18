@@ -1,8 +1,28 @@
 # cairn-client
 
-Client web (WASM) de Cairn : une fenêtre plein écran sur le monde, avec caméra
-scrollable/zoomable et couches de debug (biomes, altitude, température,
-humidité, géologie) dans un panneau flottant.
+Client web (WASM) de Cairn : une fenêtre plein écran sur le monde **vivant**.
+Le client fait tourner un `Sim` localement (Phase 2 ; en Phase 6 la simulation
+passera au serveur et le client s'y abonnera). Caméra scrollable/zoomable,
+couches de debug (biomes, altitude, température, humidité, géologie), et les
+agents + la faune dessinés en temps réel par-dessus le terrain.
+
+## Panneau — deux onglets
+
+**Carte** : couches de terrain ; contrôles de simulation (**pause**, vitesse
+**×1/×4/×16**) ; **Suivre la population** (la caméra cadre le groupe, centre et
+zoom — utile car sans clans la population se disperse vite) ; légende des
+entités (agents colorés par activité) ; bandeau date/effectifs.
+
+**Paramètres** : **seed**, **humains initiaux**, **densité de gibier**, puis
+**Régénérer le monde** ; et un **placement manuel** — armez « Poser des
+humains », cliquez la carte : une bande y est déposée et le gibier se génère
+automatiquement autour.
+
+## Hooks d'URL (debug / démarrage)
+
+- `?ticks=N` — pré-avance la simulation de N ticks avant le premier rendu.
+- `?static=1` — rend **une seule** frame puis s'arrête (pas de boucle) ; sert
+  aux captures reproductibles.
 
 ## Construire et lancer
 
@@ -30,6 +50,20 @@ La logique de rendu (`src/render.rs`) est isolée du DOM et testable nativement 
 cargo run --release -p cairn-client --example preview -- biome 80
 # → out/client_biome.png  (mêmes couleurs que le canvas)
 ```
+
+Pour vérifier le **rendu vivant** (terrain + agents + faune) exactement comme
+le navigateur, mais en PNG — même `render_to_buffer`, même projection des
+entités, caméra cadrée sur la population :
+
+```sh
+cargo run --release -p cairn-client --example client_render -- [seed] [ticks]
+# → out/client_<seed>_<ticks>.png
+```
+
+> **Note d'environnement** : sur cette machine, Edge **headless** ne capture
+> pas le calque canvas 2D (le DOM et la simulation, eux, tournent — les
+> bandeaux d'état se mettent à jour). Vérifier le rendu via `client_render`
+> ci-dessus, ou dans un vrai navigateur.
 
 ## Note d'environnement (toolchain windows-gnu) — RÉSOLU
 

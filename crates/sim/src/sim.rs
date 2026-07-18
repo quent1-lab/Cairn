@@ -23,6 +23,7 @@
 //! est l'ordre d'apparition, et les retraits sont eux-mêmes ordonnés.
 
 use cairn_core::{SimTime, TICKS_PER_DAY, WorldSeed};
+use cairn_worldgen::WorldGenConfig;
 
 use crate::agent::{
     Activity, AgentId, Behavior, DeathCause, FOREST_BONUS_C, Physiology, Position,
@@ -79,7 +80,13 @@ impl Sim {
     /// `chunk_capacity` : nombre de chunks résidents du LRU. Doit couvrir
     /// largement la zone active de la population (un chunk = 128 m de côté).
     pub fn new(seed: WorldSeed, chunk_capacity: usize) -> Self {
-        let world = World::new(seed, chunk_capacity);
+        Self::with_config(seed, chunk_capacity, WorldGenConfig::default())
+    }
+
+    /// Comme [`new`](Self::new), mais avec une config de worldgen (le client
+    /// veut une humidité rapide).
+    pub fn with_config(seed: WorldSeed, chunk_capacity: usize, cfg: WorldGenConfig) -> Self {
+        let world = World::with_config(seed, chunk_capacity, cfg);
         let climate = Climate::new(world.worldgen().temperature.latitude());
         Self {
             world,

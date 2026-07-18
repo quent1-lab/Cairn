@@ -13,7 +13,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use cairn_core::WorldSeed;
-use cairn_worldgen::WorldGen;
+use cairn_worldgen::{WorldGen, WorldGenConfig};
 
 use crate::chunk::{CHUNK_SIZE, Chunk, ChunkCoord};
 use crate::tile::{Tile, baseline_biomass, baseline_fertility};
@@ -44,8 +44,14 @@ pub struct World {
 
 impl World {
     pub fn new(seed: WorldSeed, capacity: usize) -> Self {
+        Self::with_config(seed, capacity, WorldGenConfig::default())
+    }
+
+    /// Comme [`new`](Self::new), mais avec une config de worldgen — le client
+    /// s'en sert pour une humidité « rapide » afin de rester interactif.
+    pub fn with_config(seed: WorldSeed, capacity: usize, cfg: WorldGenConfig) -> Self {
         Self {
-            worldgen: WorldGen::new(seed),
+            worldgen: WorldGen::with_config(seed, cfg),
             chunks: BTreeMap::new(),
             last_access: BTreeMap::new(),
             dirty: BTreeSet::new(),

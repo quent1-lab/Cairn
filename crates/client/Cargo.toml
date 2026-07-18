@@ -24,9 +24,11 @@ image.workspace = true
 version = "0.3"
 features = [
     "Window",
+    "Location",
     "Document",
     "Element",
     "HtmlElement",
+    "HtmlInputElement",
     "Node",
     "NodeList",
     "HtmlCanvasElement",

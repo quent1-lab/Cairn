@@ -20,6 +20,7 @@ pub mod climate;
 pub mod curves;
 pub mod ecology;
 pub mod fauna;
+pub mod scenario;
 pub mod sim;
 pub mod tile;
 pub mod world;

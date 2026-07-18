@@ -1,17 +1,19 @@
-//! Client web (WASM) de Cairn : une fenêtre sur le monde.
+//! Client web (WASM) de Cairn : une fenêtre sur le monde **vivant**.
 //!
-//! Rend le monde dans un canvas plein écran, avec une caméra scrollable et
-//! zoomable (monde infini). Les couches de debug (biomes, altitude,
-//! température, humidité, géologie) se basculent depuis un panneau flottant.
+//! Le client fait tourner un [`Sim`] localement (Phase 2 : pas encore de
+//! serveur — celui-ci arrive en Phase 6, où la sim déménagera côté serveur et
+//! le client s'abonnera à sa région). Chaque frame : on avance la simulation
+//! d'un peu de temps de jeu, on peint le terrain, puis les agents et la faune
+//! par-dessus.
 //!
-//! Choix de rendu (Phase 1) : on échantillonne directement le `worldgen`
-//! (pur, local) plutôt que le store de chunks — l'observation du baseline n'a
-//! pas besoin de matérialiser des tuiles mutables. L'humidité, coûteuse, tourne
-//! en config rapide pour rester interactive.
+//! Choix de rendu : le **terrain** échantillonne le worldgen (baseline pur) et
+//! ne change qu'au pan/zoom — on le met donc en cache et on ne le recalcule
+//! qu'à l'invalidation. Les **entités**, elles, bougent à chaque tick : on les
+//! redessine chaque frame au-dessus du terrain caché, en appels canvas 2D
+//! (petits carrés pixel-art), ce qui est bien plus léger que de les graver
+//! dans le tampon.
 
-// L'initialiseur du thread_local est déjà `const` ; ce lint le signale à tort
-// (comportement différent wasm/natif), et un `#[allow]` sur l'item ne couvre
-// pas l'expansion de la macro — d'où l'allow au niveau du crate.
+// L'initialiseur du thread_local est déjà `const` ; ce lint le signale à tort.
 #![allow(clippy::missing_const_for_thread_local)]
 
 pub mod palette;
@@ -21,60 +23,106 @@ use std::cell::RefCell;
 
 use cairn_core::WorldSeed;
 use cairn_core::scale::{km_to_tiles, tiles_to_km};
-use cairn_worldgen::{HumidityConfig, WorldGen, WorldGenConfig};
+use cairn_sim::{Activity, Behavior, Herd, Pack, Position, Sim};
+use cairn_worldgen::{HumidityConfig, WorldGenConfig};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{Clamped, JsCast};
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, ImageData};
 
 use palette::Layer;
 
-/// Zoom minimal et maximal, en pixels par tuile. Le minimum autorise une vue
-/// à l'échelle continentale (~7000 km de large) : le budget d'échantillons
-/// (`render::MAX_SAMPLES`) borne le coût quel que soit le dézoom, seule cette
-/// constante limitait la portée. Le maximum (32 px/tuile) va jusqu'au gros
-/// plan « village ».
+/// Zoom minimal et maximal, en pixels par tuile.
 const MIN_SCALE: f64 = 0.0004;
 const MAX_SCALE: f64 = 32.0;
+/// Zoom maximal du mode « Suivre » : quand la population est très groupée, on
+/// ne zoome pas au-delà (sinon on collerait à un seul agent).
+const FOLLOW_MAX_SCALE: f64 = 3.0;
 
-// État global. WASM est mono-thread : `thread_local!` + `RefCell` est
-// l'idiome pour un état mutable partagé entre les closures d'événements.
+/// Capacité du store de chunks résidents (l'éviction bornée protège la
+/// mémoire au-delà). Modeste : la scène du client est locale.
+const CHUNK_CAPACITY: usize = 2048;
+/// Population humaine de départ.
+const START_AGENTS: usize = 40;
+
+/// Paliers de vitesse proposés, en **ticks de jeu par seconde réelle**. Un
+/// tick = une heure ; 24 ticks/s = un jour de jeu par seconde.
+const SPEEDS: [f64; 3] = [6.0, 24.0, 96.0];
+/// Plafond de ticks simulés par frame : après un onglet en arrière-plan, on ne
+/// rattrape pas des heures de jeu d'un coup (ça figerait la page).
+const MAX_TICKS_PER_FRAME: u32 = 24;
+
 thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
 }
 
-/// Point d'entrée appelé automatiquement au chargement du module WASM.
 #[wasm_bindgen(start)]
 pub fn start() -> Result<(), JsValue> {
-    // Renvoie les panics Rust vers la console du navigateur, lisibles.
     console_error_panic_hook::set_once();
-    let app = App::new()?;
+    let mut app = App::new()?;
+    // Hook `?ticks=N` : pré-avance la simulation avant le premier rendu. Sert
+    // à démarrer « plus tard » et à vérifier le moteur hors navigateur
+    // interactif (une capture montre alors un monde qui a réellement tourné).
+    if let Some(n) = query_param_u64("ticks") {
+        for _ in 0..n {
+            app.sim.step();
+        }
+    }
     APP.with(|slot| *slot.borrow_mut() = Some(app));
     install_event_handlers()?;
-    with_app(|app| app.render());
+    // Première frame **synchrone** (cadrée sur la population) : le monde
+    // s'affiche dès le chargement, sans flash noir en attendant le premier
+    // `requestAnimationFrame`.
+    with_app(|a| {
+        a.follow_population();
+        a.render();
+    });
+    // Mode `?static=1` : on ne lance PAS la boucle — une seule frame figée.
+    // Utile pour une capture reproductible (le temps virtuel headless se
+    // stabilise, la boucle rAF permanente l'empêcherait).
+    if query_param_u64("static").is_none() {
+        schedule_frame();
+    }
     Ok(())
 }
 
 struct Camera {
-    /// Centre de la vue, en coordonnées de tuiles (f64 pour un pan/zoom fluide).
     cx: f64,
     cy: f64,
-    /// Échelle : pixels par tuile.
     scale: f64,
 }
 
 struct App {
-    worldgen: WorldGen,
+    sim: Sim,
     ctx: CanvasRenderingContext2d,
     canvas: HtmlCanvasElement,
     width: usize,
     height: usize,
     camera: Camera,
     layer: Layer,
-    /// Dernière position du curseur pendant un glisser (pan), en pixels.
     drag: Option<(f64, f64)>,
-    /// Un rendu est déjà programmé pour la prochaine frame : les événements
-    /// suivants ne font que mettre à jour la caméra, sans en empiler un autre.
-    render_pending: bool,
+    /// Pixel du dernier `mousedown`, pour distinguer un **clic** (placement)
+    /// d'un **glisser** (pan) au relâchement.
+    press: Option<(f64, f64)>,
+
+    // — Boucle temporelle —
+    playing: bool,
+    /// Vitesse en ticks de jeu par seconde réelle.
+    speed: f64,
+    /// Accumulateur de ticks fractionnaires entre deux frames.
+    tick_acc: f64,
+    /// Horodatage de la frame précédente (ms), ou `None` à la première.
+    last_ts: Option<f64>,
+
+    /// Seed courante (pour l'affichage et la régénération).
+    seed: u64,
+    /// Mode « poser des humains au clic » armé.
+    placing: bool,
+    /// La caméra suit le barycentre de la population (recadrage à seuil).
+    follow: bool,
+
+    // — Cache du terrain —
+    terrain: Vec<u8>,
+    terrain_valid: bool,
 }
 
 impl App {
@@ -88,39 +136,112 @@ impl App {
             .ok_or("contexte 2d indisponible")?
             .dyn_into::<CanvasRenderingContext2d>()?;
 
-        // Humidité en qualité « rapide » : sans diffusion latérale, moins de
-        // pas — l'observation en direct privilégie la réactivité.
-        let cfg = WorldGenConfig {
-            humidity: HumidityConfig {
-                steps: 32,
-                lateral_samples: 0,
-                ..HumidityConfig::default()
-            },
-            ..WorldGenConfig::default()
-        };
-        let worldgen = WorldGen::with_config(WorldSeed(42), cfg);
+        let seed = 42;
+        let (sim, home) = build_sim(seed, START_AGENTS, 2);
 
         let mut app = App {
-            worldgen,
+            sim,
             ctx,
             canvas,
             width: 0,
             height: 0,
             camera: Camera {
-                // Un continent tempéré de la seed 42.
-                cx: km_to_tiles(1500.0),
-                cy: km_to_tiles(2100.0),
-                scale: 0.05,
+                cx: home.0 as f64,
+                cy: home.1 as f64,
+                scale: 2.0,
             },
             layer: Layer::Biome,
             drag: None,
-            render_pending: false,
+            press: None,
+            playing: true,
+            speed: SPEEDS[1],
+            tick_acc: 0.0,
+            last_ts: None,
+            seed,
+            placing: false,
+            follow: true,
+            terrain: Vec::new(),
+            terrain_valid: false,
         };
         app.resize();
         Ok(app)
     }
 
-    /// Ajuste la taille du canvas à la fenêtre (device pixels).
+    /// Boîte englobante des humains (à défaut du gibier), en tuiles :
+    /// `(min_x, min_y, max_x, max_y)`. `None` si le monde est vide.
+    fn population_bounds(&self) -> Option<(f64, f64, f64, f64)> {
+        let mut b: Option<(f64, f64, f64, f64)> = None;
+        for (_, pos) in self.sim.agents.query::<&Position>().iter() {
+            grow_bounds(&mut b, pos.x, pos.y);
+        }
+        if b.is_none() {
+            for (_, (_, pos)) in self.sim.fauna.query::<(&Herd, &Position)>().iter() {
+                grow_bounds(&mut b, pos.x, pos.y);
+            }
+        }
+        b
+    }
+
+    /// Cadre la caméra sur **toute** la population — centre *et* zoom — pour
+    /// qu'elle reste visible même dispersée sur des kilomètres (en Phase 2, sans
+    /// clans, le groupe diffuse librement). À **hystérésis** : on ne recadre que
+    /// si le centre a dérivé ou si le zoom nécessaire a changé notablement,
+    /// sinon le terrain se recalculerait à chaque frame. Pas pendant un glisser.
+    fn follow_population(&mut self) {
+        if !self.follow || self.drag.is_some() {
+            return;
+        }
+        let Some((x0, y0, x1, y1)) = self.population_bounds() else {
+            return;
+        };
+        let (mx, my) = ((x0 + x1) / 2.0, (y0 + y1) / 2.0);
+        // Marge autour du groupe (~400 m), puis zoom qui fait tenir la boîte.
+        let pad = km_to_tiles(0.4);
+        let span_x = (x1 - x0 + 2.0 * pad).max(1.0);
+        let span_y = (y1 - y0 + 2.0 * pad).max(1.0);
+        let fit = (self.width as f64 / span_x)
+            .min(self.height as f64 / span_y)
+            .clamp(MIN_SCALE, FOLLOW_MAX_SCALE);
+
+        let drift = ((mx - self.camera.cx).powi(2) + (my - self.camera.cy).powi(2)).sqrt();
+        let drift_thresh = self.width.min(self.height) as f64 / self.camera.scale * 0.15;
+        let zoom_ratio = fit / self.camera.scale;
+        if drift > drift_thresh || !(0.8..1.25).contains(&zoom_ratio) {
+            self.camera.cx = mx;
+            self.camera.cy = my;
+            self.camera.scale = fit;
+            self.invalidate_terrain();
+        }
+    }
+
+    /// Régénère entièrement le monde depuis les champs du panneau Paramètres
+    /// (seed, humains initiaux, densité de gibier), recadre la caméra sur le
+    /// nouveau foyer et remet l'horloge à zéro.
+    fn rebuild(&mut self) {
+        let seed = read_u64("cfg-seed", self.seed);
+        let agents = read_u64("cfg-humans", START_AGENTS as u64) as usize;
+        let herd_grid = read_u64("cfg-herds", 2) as i64;
+        let (sim, home) = build_sim(seed, agents, herd_grid);
+        self.sim = sim;
+        self.seed = seed;
+        self.camera.cx = home.0 as f64;
+        self.camera.cy = home.1 as f64;
+        self.tick_acc = 0.0;
+        self.invalidate_terrain();
+    }
+
+    /// Pose une bande d'humains (et son gibier) au pixel écran `(px, py)`.
+    fn place_at(&mut self, px: f64, py: f64) {
+        let (wx, wy) = self.tile_at(px, py);
+        let count = read_u64("cfg-band", 20) as usize;
+        cairn_sim::scenario::drop_band(
+            &mut self.sim,
+            (wx.floor() as i64, wy.floor() as i64),
+            count,
+            6,
+        );
+    }
+
     fn resize(&mut self) {
         let win = window();
         let w = win.inner_width().unwrap().as_f64().unwrap() as usize;
@@ -129,68 +250,106 @@ impl App {
         self.height = h.max(1);
         self.canvas.set_width(self.width as u32);
         self.canvas.set_height(self.height as u32);
+        self.terrain_valid = false;
     }
 
-    /// Coordonnée de tuile (f64) sous un pixel de l'écran.
     fn tile_at(&self, px: f64, py: f64) -> (f64, f64) {
         render::tile_at(
-            px,
-            py,
-            self.camera.cx,
-            self.camera.cy,
-            self.camera.scale,
-            self.width,
-            self.height,
+            px, py, self.camera.cx, self.camera.cy, self.camera.scale, self.width, self.height,
         )
     }
 
-    fn render(&self) {
-        let buf = render::render_to_buffer(
-            &self.worldgen,
-            self.camera.cx,
-            self.camera.cy,
-            self.camera.scale,
-            self.layer,
-            self.width,
-            self.height,
-        );
+    /// Une frame : avance la sim selon le temps écoulé, puis redessine.
+    fn frame(&mut self, ts: f64) {
+        // dt borné : après un onglet masqué, on ne simule pas des minutes d'un
+        // coup. La première frame ne fait qu'amorcer l'horloge.
+        let dt_s = match self.last_ts {
+            Some(prev) => ((ts - prev) / 1000.0).clamp(0.0, 0.1),
+            None => 0.0,
+        };
+        self.last_ts = Some(ts);
+
+        if self.playing {
+            self.tick_acc += dt_s * self.speed;
+            let n = (self.tick_acc.floor() as u32).min(MAX_TICKS_PER_FRAME);
+            self.tick_acc -= n as f64;
+            for _ in 0..n {
+                self.sim.step();
+            }
+        }
+
+        self.follow_population();
+        self.render();
+    }
+
+    fn render(&mut self) {
+        if !self.terrain_valid {
+            self.terrain = render::render_to_buffer(
+                self.sim.world.worldgen(),
+                self.camera.cx,
+                self.camera.cy,
+                self.camera.scale,
+                self.layer,
+                self.width,
+                self.height,
+            );
+            self.terrain_valid = true;
+        }
         let img = ImageData::new_with_u8_clamped_array_and_sh(
-            Clamped(&buf),
+            Clamped(&self.terrain),
             self.width as u32,
             self.height as u32,
         )
         .expect("ImageData");
         self.ctx.put_image_data(&img, 0.0, 0.0).expect("put_image_data");
+
+        self.draw_entities();
         self.update_readout();
     }
 
-    /// Programme un rendu pour la prochaine frame plutôt que de le faire tout
-    /// de suite. Sans ça, un glisser rapide déclenche bien plus de `mousemove`
-    /// qu'un rendu ne peut en absorber : ils s'empilent et la carte « traîne »
-    /// derrière le curseur. Ici on *coalesce* — quel que soit le nombre
-    /// d'événements, un seul rendu par frame, avec la caméra la plus à jour.
-    fn request_render(&mut self) {
-        if self.render_pending {
-            return;
+    /// Dessine agents et faune par-dessus le terrain. Coordonnées monde →
+    /// écran, culling large, petits carrés.
+    fn draw_entities(&self) {
+        let (w, h) = (self.width as f64, self.height as f64);
+        let (cx, cy, scale) = (self.camera.cx, self.camera.cy, self.camera.scale);
+        let project = |wx: f64, wy: f64| ((wx - cx) * scale + w / 2.0, (wy - cy) * scale + h / 2.0);
+        let visible = |sx: f64, sy: f64| sx > -20.0 && sx < w + 20.0 && sy > -20.0 && sy < h + 20.0;
+
+        // Gibier (fauve) : la taille suit l'effectif du troupeau.
+        self.ctx.set_fill_style_str("#c8a24a");
+        for (_, (herd, pos)) in self.sim.fauna.query::<(&Herd, &Position)>().iter() {
+            let (sx, sy) = project(pos.x, pos.y);
+            if !visible(sx, sy) {
+                continue;
+            }
+            let s = ((scale * 1.5) * (1.0 + f64::from(herd.population) / 60.0)).clamp(3.0, 16.0);
+            self.ctx.fill_rect(sx - s / 2.0, sy - s / 2.0, s, s);
         }
-        self.render_pending = true;
-        // `once_into_js` : la closure ne sera appelée qu'une fois (rAF ne
-        // rappelle pas), puis libérée automatiquement par le shim wasm-bindgen
-        // — pas de `forget()` qui fuirait une closure par frame. Elle ne
-        // capture rien qui emprunte APP : le rendu passe par `with_app`, exécuté
-        // plus tard, une fois cet emprunt-ci relâché.
-        let cb = Closure::once_into_js(move || {
-            with_app(|a| {
-                a.render_pending = false;
-                a.render();
-            });
-        });
-        window()
-            .request_animation_frame(cb.unchecked_ref())
-            .expect("request_animation_frame");
+
+        // Prédateurs (violet).
+        self.ctx.set_fill_style_str("#8b3fb0");
+        for (_, (pack, pos)) in self.sim.fauna.query::<(&Pack, &Position)>().iter() {
+            let (sx, sy) = project(pos.x, pos.y);
+            if !visible(sx, sy) {
+                continue;
+            }
+            let s = ((scale * 1.5) * (1.0 + f64::from(pack.population) / 8.0)).clamp(3.0, 12.0);
+            self.ctx.fill_rect(sx - s / 2.0, sy - s / 2.0, s, s);
+        }
+
+        // Humains : couleur selon l'activité — on lit d'un coup d'œil qui
+        // chasse, qui boit, qui dort.
+        let s = scale.clamp(2.5, 8.0);
+        for (_, (pos, behavior)) in self.sim.agents.query::<(&Position, &Behavior)>().iter() {
+            let (sx, sy) = project(pos.x, pos.y);
+            if !visible(sx, sy) {
+                continue;
+            }
+            self.ctx.set_fill_style_str(activity_color(behavior.activity));
+            self.ctx.fill_rect(sx - s / 2.0, sy - s / 2.0, s, s);
+        }
     }
 
-    /// Met à jour le bandeau d'information (coordonnées, échelle, couche).
     fn update_readout(&self) {
         if let Some(el) = document().get_element_by_id("readout") {
             let km_per_screen = tiles_to_km(self.width as f64 / self.camera.scale);
@@ -202,53 +361,205 @@ impl App {
                 km_per_screen,
             )));
         }
+        if let Some(el) = document().get_element_by_id("sim-readout") {
+            let (herbivores, predators, _, _) = self.sim.fauna_census();
+            let t = self.sim.time;
+            el.set_text_content(Some(&format!(
+                "An {}, jour {} · {} humains · {:.0} gibier · {:.0} prédateurs",
+                t.year(),
+                t.day_of_year(),
+                self.sim.population(),
+                herbivores,
+                predators,
+            )));
+        }
+    }
+
+    fn invalidate_terrain(&mut self) {
+        self.terrain_valid = false;
     }
 
     fn on_pointer_down(&mut self, px: f64, py: f64) {
         self.drag = Some((px, py));
+        self.press = Some((px, py));
     }
 
     fn on_pointer_move(&mut self, px: f64, py: f64) {
         if let Some((lx, ly)) = self.drag {
-            // Glisser la carte déplace le monde en sens inverse.
+            // Glisser à la main reprend la main : on cesse de suivre.
+            if self.follow && (px != lx || py != ly) {
+                self.set_follow(false);
+            }
             self.camera.cx -= (px - lx) / self.camera.scale;
             self.camera.cy -= (py - ly) / self.camera.scale;
             self.drag = Some((px, py));
-            self.request_render();
+            self.invalidate_terrain();
         }
     }
 
-    fn on_pointer_up(&mut self) {
+    fn on_pointer_up(&mut self, px: f64, py: f64) {
         self.drag = None;
+        // Un relâchement proche du point d'appui est un **clic** (pas un pan).
+        // En mode placement, il pose une bande d'humains à cet endroit.
+        if let Some((dx, dy)) = self.press {
+            let moved = (px - dx).hypot(py - dy);
+            if self.placing && moved < 5.0 {
+                self.place_at(px, py);
+            }
+        }
+        self.press = None;
     }
 
-    /// Zoom géométrique centré sur le curseur : le point du monde sous la
-    /// souris reste fixe.
+    fn set_follow(&mut self, on: bool) {
+        self.follow = on;
+        if let Some(el) = document().get_element_by_id("follow-toggle") {
+            let _ = el.class_list().toggle_with_force("active", on);
+        }
+        if on {
+            // Recadre immédiatement (l'hystérésis de `follow_population` ne se
+            // déclencherait pas si la caméra est déjà « proche »).
+            if let Some((x0, y0, x1, y1)) = self.population_bounds() {
+                self.camera.cx = (x0 + x1) / 2.0;
+                self.camera.cy = (y0 + y1) / 2.0;
+                let pad = km_to_tiles(0.4);
+                let fit = (self.width as f64 / (x1 - x0 + 2.0 * pad).max(1.0))
+                    .min(self.height as f64 / (y1 - y0 + 2.0 * pad).max(1.0))
+                    .clamp(MIN_SCALE, FOLLOW_MAX_SCALE);
+                self.camera.scale = fit;
+                self.invalidate_terrain();
+            }
+        }
+    }
+
+    fn toggle_placing(&mut self) {
+        self.placing = !self.placing;
+        if let Some(el) = document().get_element_by_id("place-toggle") {
+            el.set_text_content(Some(if self.placing {
+                "✓ Cliquez sur la carte"
+            } else {
+                "Poser des humains"
+            }));
+            let _ = el.class_list().toggle_with_force("armed", self.placing);
+        }
+        // Le curseur signale le mode.
+        let _ = self.canvas.style().set_property(
+            "cursor",
+            if self.placing { "crosshair" } else { "grab" },
+        );
+    }
+
     fn on_wheel(&mut self, delta_y: f64, mx: f64, my: f64) {
         let (wx, wy) = self.tile_at(mx, my);
         let factor = (-delta_y * 0.0015).exp();
         self.camera.scale = (self.camera.scale * factor).clamp(MIN_SCALE, MAX_SCALE);
-        // Recale le centre pour que (wx, wy) retombe sous (mx, my).
         self.camera.cx = wx - (mx - self.width as f64 / 2.0) / self.camera.scale;
         self.camera.cy = wy - (my - self.height as f64 / 2.0) / self.camera.scale;
-        self.request_render();
+        self.invalidate_terrain();
     }
 
     fn on_resize(&mut self) {
         self.resize();
-        self.request_render();
     }
 
     fn set_layer(&mut self, layer: Layer) {
         self.layer = layer;
-        self.request_render();
+        self.invalidate_terrain();
     }
+
+    fn toggle_play(&mut self) {
+        self.playing = !self.playing;
+        if let Some(el) = document().get_element_by_id("play-toggle") {
+            el.set_text_content(Some(if self.playing { "⏸ Pause" } else { "▶ Lecture" }));
+        }
+    }
+
+    fn set_speed(&mut self, speed: f64) {
+        self.speed = speed;
+        if !self.playing {
+            self.toggle_play();
+        }
+    }
+}
+
+/// Construit un `Sim` (humidité rapide, comme en Phase 1) et y sème une
+/// population avec son gibier près d'un continent connu de la seed. Renvoie la
+/// sim et le foyer retenu.
+fn build_sim(seed: u64, agents: usize, herd_grid: i64) -> (Sim, (i64, i64)) {
+    let cfg = WorldGenConfig {
+        humidity: HumidityConfig {
+            steps: 32,
+            lateral_samples: 0,
+            ..HumidityConfig::default()
+        },
+        ..WorldGenConfig::default()
+    };
+    let mut sim = Sim::with_config(WorldSeed(seed), CHUNK_CAPACITY, cfg);
+    let seed_point = (km_to_tiles(1500.0) as i64, km_to_tiles(2100.0) as i64);
+    let home = cairn_sim::scenario::find_home(&mut sim, seed_point);
+    cairn_sim::scenario::populate(&mut sim, home, agents, herd_grid);
+    (sim, home)
+}
+
+/// Étend une boîte englobante `(min_x, min_y, max_x, max_y)` pour inclure
+/// le point `(x, y)`.
+fn grow_bounds(b: &mut Option<(f64, f64, f64, f64)>, x: f64, y: f64) {
+    *b = Some(match *b {
+        None => (x, y, x, y),
+        Some((x0, y0, x1, y1)) => (x0.min(x), y0.min(y), x1.max(x), y1.max(y)),
+    });
+}
+
+/// Lit un paramètre `?clé=nombre` de l'URL, s'il est présent et numérique.
+fn query_param_u64(key: &str) -> Option<u64> {
+    let search = window().location().search().ok()?;
+    let needle = format!("{key}=");
+    search
+        .trim_start_matches('?')
+        .split('&')
+        .find_map(|kv| kv.strip_prefix(&needle))
+        .and_then(|v| v.parse::<u64>().ok())
+}
+
+/// Lit un champ `<input>` numérique par id ; renvoie `fallback` s'il est
+/// absent ou illisible.
+fn read_u64(id: &str, fallback: u64) -> u64 {
+    document()
+        .get_element_by_id(id)
+        .and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok())
+        .and_then(|input| input.value().trim().parse::<u64>().ok())
+        .unwrap_or(fallback)
+}
+
+/// Couleur d'un agent selon ce qu'il fait — la lisibilité du « pourquoi »
+/// chère au brief, en un coup d'œil.
+fn activity_color(activity: Activity) -> &'static str {
+    match activity {
+        Activity::Idle | Activity::Walking => "#e8503a", // rouge : en chemin
+        Activity::Eating | Activity::Hunting => "#ff9a3c", // orange : se nourrit
+        Activity::Drinking => "#46b4ff",                 // bleu : boit
+        Activity::Sleeping => "#6a6ad0",                 // indigo : dort
+        Activity::Sheltering => "#b070c8",               // mauve : s'abrite
+    }
+}
+
+// ─────────────────────── boucle d'animation permanente ───────────────────────
+
+/// Programme la prochaine frame, qui se reprogrammera elle-même — une boucle
+/// `requestAnimationFrame` continue. `once_into_js` libère chaque closure
+/// après appel (pas de fuite par frame) ; le timestamp fourni par rAF sert
+/// d'horloge de jeu.
+fn schedule_frame() {
+    let cb = Closure::once_into_js(move |ts: f64| {
+        with_app(|a| a.frame(ts));
+        schedule_frame();
+    });
+    window()
+        .request_animation_frame(cb.unchecked_ref())
+        .expect("request_animation_frame");
 }
 
 // ─────────────────────────── câblage des événements ───────────────────────────
 
-/// Ajoute un écouteur typé et **fuit** la closure (elle doit vivre aussi
-/// longtemps que la page — pas de désinscription en Phase 1).
 macro_rules! listen {
     ($target:expr, $event:literal, $ty:ty, $body:expr) => {{
         let closure = Closure::<dyn FnMut($ty)>::new($body);
@@ -264,16 +575,14 @@ fn install_event_handlers() -> Result<(), JsValue> {
         .dyn_into::<HtmlCanvasElement>()?;
     let win = window();
 
-    // Souris : down sur le canvas, move/up sur la fenêtre (le glisser continue
-    // même si le curseur sort du canvas).
     listen!(canvas, "mousedown", web_sys::MouseEvent, move |e: web_sys::MouseEvent| {
         with_app(|a| a.on_pointer_down(e.client_x() as f64, e.client_y() as f64));
     });
     listen!(win, "mousemove", web_sys::MouseEvent, move |e: web_sys::MouseEvent| {
         with_app(|a| a.on_pointer_move(e.client_x() as f64, e.client_y() as f64));
     });
-    listen!(win, "mouseup", web_sys::MouseEvent, move |_e: web_sys::MouseEvent| {
-        with_app(App::on_pointer_up);
+    listen!(win, "mouseup", web_sys::MouseEvent, move |e: web_sys::MouseEvent| {
+        with_app(|a| a.on_pointer_up(e.client_x() as f64, e.client_y() as f64));
     });
     listen!(canvas, "wheel", web_sys::WheelEvent, move |e: web_sys::WheelEvent| {
         e.prevent_default();
@@ -283,28 +592,70 @@ fn install_event_handlers() -> Result<(), JsValue> {
         with_app(App::on_resize);
     });
 
-    // Boutons de couche du panneau flottant.
+    // Boutons de couche.
     let buttons = document().query_selector_all(".layer-btn")?;
     for i in 0..buttons.length() {
         let btn = buttons.item(i).unwrap().dyn_into::<web_sys::HtmlElement>()?;
         let id = btn.get_attribute("data-layer").unwrap_or_default();
         listen!(btn, "click", web_sys::MouseEvent, move |_e: web_sys::MouseEvent| {
             if let Some(layer) = Layer::from_id(&id) {
-                set_active_button(&id);
+                set_active_button(".layer-btn", "data-layer", &id);
                 with_app(|a| a.set_layer(layer));
             }
         });
     }
-    set_active_button(Layer::Biome.id());
+    set_active_button(".layer-btn", "data-layer", Layer::Biome.id());
+
+    // Pause / lecture.
+    if let Some(btn) = document().get_element_by_id("play-toggle") {
+        listen!(btn, "click", web_sys::MouseEvent, move |_e: web_sys::MouseEvent| {
+            with_app(App::toggle_play);
+        });
+    }
+    // Suivre la population.
+    if let Some(btn) = document().get_element_by_id("follow-toggle") {
+        listen!(btn, "click", web_sys::MouseEvent, move |_e: web_sys::MouseEvent| {
+            with_app(|a| a.set_follow(!a.follow));
+        });
+    }
+
+    // Boutons de vitesse.
+    let speeds = document().query_selector_all(".speed-btn")?;
+    for i in 0..speeds.length() {
+        let btn = speeds.item(i).unwrap().dyn_into::<web_sys::HtmlElement>()?;
+        let val = btn.get_attribute("data-speed").unwrap_or_default();
+        listen!(btn, "click", web_sys::MouseEvent, move |_e: web_sys::MouseEvent| {
+            if let Ok(speed) = val.parse::<f64>() {
+                set_active_button(".speed-btn", "data-speed", &val);
+                with_app(|a| a.set_speed(speed));
+            }
+        });
+    }
+    set_active_button(".speed-btn", "data-speed", &format!("{}", SPEEDS[1]));
+
+    // Paramètres : régénérer le monde.
+    if let Some(btn) = document().get_element_by_id("cfg-apply") {
+        listen!(btn, "click", web_sys::MouseEvent, move |_e: web_sys::MouseEvent| {
+            with_app(App::rebuild);
+        });
+    }
+    // Paramètres : armer le placement d'humains au clic.
+    if let Some(btn) = document().get_element_by_id("place-toggle") {
+        listen!(btn, "click", web_sys::MouseEvent, move |_e: web_sys::MouseEvent| {
+            with_app(App::toggle_placing);
+        });
+    }
+
     Ok(())
 }
 
-/// Applique la classe `active` au bouton de la couche choisie.
-fn set_active_button(id: &str) {
-    if let Ok(buttons) = document().query_selector_all(".layer-btn") {
+/// Applique la classe `active` au bouton dont `attr` vaut `value`, dans le
+/// groupe `selector`.
+fn set_active_button(selector: &str, attr: &str, value: &str) {
+    if let Ok(buttons) = document().query_selector_all(selector) {
         for i in 0..buttons.length() {
             if let Some(el) = buttons.item(i).and_then(|n| n.dyn_into::<web_sys::Element>().ok()) {
-                let is_active = el.get_attribute("data-layer").as_deref() == Some(id);
+                let is_active = el.get_attribute(attr).as_deref() == Some(value);
                 let _ = el.class_list().toggle_with_force("active", is_active);
             }
         }
