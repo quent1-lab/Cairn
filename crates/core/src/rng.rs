@@ -64,6 +64,15 @@ impl Pcg32 {
     pub fn next_f64(&mut self) -> f64 {
         (self.next_u64() >> 11) as f64 * (1.0 / (1u64 << 53) as f64)
     }
+
+    /// Tirage gaussien standard (moyenne 0, écart-type 1) par Box-Muller.
+    /// Sert à l'hérédité des traits (mutation gaussienne, BRIEF §3.1).
+    pub fn next_normal(&mut self) -> f64 {
+        // u1 est ramené dans (0, 1] : ln(0) exploserait.
+        let u1 = 1.0 - self.next_f64();
+        let u2 = self.next_f64();
+        (-2.0 * u1.ln()).sqrt() * (std::f64::consts::TAU * u2).cos()
+    }
 }
 
 #[cfg(test)]
@@ -85,6 +94,22 @@ mod tests {
         let mut b = Pcg32::new(123, 1);
         let identiques = (0..100).all(|_| a.next_u32() == b.next_u32());
         assert!(!identiques);
+    }
+
+    #[test]
+    fn la_gaussienne_est_centree_et_dispersee() {
+        let mut rng = Pcg32::new(11, 0);
+        let n = 20_000;
+        let (mut sum, mut sum_sq) = (0.0, 0.0);
+        for _ in 0..n {
+            let z = rng.next_normal();
+            sum += z;
+            sum_sq += z * z;
+        }
+        let mean = sum / n as f64;
+        let var = sum_sq / n as f64 - mean * mean;
+        assert!(mean.abs() < 0.03, "moyenne {mean:.3}, attendu ~0");
+        assert!((var - 1.0).abs() < 0.05, "variance {var:.3}, attendu ~1");
     }
 
     #[test]

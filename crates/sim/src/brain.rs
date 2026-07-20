@@ -8,16 +8,21 @@
 //! (bucketing temporel, §4) et un léger bonus d'engagement évite le
 //! papillonnage entre deux tâches presque équivalentes.
 //!
-//! Phase 2 : perception **locale et sans mémoire** — l'agent redécouvre son
-//! voisinage à chaque délibération. La carte mentale individuelle (savoir où
-//! était l'eau il y a dix jours) est le cœur de la Phase 3.
+//! La perception reste **locale** (l'agent redécouvre son voisinage à chaque
+//! délibération), mais depuis la Phase 3 elle est doublée d'une **mémoire**
+//! individuelle (`crate::memory`) : à défaut de source visible, l'agent vise
+//! celle qu'il a vue il y a dix jours. C'est elle qui rend l'exploration
+//! praticable — sans elle, s'aventurer hors de la perception locale, c'est
+//! s'aventurer hors de l'eau.
 
 use cairn_core::{Pcg32, SimTime, km_to_tiles, splitmix64};
 use cairn_worldgen::Biome;
 
 use crate::agent::{AgentId, Physiology, Position, Task, TaskKind, WALK_TILES_PER_TICK};
 use crate::curves::{Curve, softmax_pick};
+use crate::demography::{Demographics, HumanView, Kinship, Traits, find_human};
 use crate::fauna::HerdView;
+use crate::memory::{Memory, cell_of};
 use crate::salt;
 use crate::world::World;
 
@@ -39,34 +44,69 @@ const FORAGE_STRIDE: i64 = 3;
 /// Rayon et pas de la recherche d'un couvert forestier.
 const SHELTER_RADIUS: i64 = 32;
 const SHELTER_STRIDE: i64 = 4;
-/// Longueur d'une jambe d'errance (~500 m). Borne aussi l'étalement spatial
-/// de la population, donc le working set de chunks : à 600 tuiles, 100
-/// errants couvraient plus de chunks que le LRU n'en tient, et chaque
-/// lecture régénérait un chunk (thrash mesuré : la simulation s'effondrait).
+/// Longueur de base d'une jambe d'errance (~500 m) — modulée par la
+/// curiosité (×0,5 à ×1,5) et raccourcie pour les enfants. Borne aussi
+/// l'étalement spatial de la population, donc le working set de chunks : à
+/// 600 tuiles, 100 errants couvraient plus de chunks que le LRU n'en tient,
+/// et chaque lecture régénérait un chunk (thrash mesuré : la simulation
+/// s'effondrait).
 const WANDER_LEG_TILES: f64 = 250.0;
 /// En dessous de cette biomasse, une tuile ne vaut pas le déplacement.
 const FORAGE_MIN_BIOMASS: u8 = 5;
 /// Distance à laquelle un chasseur repère du gibier (~2 km). Large : c'est
 /// une bête de plusieurs centaines de kilos dans un paysage ouvert.
 const HERD_SIGHT_TILES: f64 = km_to_tiles(2.0);
+/// Au-delà de cette distance à son parent, un enfant décroche tout pour le
+/// rejoindre (~80 m).
+const FOLLOW_TRIGGER_TILES: f64 = 40.0;
+/// En deçà de cette distance au plus proche congénère, on ne se sent pas
+/// isolé (~500 m).
+const SOCIAL_TRIGGER_TILES: f64 = 250.0;
+/// Longueur d'une jambe d'exploration (~1,2 km) : plus ample que l'errance —
+/// on part *pour* voir, pas en passant.
+const EXPLORE_LEG_TILES: f64 = 600.0;
+/// Une cible d'exploration doit rester à ~2 km d'une source **connue** :
+/// l'arrimage au réseau d'eau, qui borne la dérive (voir le candidat).
+const EXPLORE_TETHER_TILES: i64 = 1000;
+
+/// L'agent vu par la délibération : son identité et ses composants, groupés
+/// pour ne pas trimballer sept paramètres.
+pub struct AgentCtx<'a> {
+    pub id: AgentId,
+    pub pos: &'a Position,
+    pub phys: &'a Physiology,
+    pub traits: &'a Traits,
+    pub demo: &'a Demographics,
+    pub kin: &'a Kinship,
+}
 
 /// Choisit la prochaine tâche de l'agent. Déterministe : le tirage dérive de
 /// (seed, tick, id agent) — deux exécutions rejouent la même hésitation.
+/// `mem` est lue (où boire, où explorer) **et** écrite (une source aperçue
+/// s'apprend) : délibérer, c'est déjà mémoriser.
 pub fn decide(
     world: &mut World,
     time: SimTime,
-    id: AgentId,
-    pos: &Position,
-    phys: &Physiology,
+    agent: AgentCtx<'_>,
+    mem: &mut Memory,
     current: Option<TaskKind>,
     herds: &[HerdView],
+    humans: &[HumanView],
 ) -> Option<Task> {
+    let AgentCtx { id, pos, phys, traits, demo, kin } = agent;
+    let adult = demo.is_adult(time.tick);
     let here = pos.tile();
     let mut candidates: Vec<(TaskKind, (i64, i64), f32)> = Vec::new();
 
-    // — Boire : seuil flou et raide, la soif devient vite impérieuse.
+    // — Boire : seuil flou et raide, la soif devient vite impérieuse. La
+    //   perception locale d'abord (et on la mémorise) ; sinon la **mémoire**
+    //   prend le relais — c'est elle qui sauve l'agent parti trop loin de
+    //   l'eau, et c'est ce qui rend l'exploration moins suicidaire.
     let spring = world.nearest_spring(here, SPRING_RADIUS_CHUNKS);
-    if let Some(target) = spring {
+    if let Some(seen) = spring {
+        mem.remember_spring(seen, (pos.x, pos.y));
+    }
+    if let Some(target) = spring.or_else(|| mem.nearest_known_spring((pos.x, pos.y))) {
         let urgency = Curve::Logistic { steepness: 9.0, midpoint: 0.45 }.eval(phys.thirst);
         let score = urgency * travel_discount(pos.distance_tiles(target));
         candidates.push((TaskKind::Drink, target, score));
@@ -82,12 +122,13 @@ pub fn decide(
         candidates.push((TaskKind::Forage, forage_target, score));
     }
 
-    // — Chasser : même pression de faim que la cueillette, mais une prise
-    //   nourrit bien davantage. Le gibier proche et nombreux attire ; quand
-    //   les troupeaux ont été décimés ou ont fui, ce candidat s'efface tout
-    //   seul et la faim repart sur la cueillette ou l'errance. C'est de là
-    //   que sort le suivi des troupeaux — rien ne dit « suis le gibier ».
-    let nearest_herd = nearest_herd(pos, herds);
+    // — Chasser (adultes seulement) : même pression de faim que la
+    //   cueillette, mais une prise nourrit bien davantage. Le gibier proche
+    //   et nombreux attire ; quand les troupeaux ont été décimés ou ont fui,
+    //   ce candidat s'efface tout seul et la faim repart sur la cueillette
+    //   ou l'errance. C'est de là que sort le suivi des troupeaux — rien ne
+    //   dit « suis le gibier ».
+    let nearest_herd = if adult { nearest_herd(pos, herds) } else { None };
     if let Some(herd) = nearest_herd {
         let target = (herd.pos.0.floor() as i64, herd.pos.1.floor() as i64);
         let urgency = Curve::Logistic { steepness: 6.0, midpoint: 0.4 }.eval(phys.hunger);
@@ -110,11 +151,107 @@ pub fn decide(
         candidates.push((TaskKind::Shelter, target, score));
     }
 
+    // — Suivre son parent (enfants) : plus il est loin, plus ça presse. La
+    //   cible est sa position d'instantané — re-visée à chaque délibération,
+    //   ce qui suffit à le suivre pas à pas.
+    if !adult {
+        let parent = kin
+            .mother
+            .and_then(|m| find_human(humans, m))
+            .or_else(|| kin.father.and_then(|f| find_human(humans, f)));
+        if let Some(parent) = parent {
+            let d = (pos.x - parent.pos.0).hypot(pos.y - parent.pos.1);
+            if d > FOLLOW_TRIGGER_TILES {
+                let score = ((d / 400.0) as f32).clamp(0.3, 1.0);
+                let target = (parent.pos.0.floor() as i64, parent.pos.1.floor() as i64);
+                candidates.push((TaskKind::Follow, target, score));
+            }
+        }
+    }
+
+    // — Rejoindre les autres (adultes isolés) : le drive « appartenir »,
+    //   pondéré par la sociabilité. C'est lui qui maintient une densité de
+    //   rencontres — donc des conceptions et des échanges de cartes mentales
+    //   (`memory::exchange_knowledge`) — sans qu'aucune règle ne dise
+    //   « restez groupés ».
+    if adult {
+        let mut nearest: Option<(f64, (f64, f64))> = None;
+        for h in humans {
+            if h.id == id {
+                continue;
+            }
+            let d2 = (pos.x - h.pos.0).powi(2) + (pos.y - h.pos.1).powi(2);
+            if nearest.is_none_or(|(bd, _)| d2 < bd) {
+                nearest = Some((d2, h.pos));
+            }
+        }
+        if let Some((d2, hpos)) = nearest {
+            let d = d2.sqrt();
+            if d > SOCIAL_TRIGGER_TILES {
+                // Pas de décote de trajet : l'isolement **est** l'urgence, et
+                // plus les autres sont loin, moins il faut tarder à rentrer.
+                // (Avec la décote, mesuré : les explorateurs partaient sans
+                // retour et la population se diluait sur 90 km.)
+                let score = 0.4 * traits.sociability;
+                let target = (hpos.0.floor() as i64, hpos.1.floor() as i64);
+                candidates.push((TaskKind::Socialize, target, score));
+            }
+        }
+    }
+
+    // — Explorer (adultes au confort) : le drive « comprendre ». La
+    //   curiosité pousse vers une cellule **jamais visitée** — huit azimuts
+    //   sondés, on tire parmi ceux qui mènent à l'inconnu (et à la terre).
+    //   Deux gardes-fous, tous deux mesurés sur la démo d'un an :
+    //   - un besoin qui monte éteint l'envie (on n'explore que repu) ;
+    //   - la cible doit rester **à portée d'une source connue** — on pousse
+    //     la frontière le long du réseau d'eau, on ne s'enfonce pas dans
+    //     l'inconnu sec. Sans cet arrimage, la population s'étalait sur
+    //     90 km en un an et le churn de chunks écroulait la simulation
+    //     (0,2 tick/s) tout en dissolvant la moindre vie sociale.
+    let comfort = 1.0
+        - phys
+            .hunger
+            .max(phys.thirst)
+            .max(phys.fatigue)
+            .max(phys.cold);
+    if adult && comfort > 0.5 {
+        let mut unknown: Vec<(i64, i64)> = Vec::new();
+        for k in 0..8 {
+            let angle = f64::from(k) * std::f64::consts::TAU / 8.0;
+            let target = (
+                (pos.x + angle.cos() * EXPLORE_LEG_TILES).floor() as i64,
+                (pos.y + angle.sin() * EXPLORE_LEG_TILES).floor() as i64,
+            );
+            let watered = mem
+                .nearest_known_spring((target.0 as f64, target.1 as f64))
+                .is_some_and(|s| {
+                    let d2 = (s.0 - target.0).pow(2) + (s.1 - target.1).pow(2);
+                    d2 <= EXPLORE_TETHER_TILES * EXPLORE_TETHER_TILES
+                });
+            if watered
+                && !mem.knows_cell(cell_of(target))
+                && world.worldgen().elevation(target.0, target.1) > 0.0
+            {
+                unknown.push(target);
+            }
+        }
+        if !unknown.is_empty() {
+            let mut rng =
+                Pcg32::new(world.seed().derive(salt::EXPLORE) ^ splitmix64(time.tick), id.0);
+            let target = unknown[(rng.next_u32() as usize) % unknown.len()];
+            let score = 0.15 * traits.curiosity * comfort;
+            candidates.push((TaskKind::Explore, target, score));
+        }
+    }
+
     // — Errer : bruit de fond exploratoire, qui enfle en désespoir quand un
-    //   besoin monte sans solution locale. C'est lui qui disperse les groupes
-    //   quand une zone s'épuise — personne ne le scripte.
+    //   besoin monte sans solution — ni vue, ni **sue** : connaître une
+    //   source, même lointaine, suffit à garder son calme. C'est l'errance
+    //   qui disperse les groupes quand une zone s'épuise — personne ne le
+    //   scripte.
     let mut desperation = 0.0;
-    if spring.is_none() {
+    if spring.is_none() && mem.nearest_known_spring((pos.x, pos.y)).is_none() {
         desperation += 0.6 * phys.thirst;
     }
     // La faim ne pousse à partir que si **ni** la cueillette **ni** le gibier
@@ -130,10 +267,20 @@ pub fn decide(
     // tuile ferme avant l'eau. Sans ça, errer vers l'océan déclenchait un A*
     // (partiel, coûteux) pour un but inatteignable — cause n°1 de pathfinding
     // inutile près des côtes.
+    //
+    // La longueur de la jambe suit la **curiosité** (héritée) : un curieux
+    // pousse plus loin du connu — c'est le critère mesurable « les curieux
+    // explorent plus loin ». Les enfants font des jambes courtes : ils
+    // gravitent autour de leurs parents.
+    let leg = if adult {
+        WANDER_LEG_TILES * (0.5 + f64::from(traits.curiosity))
+    } else {
+        WANDER_LEG_TILES * 0.25
+    };
     let (dx, dy) = (angle.cos(), angle.sin());
     let mut wander_target = here;
     let mut d = 40.0;
-    while d <= WANDER_LEG_TILES {
+    while d <= leg {
         let p = ((pos.x + dx * d).floor() as i64, (pos.y + dy * d).floor() as i64);
         if world.worldgen().elevation(p.0, p.1) <= 0.0 {
             break; // eau : on s'arrête à la dernière terre trouvée

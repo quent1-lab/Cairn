@@ -24,7 +24,7 @@ use std::collections::HashMap;
 
 use cairn_core::WorldSeed;
 use cairn_core::scale::{km_to_tiles, tiles_to_km};
-use cairn_sim::{Activity, AgentId, Behavior, FaunaId, Herd, Pack, Position, Sim};
+use cairn_sim::{Activity, AgentId, Behavior, Demographics, FaunaId, Herd, Pack, Position, Sim};
 use cairn_worldgen::{HumidityConfig, WorldGenConfig};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{Clamped, JsCast};
@@ -406,13 +406,18 @@ impl App {
 
         // Humains. Deux modes : une couleur fixe, ou la couleur de l'activité
         // (qui chasse, qui boit, qui dort). En couleur fixe on pose le style
-        // une seule fois.
+        // une seule fois. Les enfants sont des carrés plus petits — on voit
+        // la lignée grandir sans ouvrir le moindre panneau.
         let s = scale.clamp(2.5, 8.0);
+        let tick = self.sim.time.tick;
         if !self.color_by_activity {
             self.ctx.set_fill_style_str(HUMAN_COLOR);
         }
-        for (_, (id, pos, behavior)) in
-            self.sim.agents.query::<(&AgentId, &Position, &Behavior)>().iter()
+        for (_, (id, pos, behavior, demo)) in self
+            .sim
+            .agents
+            .query::<(&AgentId, &Position, &Behavior, &Demographics)>()
+            .iter()
         {
             let (sx, sy) = place(self.prev_pos.get(&id.0), pos.x, pos.y);
             if !visible(sx, sy) {
@@ -421,6 +426,7 @@ impl App {
             if self.color_by_activity {
                 self.ctx.set_fill_style_str(activity_color(behavior.activity));
             }
+            let s = if demo.is_adult(tick) { s } else { (s * 0.55).max(2.0) };
             self.ctx.fill_rect(sx - s / 2.0, sy - s / 2.0, s, s);
         }
     }
@@ -439,15 +445,56 @@ impl App {
         if let Some(el) = document().get_element_by_id("sim-readout") {
             let (herbivores, predators, _, _) = self.sim.fauna_census();
             let t = self.sim.time;
+            let children = self
+                .sim
+                .agents
+                .query::<&Demographics>()
+                .iter()
+                .filter(|(_, d)| !d.is_adult(t.tick))
+                .count();
             el.set_text_content(Some(&format!(
-                "An {}, jour {} · {} humains · {:.0} gibier · {:.0} prédateurs",
+                "An {}, jour {} · {} humains (dont {} enfants, {} naissances) · {:.0} gibier · {:.0} prédateurs",
                 t.year(),
                 t.day_of_year(),
                 self.sim.population(),
+                children,
+                self.sim.births.len(),
                 herbivores,
                 predators,
             )));
         }
+        self.update_pyramid();
+    }
+
+    /// La pyramide des âges du panneau : tranches de 10 ans, barres unicode.
+    /// L'observable démographique de la Phase 3 — une population qui persiste
+    /// a une base d'enfants et un sommet d'anciens.
+    fn update_pyramid(&self) {
+        let Some(el) = document().get_element_by_id("age-pyramid") else {
+            return;
+        };
+        let tick = self.sim.time.tick;
+        let mut buckets = [0usize; 8]; // 0-9, 10-19, …, 70+
+        for (_, demo) in self.sim.agents.query::<&Demographics>().iter() {
+            let age = demo.age_years(tick).max(0.0);
+            buckets[((age / 10.0) as usize).min(7)] += 1;
+        }
+        let total: usize = buckets.iter().sum();
+        if total == 0 {
+            el.set_text_content(Some("population éteinte"));
+            return;
+        }
+        let mut text = String::new();
+        for (i, &n) in buckets.iter().enumerate().rev() {
+            if n == 0 {
+                continue;
+            }
+            // Barres proportionnelles, 24 colonnes au plus.
+            let bar = "█".repeat(1 + n * 23 / total.max(1));
+            let label = if i == 7 { "70+".to_string() } else { format!("{:>2}-{}", i * 10, i * 10 + 9) };
+            text.push_str(&format!("{label:>5} {bar} {n}\n"));
+        }
+        el.set_text_content(Some(&text));
     }
 
     fn invalidate_terrain(&mut self) {

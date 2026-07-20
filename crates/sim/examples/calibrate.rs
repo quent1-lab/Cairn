@@ -93,7 +93,10 @@ fn main() {
                 sim.step();
             }
             let (starved, dehydrated, frozen) = death_counts(&sim);
-            let dead = placed - sim.population();
+            // Le nombre de décès enregistrés, pas `placed - population()` :
+            // depuis la Phase 3, les naissances peuvent faire dépasser la
+            // population de départ, et cette soustraction (usize) débordait.
+            let dead = sim.deaths.len();
             let alive = sim.population();
             // Fraction du temps de vie passée à s'abriter : preuve du
             // comportement « s'abriter quand il fait froid ».
@@ -127,6 +130,8 @@ fn death_counts(sim: &Sim) -> (usize, usize, usize) {
             DeathCause::Starvation => c.0 += 1,
             DeathCause::Dehydration => c.1 += 1,
             DeathCause::Hypothermia => c.2 += 1,
+            // La vieillesse n'est pas un signal de calibrage climatique.
+            DeathCause::OldAge => {}
         }
     }
     c

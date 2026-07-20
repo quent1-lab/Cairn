@@ -1,5 +1,7 @@
-//! L'agent et sa physiologie (BRIEF §3.1, Phase 2 : le bloc physiologie
-//! seulement — traits, compétences, mémoire et social viendront en Phase 3+).
+//! L'agent et sa physiologie (BRIEF §3.1) : faim, soif, fatigue, froid,
+//! santé, mort. Les autres blocs du brief vivent dans leurs propres modules —
+//! traits et démographie dans `demography`, mémoire spatiale dans `memory`,
+//! compétences dans `skills` — pour que chacun reste lisible seul.
 //!
 //! Chaque agent est une entité `hecs` composée de petits **composants** :
 //! son identité, sa position, sa physiologie, son comportement. Les systèmes
@@ -100,11 +102,23 @@ pub enum TaskKind {
     Drink,
     Forage,
     /// Chasser un troupeau : bien plus nourrissant que la cueillette, mais il
-    /// faut rejoindre du gibier qui fuit.
+    /// faut rejoindre du gibier qui fuit. Réservé aux adultes.
     Hunt,
     Sleep,
     Shelter,
     Wander,
+    /// Un enfant rejoint son parent : la cible est la dernière position
+    /// connue du parent — re-visée à chaque délibération, ce qui suffit à le
+    /// suivre sans machinerie de cible mobile.
+    Follow,
+    /// Rejoindre le plus proche congénère quand on est isolé. C'est le drive
+    /// « appartenir » réduit à sa plus simple expression : sans lui, une
+    /// population sans clans diffuse jusqu'à ce que plus personne ne se
+    /// croise — et sans rencontres, ni reproduction ni transmission.
+    Socialize,
+    /// Marcher vers une cellule jamais visitée : le drive « comprendre »,
+    /// réservé aux curieux dont les besoins sont contenus (voir `brain`).
+    Explore,
 }
 
 /// Le composant « comportement » : la tâche en cours et l'activité de l'heure.
@@ -119,6 +133,8 @@ pub enum DeathCause {
     Starvation,
     Dehydration,
     Hypothermia,
+    /// Sénescence (tirage quotidien de Gompertz, voir `demography`).
+    OldAge,
 }
 
 /// Les besoins vitaux, tous dans [0, 1] : 0 = comblé, 1 = critique.
@@ -153,14 +169,18 @@ impl Physiology {
     /// Une heure de dérive passive : les besoins montent, le corps subit la
     /// température **ressentie** `felt_c` (air + abris), la santé s'érode ou
     /// se répare. Pure — c'est ce qui la rend testable sans monde.
-    pub fn drift(&mut self, felt_c: f64, activity: Activity) {
+    ///
+    /// `endurance` est le trait hérité (0–1) : un corps endurant fatigue
+    /// moins vite (×0,75 à endurance 1, ×1,25 à endurance 0).
+    pub fn drift(&mut self, felt_c: f64, activity: Activity, endurance: f32) {
         self.hunger = (self.hunger + HUNGER_PER_TICK).min(1.0);
         self.thirst = (self.thirst + THIRST_PER_TICK).min(1.0);
 
         if activity == Activity::Sleeping {
             self.fatigue = (self.fatigue - FATIGUE_SLEEP_RECOVERY).max(0.0);
         } else {
-            self.fatigue = (self.fatigue + FATIGUE_AWAKE_PER_TICK).min(1.0);
+            let rate = FATIGUE_AWAKE_PER_TICK * (1.25 - 0.5 * endurance);
+            self.fatigue = (self.fatigue + rate).min(1.0);
         }
 
         // Froid : accumulation proportionnelle au déficit (à -20 °C ressenti,
@@ -214,7 +234,7 @@ mod tests {
         let mut heures = 0;
         while !p.is_dead() && heures < 24 * 10 {
             // Climat doux, repos : seule la soif tue.
-            p.drift(15.0, Activity::Idle);
+            p.drift(15.0, Activity::Idle, 0.5);
             p.hunger = 0.5; // nourri de force : isole la soif
             heures += 1;
         }
@@ -230,7 +250,7 @@ mod tests {
         let mut gele = Physiology::default();
         let mut heures_froid = 0;
         while !gele.is_dead() && heures_froid < 24 * 30 {
-            gele.drift(-25.0, Activity::Idle);
+            gele.drift(-25.0, Activity::Idle, 0.5);
             gele.thirst = 0.5;
             gele.hunger = 0.5;
             heures_froid += 1;
@@ -246,7 +266,7 @@ mod tests {
     fn bien_pourvu_on_recupere() {
         let mut p = Physiology { health: 0.5, ..Default::default() };
         for _ in 0..24 {
-            p.drift(15.0, Activity::Idle);
+            p.drift(15.0, Activity::Idle, 0.5);
             p.hunger = 0.2;
             p.thirst = 0.2;
         }
@@ -257,7 +277,7 @@ mod tests {
     fn dormir_efface_la_fatigue() {
         let mut p = Physiology { fatigue: 0.9, ..Default::default() };
         for _ in 0..8 {
-            p.drift(15.0, Activity::Sleeping);
+            p.drift(15.0, Activity::Sleeping, 0.5);
         }
         assert!(p.fatigue < 0.05);
     }
@@ -272,8 +292,8 @@ mod tests {
         let mut expose = Physiology::default();
         let mut abrite = Physiology::default();
         for _ in 0..48 {
-            expose.drift(felt_expose, Activity::Idle);
-            abrite.drift(felt_abrite, Activity::Sheltering);
+            expose.drift(felt_expose, Activity::Idle, 0.5);
+            abrite.drift(felt_abrite, Activity::Sheltering, 0.5);
         }
         assert!(expose.cold > 0.15, "à découvert le froid s'accumule");
         assert_eq!(abrite.cold, 0.0, "abrité, aucun stress thermique");

@@ -99,6 +99,11 @@
     #sim-readout {
       color: var(--text); font-size: 11px; font-variant-numeric: tabular-nums;
     }
+    /* Pyramide des âges (Phase 3) : texte préformaté, barres unicode. */
+    #age-pyramid {
+      color: var(--text-dim); font: 10px ui-monospace, monospace;
+      white-space: pre; line-height: 1.5;
+    }
 
     /* Onglets. */
     .tabs { display: flex; gap: 4px; margin-bottom: 2px; }
@@ -176,6 +181,7 @@
           <button id="follow-toggle" class="layer-btn active">⊙ Suivre la population</button>
           <button id="color-toggle" class="layer-btn">Couleur : activité</button>
           <div id="sim-readout">…</div>
+          <div id="age-pyramid"></div>
           <div id="legend">
             <div id="legend-activity" style="display:grid; gap:3px;">
               <div class="row"><span class="dot" style="background:#e8503a"></span>humain (en chemin)</div>
@@ -185,6 +191,7 @@
             </div>
             <div class="row"><span class="dot" style="background:#c8a24a"></span>troupeau</div>
             <div class="row"><span class="dot" style="background:#8b3fb0"></span>prédateurs</div>
+            <div class="row"><span class="dot" style="width:6px;height:6px;background:#e8503a"></span>petit carré = enfant</div>
           </div>
         </div>
       </div>

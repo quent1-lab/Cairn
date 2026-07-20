@@ -1,0 +1,6 @@
+# Linker explicite pour la cible GNU : le paquet WinGet de WinLibs vit sous
+# « C:\Users\<utilisateur>\… » et son spec GCC injecte `default-manifest.o` avec
+# ce chemin **non quoté** → ld coupe à l'espace et le lien échoue. On pointe
+# vers la même toolchain installée sous C:\mingw64 (chemin sans espace).
+[target.x86_64-pc-windows-gnu]
+linker = "C:\\mingw64\\bin\\x86_64-w64-mingw32-gcc.exe"

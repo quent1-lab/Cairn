@@ -7,8 +7,14 @@
 //!
 //! 0. **Instantanés** : positions du gibier, des meutes, des humains.
 //! 1. **Délibération** (bucketée) : les agents « dus » choisissent une tâche.
-//! 2. **Exécution** : chacun avance sa tâche — marche, mange, boit, chasse.
+//! 2. **Exécution** : chacun avance sa tâche — marche, mange, boit, chasse —
+//!    et note au passage où il a mis les pieds (mémoire spatiale).
+//! 2 bis. **Nourrissons** : portés par leur mère, allaités par elle.
 //! 3. **Physiologie** : les besoins dérivent, le climat mord, on meurt.
+//! 3 bis. **Démographie** (une fois par jour) : naissances, conceptions,
+//!    sénescence.
+//! 3 ter. **Savoirs** (toutes les 4 h) : échange des sources connues entre
+//!    agents à portée de conversation.
 //! 4. **Faune** : les meutes chassent, les troupeaux paissent, fuient, migrent.
 //! 5. **Écologie** (une fois par jour) : la biomasse consommée repousse.
 //!
@@ -31,11 +37,14 @@ use crate::agent::{
     Activity, AgentId, Behavior, DeathCause, FOREST_BONUS_C, Physiology, Position,
     SHELTER_BONUS_C, TaskKind, WALK_TILES_PER_TICK,
 };
-use crate::brain::{self, DELIBERATION_PERIOD};
+use crate::brain::{self, AgentCtx, DELIBERATION_PERIOD};
 use crate::climate::Climate;
+use crate::demography::{self, Demographics, HumanView, Kinship, Sex, Traits};
 use crate::ecology;
 use crate::fauna::{self, FaunaId, Herd, HerdView, Kill, Pack};
+use crate::memory::{self, Memory};
 use crate::pathfind;
+use crate::skills::{self, Skills};
 use crate::world::World;
 
 /// Un agent est « arrivé » sous une tuile et demie de sa cible.
@@ -63,7 +72,7 @@ const PATH_REQUESTS_PER_TICK: u32 = 8;
 /// rejoindre en ligne droite, vers un `goal` donné. Vit dans une table à côté
 /// de l'ECS (le composant `Behavior` doit rester `Copy`, or un chemin est un
 /// `Vec`).
-struct Route {
+pub(crate) struct Route {
     goal: (i64, i64),
     waypoints: Vec<(i64, i64)>,
     cursor: usize,
@@ -89,6 +98,16 @@ pub struct DeathRecord {
     pub pos: (i64, i64),
 }
 
+/// Trace d'une naissance — le pendant du décès, et le futur matériau de
+/// l'arbre généalogique.
+#[derive(Debug, Clone, Copy)]
+pub struct BirthRecord {
+    pub tick: u64,
+    pub mother: AgentId,
+    pub father: AgentId,
+    pub child: AgentId,
+}
+
 pub struct Sim {
     pub world: World,
     pub climate: Climate,
@@ -97,6 +116,8 @@ pub struct Sim {
     pub fauna: hecs::World,
     pub time: SimTime,
     pub deaths: Vec<DeathRecord>,
+    /// Naissances depuis le début du monde (Phase 3).
+    pub births: Vec<BirthRecord>,
     /// Têtes de gibier prélevées par les humains depuis le début : le compteur
     /// de la pression de chasse.
     pub hunted_head: f32,
@@ -105,8 +126,8 @@ pub struct Sim {
     /// Agent-ticks passés à s'abriter (observabilité du comportement de froid).
     pub shelter_ticks: u64,
     /// Trajets d'évitement d'eau en cours, par identifiant d'agent.
-    routes: BTreeMap<u64, Route>,
-    next_agent_id: u64,
+    pub(crate) routes: BTreeMap<u64, Route>,
+    pub(crate) next_agent_id: u64,
     next_fauna_id: u64,
 }
 
@@ -129,6 +150,7 @@ impl Sim {
             fauna: hecs::World::new(),
             time: SimTime::default(),
             deaths: Vec::new(),
+            births: Vec::new(),
             hunted_head: 0.0,
             path_calls: 0,
             shelter_ticks: 0,
@@ -138,14 +160,58 @@ impl Sim {
         }
     }
 
+    /// Lâche un **fondateur** : un adulte au sexe, à l'âge (16–40 ans) et
+    /// aux traits dérivés de la seed. Les enfants, eux, naissent — voir
+    /// [`demography`].
     pub fn spawn_agent(&mut self, x: f64, y: f64) -> AgentId {
         let id = AgentId(self.next_agent_id);
         self.next_agent_id += 1;
+        let (demo, traits) = demography::founder(self.world.seed(), id.0, self.time.tick);
         self.agents.spawn((
             id,
             Position { x, y },
             Physiology::default(),
             Behavior::default(),
+            traits,
+            demo,
+            Kinship { mother: None, father: None },
+            Memory::default(),
+            Skills::founder(&traits),
+        ));
+        id
+    }
+
+    /// Fait naître un enfant : traits hérités, filiation posée, besoins
+    /// presque nuls (il vient de naître au sein de sa mère).
+    pub(crate) fn spawn_child(
+        &mut self,
+        x: f64,
+        y: f64,
+        sex: Sex,
+        traits: Traits,
+        kin: Kinship,
+    ) -> AgentId {
+        let id = AgentId(self.next_agent_id);
+        self.next_agent_id += 1;
+        self.agents.spawn((
+            id,
+            Position { x, y },
+            Physiology {
+                hunger: 0.1,
+                thirst: 0.1,
+                fatigue: 0.0,
+                cold: 0.0,
+                health: 1.0,
+                last_damage: None,
+            },
+            Behavior::default(),
+            traits,
+            Demographics { sex, born_tick: self.time.tick as i64, pregnancy: None },
+            kin,
+            // Un nouveau-né ne sait rien et ne connaît rien : tout est à
+            // apprendre — c'est ce qui rend l'oubli générationnel possible.
+            Memory::default(),
+            Skills::default(),
         ));
         id
     }
@@ -166,6 +232,25 @@ impl Sim {
 
     pub fn population(&self) -> usize {
         self.agents.len() as usize
+    }
+
+    /// Instantané de la population humaine, **trié par identifiant** (les
+    /// consommateurs le fouillent par recherche binaire — retrouver un
+    /// parent, un partenaire).
+    pub fn human_views(&self) -> Vec<HumanView> {
+        let mut views: Vec<HumanView> = self
+            .agents
+            .query::<(&AgentId, &Position, &Demographics)>()
+            .iter()
+            .map(|(_, (id, pos, demo))| HumanView {
+                id: *id,
+                pos: (pos.x, pos.y),
+                sex: demo.sex,
+                adult: demo.is_adult(self.time.tick),
+            })
+            .collect();
+        views.sort_unstable_by_key(|h| h.id.0);
+        views
     }
 
     /// Instantané des troupeaux, dans l'ordre d'itération de `hecs`.
@@ -202,22 +287,34 @@ impl Sim {
     pub fn step(&mut self) {
         let time = self.time;
 
-        // 0. Instantanés : l'état de la faune tel qu'il est *au début* du
-        // tick. Tout le monde délibère sur la même photo.
+        // 0. Instantanés : l'état de la faune et des humains tel qu'il est
+        // *au début* du tick. Tout le monde délibère sur la même photo.
         let herds = self.herd_views();
+        let humans = self.human_views();
 
         // 1. Délibération — bucketée : l'agent i ne repense sa tâche qu'aux
         // ticks (tick + i) % période == 0, ou dès qu'il n'a plus de tâche.
-        for (_, (id, pos, phys, behavior)) in self
-            .agents
-            .query_mut::<(&AgentId, &Position, &Physiology, &mut Behavior)>()
-        {
+        // Les nourrissons ne délibèrent pas : ils sont portés.
+        for (_, (id, pos, phys, traits, demo, kin, behavior, mem)) in self.agents.query_mut::<(
+            &AgentId,
+            &Position,
+            &Physiology,
+            &Traits,
+            &Demographics,
+            &Kinship,
+            &mut Behavior,
+            &mut Memory,
+        )>() {
+            if demo.is_infant(time.tick) {
+                continue;
+            }
             let due = behavior.task.is_none()
                 || (time.tick.wrapping_add(id.0)) % DELIBERATION_PERIOD == 0;
             if due {
                 let current = behavior.task.map(|t| t.kind);
+                let ctx = AgentCtx { id: *id, pos, phys, traits, demo, kin };
                 behavior.task =
-                    brain::decide(&mut self.world, time, *id, pos, phys, current, &herds);
+                    brain::decide(&mut self.world, time, ctx, mem, current, &herds, &humans);
             }
         }
 
@@ -227,10 +324,25 @@ impl Sim {
         // par l'eau).
         let mut kills: Vec<Kill> = Vec::new();
         let mut path_budget = PATH_REQUESTS_PER_TICK;
-        for (_, (id, pos, phys, behavior)) in self
-            .agents
-            .query_mut::<(&AgentId, &mut Position, &mut Physiology, &mut Behavior)>()
+        for (_, (id, pos, phys, traits, demo, behavior, mem, agent_skills)) in
+            self.agents.query_mut::<(
+                &AgentId,
+                &mut Position,
+                &mut Physiology,
+                &Traits,
+                &Demographics,
+                &mut Behavior,
+                &mut Memory,
+                &mut Skills,
+            )>()
         {
+            if demo.is_infant(time.tick) {
+                continue;
+            }
+            // La capacité de travail porte l'âge : un enfant cueille mal —
+            // c'est là que « improductif » se paie (le savoir-faire, lui,
+            // vit dans `Skills` et se forge en pratiquant).
+            let work = demography::work_capacity(demo.age_years(time.tick));
             let outcome = execute(
                 &mut self.world,
                 &mut self.routes,
@@ -240,7 +352,12 @@ impl Sim {
                 phys,
                 behavior,
                 &herds,
+                work,
+                traits,
+                agent_skills,
             );
+            // Où que la tâche l'ait mené, l'agent note où il a mis les pieds.
+            mem.note_visit(pos.tile());
             if let Some(kill) = outcome {
                 kills.push(kill);
             }
@@ -248,14 +365,21 @@ impl Sim {
         self.hunted_head += kills.iter().map(|k| k.head).sum::<f32>();
         self.path_calls += u64::from(PATH_REQUESTS_PER_TICK - path_budget);
 
+        // 2 bis. Les nourrissons : portés par leur mère, allaités par elle.
+        demography::nurse_infants(self);
+
         // 3. Physiologie et morts. On collecte d'abord (on ne peut pas
         // retirer une entité pendant qu'on itère dessus), on retire après.
         let mut dead = Vec::new();
         let mut sheltered = 0u64;
-        for (entity, (id, pos, phys, behavior)) in self
-            .agents
-            .query_mut::<(&AgentId, &Position, &mut Physiology, &Behavior)>()
-        {
+        for (entity, (id, pos, phys, traits, demo, behavior)) in self.agents.query_mut::<(
+            &AgentId,
+            &Position,
+            &mut Physiology,
+            &Traits,
+            &Demographics,
+            &Behavior,
+        )>() {
             let (x, y) = pos.tile();
             let tile = self.world.tile(x, y);
             let mut felt = self.climate.instant(&tile, y, time);
@@ -271,7 +395,11 @@ impl Sim {
                 felt += SHELTER_BONUS_C;
                 sheltered += 1;
             }
-            phys.drift(felt, behavior.activity);
+            phys.drift(felt, behavior.activity, traits.endurance);
+            // Une grossesse se nourrit : le surcoût s'ajoute à la dérive.
+            if demo.pregnancy.is_some() {
+                phys.hunger = (phys.hunger + demography::PREGNANCY_HUNGER_PER_TICK).min(1.0);
+            }
             if phys.is_dead() {
                 let cause = phys.last_damage.unwrap_or(DeathCause::Starvation);
                 dead.push((entity, *id, cause, (x, y)));
@@ -284,6 +412,20 @@ impl Sim {
             let _ = self.agents.despawn(entity);
             self.routes.remove(&agent.0); // pas de trajet fantôme d'un mort
             self.deaths.push(DeathRecord { tick: time.tick, agent, cause, pos });
+        }
+
+        // 3 bis. Démographie quotidienne à minuit : naissances, conceptions,
+        // sénescence.
+        if time.tick.is_multiple_of(TICKS_PER_DAY) {
+            demography::daily(self);
+        }
+
+        // 3 ter. Échange de savoirs toutes les 4 h : un instantané quotidien
+        // raterait les croisements de la journée (on se parle en se
+        // rencontrant, pas à minuit pile). Les enfants héritent ainsi des
+        // sources de leurs parents simplement en vivant à leurs côtés.
+        if time.tick % 4 == 0 {
+            memory::exchange_knowledge(self);
         }
 
         // 4. Faune. Les meutes chassent d'abord (sur l'instantané), puis
@@ -337,7 +479,9 @@ impl Sim {
 }
 
 /// Avance la tâche courante d'un agent : marche vers la cible (en contournant
-/// l'eau si besoin), puis agit. Renvoie une prise si l'agent a abattu du
+/// l'eau si besoin), puis agit. `work` est la capacité de travail liée à
+/// l'âge ; les compétences (`agent_skills`) modulent le rendement des gestes
+/// **et se forgent en les faisant**. Renvoie une prise si l'agent a abattu du
 /// gibier ce tick.
 #[allow(clippy::too_many_arguments)]
 fn execute(
@@ -349,6 +493,9 @@ fn execute(
     phys: &mut Physiology,
     behavior: &mut Behavior,
     herds: &[HerdView],
+    work: f32,
+    traits: &Traits,
+    agent_skills: &mut Skills,
 ) -> Option<Kill> {
     let task = match behavior.task {
         Some(task) => task,
@@ -377,7 +524,15 @@ fn execute(
             return None;
         }
         behavior.activity = Activity::Hunting;
-        phys.hunger = (phys.hunger - HUNT_NUTRITION).max(0.0);
+        // Un bon chasseur tire plus d'une bête (dépeçage, choix de la proie) —
+        // et chaque mise à mort forge le geste bien plus qu'une heure d'affût.
+        let nutrition = HUNT_NUTRITION * (0.75 + 0.5 * agent_skills.hunting);
+        skills::practice(
+            &mut agent_skills.hunting,
+            skills::hunt_cap(traits),
+            skills::KILL_PRACTICE_BOOST,
+        );
+        phys.hunger = (phys.hunger - nutrition).max(0.0);
         behavior.task = None;
         return Some(Kill { herd: prey.entity, head: HUNT_YIELD_HEAD });
     }
@@ -404,9 +559,12 @@ fn execute(
         }
         TaskKind::Forage => {
             behavior.activity = Activity::Eating;
+            // Le rendement d'une heure de cueillette : l'âge (capacité) et
+            // le savoir-faire, qui se forge à chaque heure pratiquée.
+            let bite = EAT_HUNGER_PER_TICK * work * (0.6 + 0.8 * agent_skills.foraging);
+            skills::practice(&mut agent_skills.foraging, skills::forage_cap(traits), 1.0);
             let tile = world.tile_mut(task.target.0, task.target.1);
-            let wanted = (phys.hunger.min(EAT_HUNGER_PER_TICK) / NUTRITION_PER_BIOMASS)
-                .ceil() as u8;
+            let wanted = (phys.hunger.min(bite) / NUTRITION_PER_BIOMASS).ceil() as u8;
             let taken = wanted.min(tile.biomass);
             tile.biomass -= taken;
             phys.hunger = (phys.hunger - f32::from(taken) * NUTRITION_PER_BIOMASS).max(0.0);
@@ -427,9 +585,9 @@ fn execute(
                 behavior.task = None;
             }
         }
-        TaskKind::Wander => {
+        TaskKind::Wander | TaskKind::Follow | TaskKind::Socialize | TaskKind::Explore => {
             behavior.activity = Activity::Idle;
-            behavior.task = None; // arrivé au bout de la jambe d'errance
+            behavior.task = None; // arrivé — on re-délibérera aussitôt
         }
         TaskKind::Hunt => unreachable!("la chasse est traitée avant, sa cible bouge"),
     }
@@ -560,20 +718,25 @@ fn walk_line(world: &mut World, pos: &mut Position, target: (i64, i64)) -> Move 
 mod tests {
     use super::*;
 
-    /// Empreinte compacte de l'état complet : positions et physiologies dans
-    /// l'ordre des identifiants. Deux exécutions identiques ⇒ même empreinte.
-    fn fingerprint(sim: &Sim) -> Vec<(u64, u64, u64, u32, u32)> {
+    /// Empreinte compacte de l'état complet : positions, physiologies,
+    /// traits hérités, mémoire et compétences dans l'ordre des identifiants.
+    /// Deux exécutions identiques ⇒ même empreinte.
+    #[allow(clippy::type_complexity)]
+    fn fingerprint(sim: &Sim) -> Vec<(u64, u64, u64, u32, u32, u32, u64, u32)> {
         let mut all: Vec<_> = sim
             .agents
-            .query::<(&AgentId, &Position, &Physiology)>()
+            .query::<(&AgentId, &Position, &Physiology, &Traits, &Memory, &Skills)>()
             .iter()
-            .map(|(_, (id, pos, phys))| {
+            .map(|(_, (id, pos, phys, traits, mem, sk))| {
                 (
                     id.0,
                     pos.x.to_bits(),
                     pos.y.to_bits(),
                     phys.hunger.to_bits(),
                     phys.health.to_bits(),
+                    traits.curiosity.to_bits(),
+                    (mem.known.len() as u64) << 8 | mem.springs.len() as u64,
+                    sk.foraging.to_bits(),
                 )
             })
             .collect();
@@ -717,6 +880,7 @@ mod tests {
         let b = scenario(42, 30, 24 * 8);
         assert_eq!(fingerprint(&a), fingerprint(&b));
         assert_eq!(a.deaths.len(), b.deaths.len());
+        assert_eq!(a.births.len(), b.births.len());
         assert_eq!(a.world.dirty_count(), b.world.dirty_count());
         // La faune aussi : effectifs bit à bit, pas seulement « à peu près ».
         let (ha, pa, nha, npa) = a.fauna_census();
@@ -839,6 +1003,287 @@ mod tests {
         let b = scenario(43, 30, 24 * 4);
         assert!(a.population() > 0, "extinction : scénario invalide pour le test");
         assert_ne!(fingerprint(&a), fingerprint(&b));
+    }
+
+    /// Une grossesse menée à terme donne un enfant : filiation posée, traits
+    /// hérités bornés, et le nourrisson est **porté** — sa position est celle
+    /// de sa mère, tick après tick — et allaité (il ne meurt pas de faim).
+    #[test]
+    fn une_grossesse_donne_un_nourrisson_porte_et_allaite() {
+        use crate::demography::Pregnancy;
+
+        let (mut sim, _) = scenario_setup(42, 12, 0);
+        let (mut mother, mut father) = (None, None);
+        for (_, (id, demo)) in sim.agents.query::<(&AgentId, &Demographics)>().iter() {
+            match demo.sex {
+                Sex::Female if mother.is_none() => mother = Some(*id),
+                Sex::Male if father.is_none() => father = Some(*id),
+                _ => {}
+            }
+        }
+        let (mother, father) = (mother.expect("aucune femme"), father.expect("aucun homme"));
+        // Grossesse imposée, à terme dans 2 jours : on teste la naissance et
+        // l'enfance, pas la rencontre (testée par ailleurs).
+        let due = sim.time.tick + 48;
+        let father_traits = Traits { curiosity: 0.9, ..Traits::default() };
+        for (_, (id, demo)) in sim.agents.query_mut::<(&AgentId, &mut Demographics)>() {
+            if *id == mother {
+                demo.pregnancy = Some(Pregnancy { due_tick: due, father, father_traits });
+            }
+        }
+
+        for _ in 0..24 * 8 {
+            sim.step();
+        }
+
+        assert_eq!(sim.births.len(), 1, "une naissance attendue");
+        let birth = sim.births[0];
+        assert_eq!(birth.mother, mother);
+        assert_eq!(birth.father, father);
+
+        let mut mother_pos = None;
+        let mut child = None;
+        for (_, (id, pos, kin, traits, demo, phys)) in sim
+            .agents
+            .query::<(&AgentId, &Position, &Kinship, &Traits, &Demographics, &Physiology)>()
+            .iter()
+        {
+            if *id == mother {
+                mother_pos = Some((pos.x, pos.y));
+            }
+            if *id == birth.child {
+                child = Some(((pos.x, pos.y), *kin, *traits, *demo, *phys));
+            }
+        }
+        let mother_pos = mother_pos.expect("la mère doit survivre à ce scénario doux");
+        let ((cx, cy), kin, traits, demo, phys) =
+            child.expect("le nourrisson doit survivre, porté et allaité");
+        assert_eq!(kin.mother, Some(mother));
+        assert_eq!(kin.father, Some(father));
+        assert!(demo.is_infant(sim.time.tick));
+        for t in [
+            traits.strength,
+            traits.endurance,
+            traits.dexterity,
+            traits.curiosity,
+            traits.sociability,
+            traits.aggression,
+        ] {
+            assert!((0.0..=1.0).contains(&t), "trait hors bornes : {t}");
+        }
+        // Porté : après 6 jours de vie, toujours dans les bras de sa mère.
+        let d = (cx - mother_pos.0).hypot(cy - mother_pos.1);
+        assert!(d < 1.0, "le nourrisson doit être porté ({d:.1} tuiles de sa mère)");
+        // Allaité : la faim ne s'accumule pas.
+        assert!(phys.hunger < 0.5, "nourrisson affamé ({:.2}) malgré l'allaitement", phys.hunger);
+    }
+
+    /// Le revers de l'allaitement : un nourrisson sans mère n'a personne
+    /// pour le porter ni le nourrir — il meurt en quelques jours. Aucune
+    /// règle ne dit « les orphelins meurent » : la dérive suffit.
+    #[test]
+    fn un_nourrisson_orphelin_ne_survit_pas() {
+        let (mut sim, home) = scenario_setup(42, 6, 0);
+        let orphan = sim.spawn_child(
+            home.0 as f64 + 0.5,
+            home.1 as f64 + 0.5,
+            Sex::Male,
+            Traits::default(),
+            Kinship { mother: None, father: None },
+        );
+        for _ in 0..24 * 8 {
+            sim.step();
+        }
+        assert!(
+            sim.deaths.iter().any(|d| d.agent == orphan),
+            "l'orphelin devrait être mort en 8 jours"
+        );
+    }
+
+    /// La rencontre suffit : un campement mixte produit des conceptions en
+    /// quelques semaines, sans aucune intervention.
+    #[test]
+    fn les_conceptions_surviennent_au_campement() {
+        let (mut sim, _) = scenario_setup(42, 30, 0);
+        for _ in 0..24 * 45 {
+            sim.step();
+        }
+        let pregnancies = sim
+            .agents
+            .query::<&Demographics>()
+            .iter()
+            .filter(|(_, d)| d.pregnancy.is_some())
+            .count();
+        assert!(
+            pregnancies + sim.births.len() > 0,
+            "30 adultes mêlés pendant 45 jours : au moins une conception attendue"
+        );
+    }
+
+    /// Un enfant (ni nourrisson ni adulte) **suit** son parent : lâché à
+    /// 300 tuiles de sa mère, il la rejoint et gravite ensuite autour d'elle.
+    #[test]
+    fn un_enfant_suit_sa_mere() {
+        let (mut sim, home) = scenario_setup(42, 4, 0);
+        let mother = sim
+            .agents
+            .query::<(&AgentId, &Demographics)>()
+            .iter()
+            .find(|(_, (_, d))| d.sex == Sex::Female)
+            .map(|(_, (id, _))| *id)
+            .expect("aucune femme parmi les fondateurs");
+        let child = sim.spawn_child(
+            home.0 as f64 + 300.5,
+            home.1 as f64 + 0.5,
+            Sex::Female,
+            Traits::default(),
+            Kinship { mother: Some(mother), father: None },
+        );
+        // Vieilli à 8 ans : un enfant autonome (marche, cueille) mais pas un
+        // adulte — c'est lui qui a le candidat « suivre son parent ».
+        for (_, (id, demo)) in sim.agents.query_mut::<(&AgentId, &mut Demographics)>() {
+            if *id == child {
+                demo.born_tick -= (8.0 * cairn_core::TICKS_PER_YEAR as f64) as i64;
+            }
+        }
+
+        for _ in 0..24 * 3 {
+            sim.step();
+        }
+
+        let mut positions = BTreeMap::new();
+        for (_, (id, pos)) in sim.agents.query::<(&AgentId, &Position)>().iter() {
+            positions.insert(id.0, (pos.x, pos.y));
+        }
+        let m = positions.get(&mother.0).expect("mère morte : scénario invalide");
+        let c = positions.get(&child.0).expect("enfant mort : scénario invalide");
+        let d = (c.0 - m.0).hypot(c.1 - m.1);
+        assert!(
+            d < 200.0,
+            "l'enfant devrait graviter autour de sa mère (à {d:.0} tuiles après 3 jours, départ 300)"
+        );
+    }
+
+    /// LE critère de la carte mentale : « strictement incluse dans ce que
+    /// l'agent a pu percevoir ». On rejoue la simulation pas à pas en notant
+    /// **de l'extérieur** où chaque agent a mis les pieds, puis on vérifie
+    /// que sa mémoire ne contient rien d'autre : cellules ⊆ cellules
+    /// foulées, sources ⊆ vraies sources (vues ou apprises d'un autre —
+    /// qui ne mémorise lui-même que du vrai). Aucune omniscience possible.
+    #[test]
+    fn la_carte_mentale_reste_dans_le_percu() {
+        let (mut sim, _) = scenario_setup(42, 10, 0);
+        let mut stepped: BTreeMap<u64, std::collections::BTreeSet<(i64, i64)>> = BTreeMap::new();
+        for _ in 0..24 * 10 {
+            sim.step();
+            for (_, (id, pos)) in sim.agents.query::<(&AgentId, &Position)>().iter() {
+                stepped.entry(id.0).or_default().insert(crate::memory::cell_of(pos.tile()));
+            }
+        }
+        let mut checked = 0;
+        let mut spring_seen = 0;
+        for (_, (id, mem)) in sim.agents.query::<(&AgentId, &Memory)>().iter() {
+            let walked = stepped.get(&id.0).expect("agent jamais observé");
+            for cell in &mem.known {
+                assert!(
+                    walked.contains(cell),
+                    "agent {} : cellule {cell:?} en mémoire sans y avoir mis les pieds",
+                    id.0
+                );
+            }
+            checked += 1;
+            spring_seen += mem.springs.len();
+        }
+        assert!(checked > 0, "population disparue : scénario invalide");
+        assert!(spring_seen > 0, "personne n'a mémorisé la moindre source en 10 jours ?");
+        // Chaque source mémorisée est une vraie source (eau douce à la tuile).
+        let springs: Vec<(u64, (i64, i64))> = sim
+            .agents
+            .query::<(&AgentId, &Memory)>()
+            .iter()
+            .flat_map(|(_, (id, mem))| mem.springs.iter().map(|s| (id.0, *s)).collect::<Vec<_>>())
+            .collect();
+        for (agent, (x, y)) in springs {
+            assert!(
+                sim.world.tile(x, y).has_fresh_water(),
+                "agent {agent} : source fantôme en ({x}, {y})"
+            );
+        }
+        // Et la pratique a forgé au moins un cueilleur au-delà de son départ.
+        let progressed = sim
+            .agents
+            .query::<(&Traits, &Skills)>()
+            .iter()
+            .any(|(_, (t, s))| s.foraging > 0.5 * crate::skills::forage_cap(t) + 1e-4);
+        assert!(progressed, "10 jours de cueillette doivent forger la compétence");
+    }
+
+    /// Critère : « deux groupes qui se rencontrent échangent de l'information
+    /// géographique ». Une source connue du seul agent A passe à B, à portée
+    /// de conversation — et **pas** à C, trop loin pour entendre.
+    #[test]
+    fn les_rencontres_echangent_les_sources() {
+        let (mut sim, home) = scenario_setup(42, 2, 0);
+        let far = sim.spawn_agent(home.0 as f64 + 5_000.0, home.1 as f64 + 0.5);
+        let ids: Vec<AgentId> = sim
+            .agents
+            .query::<&AgentId>()
+            .iter()
+            .map(|(_, id)| *id)
+            .collect();
+        let secret = (123_456, -654_321); // n'importe où : on teste le canal
+        for (_, (id, mem)) in sim.agents.query_mut::<(&AgentId, &mut Memory)>() {
+            if *id == ids[0] {
+                mem.remember_spring(secret, (0.0, 0.0));
+            }
+        }
+        crate::memory::exchange_knowledge(&mut sim);
+        let knows = |sim: &Sim, who: AgentId| {
+            sim.agents
+                .query::<(&AgentId, &Memory)>()
+                .iter()
+                .any(|(_, (id, mem))| *id == who && mem.springs.contains(&secret))
+        };
+        assert!(
+            knows(&sim, ids[1]),
+            "la source connue de A doit être apprise par B, à 12 tuiles de lui"
+        );
+        assert!(
+            !knows(&sim, far),
+            "à 10 km, C est bien trop loin pour entendre parler de la source"
+        );
+    }
+
+    /// Critère : « les agents curieux explorent plus loin, mesurablement ».
+    /// Deux moitiés de population identiques à la curiosité près ; après
+    /// deux semaines, les curieux connaissent nettement plus de cellules.
+    #[test]
+    fn les_curieux_explorent_plus_loin() {
+        let (mut sim, _) = scenario_setup(42, 20, 0);
+        for (_, (id, traits)) in sim.agents.query_mut::<(&AgentId, &mut Traits)>() {
+            *traits = Traits {
+                curiosity: if id.0 % 2 == 0 { 0.95 } else { 0.05 },
+                sociability: 0.2, // la même cohésion pour tous : on isole la curiosité
+                ..Traits::default()
+            };
+        }
+        for _ in 0..24 * 14 {
+            sim.step();
+        }
+        let (mut curious, mut dull) = ((0usize, 0usize), (0usize, 0usize));
+        for (_, (id, mem)) in sim.agents.query::<(&AgentId, &Memory)>().iter() {
+            let bucket = if id.0 % 2 == 0 { &mut curious } else { &mut dull };
+            bucket.0 += mem.known.len();
+            bucket.1 += 1;
+        }
+        assert!(curious.1 > 0 && dull.1 > 0, "un groupe s'est éteint : scénario invalide");
+        let mean_curious = curious.0 as f64 / curious.1 as f64;
+        let mean_dull = dull.0 as f64 / dull.1 as f64;
+        assert!(
+            mean_curious > mean_dull * 1.2,
+            "les curieux doivent connaître nettement plus de terrain \
+             ({mean_curious:.1} cellules contre {mean_dull:.1})"
+        );
     }
 
     #[test]

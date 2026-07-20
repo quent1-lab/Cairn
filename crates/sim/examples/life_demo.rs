@@ -8,8 +8,11 @@
 //!
 //! Usage : cargo run --release -p cairn-sim --example life_demo -- [seed] [années] [agents]
 
-use cairn_core::{TICKS_PER_DAY, TICKS_PER_YEAR, WorldSeed, km_to_tiles};
-use cairn_sim::{AgentId, DeathCause, Herd, Pack, Physiology, Position, Sim, fauna};
+use cairn_core::{TICKS_PER_DAY, TICKS_PER_YEAR, WorldSeed, km_to_tiles, tiles_to_km};
+use cairn_sim::{
+    AgentId, DeathCause, Demographics, Herd, Memory, Pack, Physiology, Position, Sim, Skills,
+    fauna, memory::MEMORY_CELL_TILES,
+};
 use cairn_worldgen::Biome;
 
 /// Chunks résidents : ~520 Mio (dans la cible 2 Go du brief). Doit couvrir le
@@ -27,7 +30,9 @@ fn main() {
     let years: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(1);
     let n_agents: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(100);
 
-    println!("— Cairn, Phase 2 : LA VIE — seed {seed}, {years} an(s), {n_agents} agents\n");
+    println!(
+        "— Cairn, Phases 2-3 : LA VIE & LE NOMBRE — seed {seed}, {years} an(s), {n_agents} agents\n"
+    );
 
     let mut sim = Sim::new(WorldSeed(seed), CHUNK_CAPACITY);
     let origin = find_home(&mut sim);
@@ -96,8 +101,8 @@ fn main() {
     );
 
     println!(
-        "{:>4} {:>5} | {:>5} {:>5} {:>5} | {:>5} {:>5} {:>5} | {:>6} {:>6} {:>6} | {:>6}",
-        "mois", "pop", "faim", "soif", "froid", "†faim", "†soif", "†froid",
+        "{:>4} {:>5} {:>5} | {:>5} {:>5} {:>5} | {:>5} {:>5} {:>5} {:>4} | {:>6} {:>6} {:>6} | {:>6}",
+        "mois", "pop", "naiss", "faim", "soif", "froid", "†faim", "†soif", "†froid", "†âge",
         "gibier", "loc3km", "prises", "préda"
     );
 
@@ -111,12 +116,19 @@ fn main() {
     }
     let elapsed = start.elapsed();
 
-    let (starved, dehydrated, frozen) = death_counts(&sim);
+    let (starved, dehydrated, frozen, old_age) = death_counts(&sim);
     let alive = sim.population();
     println!(
-        "\nBilan : {alive}/{placed} vivants après {years} an(s) — morts : {} faim, {} soif, {} froid",
-        starved, dehydrated, frozen
+        "\nBilan : {alive} vivants ({placed} fondateurs, {} naissances) après {years} an(s) — \
+         morts : {} faim, {} soif, {} froid, {} vieillesse",
+        sim.births.len(),
+        starved,
+        dehydrated,
+        frozen,
+        old_age
     );
+    age_pyramid(&sim);
+    knowledge_report(&sim);
     let (gibier, predateurs, troupeaux_fin, meutes_fin) = sim.fauna_census();
     let local = local_herbivores(&sim, origin, 3.0);
     println!(
@@ -142,7 +154,7 @@ fn main() {
         sim.world.dirty_count(),
     );
 
-    let dead = placed - alive;
+    let dead = sim.deaths.len();
     let verdict = if alive == 0 {
         "ÉCHEC : extinction — le monde est trop dur (ou le foyer mal choisi)."
     } else if dead == 0 {
@@ -193,16 +205,64 @@ fn find_home(sim: &mut Sim) -> (i64, i64) {
     panic!("aucun foyer habitable trouvé avec cette seed — essayer une autre");
 }
 
-fn death_counts(sim: &Sim) -> (usize, usize, usize) {
-    let mut c = (0, 0, 0);
+fn death_counts(sim: &Sim) -> (usize, usize, usize, usize) {
+    let mut c = (0, 0, 0, 0);
     for d in &sim.deaths {
         match d.cause {
             DeathCause::Starvation => c.0 += 1,
             DeathCause::Dehydration => c.1 += 1,
             DeathCause::Hypothermia => c.2 += 1,
+            DeathCause::OldAge => c.3 += 1,
         }
     }
     c
+}
+
+/// Ce que la population **sait** (Phase 3) : le territoire vécu (union des
+/// cartes mentales), les sources d'eau connues, le savoir-faire moyen.
+fn knowledge_report(sim: &Sim) {
+    let mut all_cells = std::collections::BTreeSet::new();
+    let (mut springs, mut foraging, mut hunting, mut n) = (0usize, 0.0f32, 0.0f32, 0usize);
+    for (_, (mem, skills)) in sim.agents.query::<(&Memory, &Skills)>().iter() {
+        all_cells.extend(mem.known.iter().copied());
+        springs += mem.springs.len();
+        foraging += skills.foraging;
+        hunting += skills.hunting;
+        n += 1;
+    }
+    if n == 0 {
+        return;
+    }
+    let cell_km = tiles_to_km(MEMORY_CELL_TILES as f64);
+    println!(
+        "\nSavoirs : territoire vécu {:.0} km² ({} cellules), {:.1} sources connues/tête, \
+         cueillette {:.2} / chasse {:.2} en moyenne",
+        all_cells.len() as f64 * cell_km * cell_km,
+        all_cells.len(),
+        springs as f64 / n as f64,
+        foraging / n as f32,
+        hunting / n as f32,
+    );
+}
+
+/// Pyramide des âges en ASCII : tranches de 5 ans, un « █ » par individu.
+/// C'est l'observable démographique de la Phase 3 — une population qui
+/// persiste a une base (des enfants) et un sommet (des vieux).
+fn age_pyramid(sim: &Sim) {
+    let tick = sim.time.tick;
+    let mut buckets = [0usize; 17]; // 0-4, 5-9, …, 80+
+    for (_, demo) in sim.agents.query::<&Demographics>().iter() {
+        let age = demo.age_years(tick).max(0.0);
+        buckets[((age / 5.0) as usize).min(16)] += 1;
+    }
+    println!("\nPyramide des âges :");
+    for (i, &n) in buckets.iter().enumerate().rev() {
+        if n == 0 {
+            continue;
+        }
+        let label = if i == 16 { "80+ ".to_string() } else { format!("{:>2}-{:<2}", i * 5, i * 5 + 4) };
+        println!("  {label} | {} {n}", "█".repeat(n.min(60)));
+    }
 }
 
 fn report(sim: &Sim, month: u64, origin: (i64, i64)) {
@@ -215,18 +275,20 @@ fn report(sim: &Sim, month: u64, origin: (i64, i64)) {
         n += 1;
     }
     let mean = |v: f32| if n > 0 { v / n as f32 } else { 0.0 };
-    let (starved, dehydrated, frozen) = death_counts(sim);
+    let (starved, dehydrated, frozen, old_age) = death_counts(sim);
     let (gibier, predateurs, _, _) = sim.fauna_census();
     println!(
-        "{:>4} {:>5} | {:>5.2} {:>5.2} {:>5.2} | {:>5} {:>5} {:>5} | {:>6.0} {:>6.0} {:>6.0} | {:>6.0}",
+        "{:>4} {:>5} {:>5} | {:>5.2} {:>5.2} {:>5.2} | {:>5} {:>5} {:>5} {:>4} | {:>6.0} {:>6.0} {:>6.0} | {:>6.0}",
         month,
         n,
+        sim.births.len(),
         mean(hunger),
         mean(thirst),
         mean(cold),
         starved,
         dehydrated,
         frozen,
+        old_age,
         gibier,
         local_herbivores(sim, origin, 3.0),
         sim.hunted_head,
