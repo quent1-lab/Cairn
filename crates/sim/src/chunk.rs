@@ -1,6 +1,8 @@
 //! Le chunk : un carré de 64 × 64 tuiles, unité de génération et de
 //! déchargement (BRIEF §2.1).
 
+use std::collections::BTreeSet;
+
 use cairn_core::splitmix64;
 use cairn_worldgen::{Biome, WorldGen};
 
@@ -35,6 +37,12 @@ pub struct Chunk {
     /// plus proche » en parcourant quelques listes courtes au lieu de dizaines
     /// de milliers de tuiles.
     pub springs: Vec<(u8, u8)>,
+    /// Tuiles locales déjà passées par `World::tile_mut` (broutage, cueillette).
+    /// Sert uniquement l'instantané d'éviction (`world::snapshot_delta`) : sans
+    /// lui, retrouver les quelques tuiles modifiées obligerait à comparer les
+    /// 4096 tuiles au baseline à chaque éviction — mesuré, ce scan complet
+    /// coûtait plus qu'il ne faisait gagner l'éviction non protégée.
+    touched: BTreeSet<(u8, u8)>,
 }
 
 impl Chunk {
@@ -96,12 +104,23 @@ impl Chunk {
                 });
             }
         }
-        Self { coord, tiles, springs }
+        Self { coord, tiles, springs, touched: BTreeSet::new() }
     }
 
     /// Tuile locale (lx, ly), avec 0 ≤ lx, ly < 64.
     pub fn tile(&self, lx: usize, ly: usize) -> &Tile {
         &self.tiles[ly * CHUNK_SIZE as usize + lx]
+    }
+
+    /// Les tuiles locales déjà notées comme mutées (voir le champ `touched`).
+    pub(crate) fn touched(&self) -> &BTreeSet<(u8, u8)> {
+        &self.touched
+    }
+
+    /// Note qu'une tuile va être mutée — sert l'instantané d'éviction, pas la
+    /// simulation elle-même (aucun ordre à respecter, un `BTreeSet` suffit).
+    pub(crate) fn mark_touched(&mut self, lx: usize, ly: usize) {
+        self.touched.insert((lx as u8, ly as u8));
     }
 
     /// Accès mutable à la tuile locale. Réservé au [`World`](crate::World),

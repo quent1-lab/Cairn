@@ -20,11 +20,14 @@ pub mod palette;
 pub mod render;
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use cairn_core::WorldSeed;
 use cairn_core::scale::{km_to_tiles, tiles_to_km};
-use cairn_sim::{Activity, AgentId, Behavior, Demographics, FaunaId, Herd, Pack, Position, Sim};
+use cairn_sim::{
+    Activity, AgentId, Behavior, DeathCause, Demographics, FaunaId, Herd, Memory, Pack, Position,
+    Sex, Sim, Skills,
+};
 use cairn_worldgen::{HumidityConfig, WorldGenConfig};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::{Clamped, JsCast};
@@ -44,6 +47,14 @@ const FOLLOW_MAX_SCALE: f64 = 3.0;
 const CHUNK_CAPACITY: usize = 2048;
 /// Population humaine de départ.
 const START_AGENTS: usize = 40;
+/// Points conservés dans l'historique de population (un par jour de jeu
+/// échantillonné) : ~400 jours, largement assez pour « voir l'évolution »
+/// sans grossir indéfiniment.
+const POP_HISTORY_CAP: usize = 400;
+/// Dimensions du petit graphique d'évolution du panneau Population — mêmes
+/// valeurs que les attributs `width`/`height` du `<canvas>` dans le HTML.
+const POP_CHART_W: f64 = 230.0;
+const POP_CHART_H: f64 = 56.0;
 
 /// Paliers de vitesse proposés, en **ticks de jeu par seconde réelle**. Un
 /// tick = une heure ; 24 ticks/s = un jour de jeu par seconde. Le plus lent
@@ -68,6 +79,7 @@ pub fn start() -> Result<(), JsValue> {
     if let Some(n) = query_param_u64("ticks") {
         for _ in 0..n {
             app.sim.step();
+            app.sample_population();
         }
     }
     APP.with(|slot| *slot.borrow_mut() = Some(app));
@@ -94,10 +106,42 @@ struct Camera {
     scale: f64,
 }
 
+/// Trois façons de colorer les humains : couleur fixe, activité en cours, ou
+/// sexe/âge — le portrait démographique de la population en un coup d'œil,
+/// sans ouvrir le panneau. Bouclé par clics successifs sur le même bouton.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ColorMode {
+    Fixed,
+    Activity,
+    SexAge,
+}
+
+impl ColorMode {
+    fn next(self) -> Self {
+        match self {
+            ColorMode::Fixed => ColorMode::Activity,
+            ColorMode::Activity => ColorMode::SexAge,
+            ColorMode::SexAge => ColorMode::Fixed,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            ColorMode::Fixed => "Couleur : humain",
+            ColorMode::Activity => "Couleur : activité",
+            ColorMode::SexAge => "Couleur : sexe/âge",
+        }
+    }
+}
+
 struct App {
     sim: Sim,
     ctx: CanvasRenderingContext2d,
     canvas: HtmlCanvasElement,
+    /// Contexte du petit graphique d'évolution démographique (onglet
+    /// Population) — un second canvas, minuscule et de taille fixe, donc pas
+    /// besoin de le redimensionner comme la vue principale.
+    pop_chart_ctx: CanvasRenderingContext2d,
     width: usize,
     height: usize,
     camera: Camera,
@@ -122,8 +166,15 @@ struct App {
     placing: bool,
     /// La caméra suit le barycentre de la population (recadrage à seuil).
     follow: bool,
-    /// Humains colorés par activité (sinon une couleur fixe « humain »).
-    color_by_activity: bool,
+    /// Comment les humains sont colorés (activité, sexe/âge, ou fixe).
+    color_mode: ColorMode,
+
+    // — Suivi démographique (onglet Population) —
+    /// Population échantillonnée une fois par jour de jeu : de quoi tracer
+    /// une courbe d'évolution sans stocker un point par tick.
+    pop_history: VecDeque<(u64, u32)>,
+    /// Dernier jour échantillonné, pour ne pousser qu'un point par jour.
+    last_sampled_day: Option<u64>,
 
     // — Interpolation d'affichage —
     /// Position de chaque entité **au tick précédent**, par identifiant stable
@@ -154,6 +205,13 @@ impl App {
             .get_context("2d")?
             .ok_or("contexte 2d indisponible")?
             .dyn_into::<CanvasRenderingContext2d>()?;
+        let pop_chart_ctx = document()
+            .get_element_by_id("pop-chart")
+            .ok_or("canvas #pop-chart introuvable")?
+            .dyn_into::<HtmlCanvasElement>()?
+            .get_context("2d")?
+            .ok_or("contexte 2d indisponible pour #pop-chart")?
+            .dyn_into::<CanvasRenderingContext2d>()?;
 
         let seed = 42;
         let (sim, home) = build_sim(seed, START_AGENTS, 2);
@@ -162,6 +220,7 @@ impl App {
             sim,
             ctx,
             canvas,
+            pop_chart_ctx,
             width: 0,
             height: 0,
             camera: Camera {
@@ -179,7 +238,9 @@ impl App {
             seed,
             placing: false,
             follow: true,
-            color_by_activity: true,
+            color_mode: ColorMode::Activity,
+            pop_history: VecDeque::new(),
+            last_sampled_day: None,
             prev_pos: HashMap::new(),
             prev_fauna: HashMap::new(),
             has_prev: false,
@@ -256,6 +317,8 @@ impl App {
         self.prev_pos.clear();
         self.prev_fauna.clear();
         self.has_prev = false;
+        self.pop_history.clear();
+        self.last_sampled_day = None;
         self.invalidate_terrain();
     }
 
@@ -311,6 +374,7 @@ impl App {
             }
             if stepped > 0 {
                 self.has_prev = true;
+                self.sample_population();
             }
         }
         // Curseur d'interpolation : où en est-on entre le dernier tick et le
@@ -338,6 +402,20 @@ impl App {
         }
     }
 
+    /// Empile un point de population dans l'historique, une fois par jour de
+    /// jeu (pas par tick — inutile pour une courbe qu'on regarde de loin).
+    fn sample_population(&mut self) {
+        let day = self.sim.time.tick / cairn_core::TICKS_PER_DAY;
+        if self.last_sampled_day == Some(day) {
+            return;
+        }
+        self.last_sampled_day = Some(day);
+        self.pop_history.push_back((self.sim.time.tick, self.sim.population() as u32));
+        if self.pop_history.len() > POP_HISTORY_CAP {
+            self.pop_history.pop_front();
+        }
+    }
+
     fn render(&mut self) {
         if !self.terrain_valid {
             self.terrain = render::render_to_buffer(
@@ -361,6 +439,8 @@ impl App {
 
         self.draw_entities();
         self.update_readout();
+        self.update_population_stats();
+        self.draw_population_chart();
     }
 
     /// Dessine agents et faune par-dessus le terrain. Chaque entité est
@@ -404,13 +484,14 @@ impl App {
             self.ctx.fill_rect(sx - s / 2.0, sy - s / 2.0, s, s);
         }
 
-        // Humains. Deux modes : une couleur fixe, ou la couleur de l'activité
-        // (qui chasse, qui boit, qui dort). En couleur fixe on pose le style
-        // une seule fois. Les enfants sont des carrés plus petits — on voit
-        // la lignée grandir sans ouvrir le moindre panneau.
+        // Humains. Trois modes : couleur fixe, activité (qui chasse, qui
+        // boit, qui dort), ou sexe/âge (le portrait démographique). En
+        // couleur fixe on pose le style une seule fois. Les enfants sont des
+        // carrés plus petits dans tous les modes — on voit la lignée
+        // grandir sans ouvrir le moindre panneau.
         let s = scale.clamp(2.5, 8.0);
         let tick = self.sim.time.tick;
-        if !self.color_by_activity {
+        if self.color_mode == ColorMode::Fixed {
             self.ctx.set_fill_style_str(HUMAN_COLOR);
         }
         for (_, (id, pos, behavior, demo)) in self
@@ -423,10 +504,13 @@ impl App {
             if !visible(sx, sy) {
                 continue;
             }
-            if self.color_by_activity {
-                self.ctx.set_fill_style_str(activity_color(behavior.activity));
+            let adult = demo.is_adult(tick);
+            match self.color_mode {
+                ColorMode::Fixed => {}
+                ColorMode::Activity => self.ctx.set_fill_style_str(activity_color(behavior.activity)),
+                ColorMode::SexAge => self.ctx.set_fill_style_str(sex_age_color(demo.sex, adult)),
             }
-            let s = if demo.is_adult(tick) { s } else { (s * 0.55).max(2.0) };
+            let s = if adult { s } else { (s * 0.55).max(2.0) };
             self.ctx.fill_rect(sx - s / 2.0, sy - s / 2.0, s, s);
         }
     }
@@ -497,6 +581,97 @@ impl App {
         el.set_text_content(Some(&text));
     }
 
+    /// Onglet Population : effectifs par sexe/âge, naissances, décès par
+    /// cause, savoirs moyens (territoire connu, compétences). Un seul
+    /// passage sur la population pour tout calculer.
+    fn update_population_stats(&self) {
+        let tick = self.sim.time.tick;
+        let (mut women, mut men, mut children) = (0u32, 0u32, 0u32);
+        let (mut cells_sum, mut springs_sum) = (0usize, 0usize);
+        let (mut forage_sum, mut hunt_sum) = (0.0f32, 0.0f32);
+        let mut n = 0u32;
+        for (_, (demo, mem, sk)) in
+            self.sim.agents.query::<(&Demographics, &Memory, &Skills)>().iter()
+        {
+            match (demo.is_adult(tick), demo.sex) {
+                (true, Sex::Female) => women += 1,
+                (true, Sex::Male) => men += 1,
+                (false, _) => children += 1,
+            }
+            cells_sum += mem.known.len();
+            springs_sum += mem.springs.len();
+            forage_sum += sk.foraging;
+            hunt_sum += sk.hunting;
+            n += 1;
+        }
+
+        if let Some(el) = document().get_element_by_id("pop-stats") {
+            let (mut starved, mut dehydrated, mut frozen, mut old_age) = (0u32, 0u32, 0u32, 0u32);
+            for d in &self.sim.deaths {
+                match d.cause {
+                    DeathCause::Starvation => starved += 1,
+                    DeathCause::Dehydration => dehydrated += 1,
+                    DeathCause::Hypothermia => frozen += 1,
+                    DeathCause::OldAge => old_age += 1,
+                }
+            }
+            el.set_text_content(Some(&format!(
+                "Population   {n:>4}   ({women} ♀ · {men} ♂ · {children} enfants)\n\
+                 Naissances   {:>4}\n\
+                 Décès        {:>4}   (faim {starved} · soif {dehydrated} · froid {frozen} · vieillesse {old_age})",
+                self.sim.births.len(),
+                self.sim.deaths.len(),
+            )));
+        }
+
+        if let Some(el) = document().get_element_by_id("pop-knowledge") {
+            if n == 0 {
+                el.set_text_content(Some("population éteinte"));
+                return;
+            }
+            let cell_km = tiles_to_km(cairn_sim::memory::MEMORY_CELL_TILES as f64);
+            let cells_mean = cells_sum as f64 / f64::from(n);
+            el.set_text_content(Some(&format!(
+                "Territoire connu   {:.0} km² en moyenne ({cells_mean:.0} cellules)\n\
+                 Sources connues    {:.1} par tête\n\
+                 Cueillette         {:.2}\n\
+                 Chasse             {:.2}",
+                cells_mean * cell_km * cell_km,
+                springs_sum as f64 / f64::from(n),
+                forage_sum / n as f32,
+                hunt_sum / n as f32,
+            )));
+        }
+    }
+
+    /// Le petit graphique d'évolution de la population (onglet Population) :
+    /// une simple ligne reliant les échantillons journaliers.
+    fn draw_population_chart(&self) {
+        let ctx = &self.pop_chart_ctx;
+        ctx.clear_rect(0.0, 0.0, POP_CHART_W, POP_CHART_H);
+        if self.pop_history.len() < 2 {
+            return;
+        }
+        let (min_p, max_p) = self.pop_history.iter().fold((u32::MAX, 0u32), |(lo, hi), &(_, p)| {
+            (lo.min(p), hi.max(p))
+        });
+        let span = f64::from(max_p - min_p).max(1.0);
+        let n = self.pop_history.len();
+        ctx.begin_path();
+        ctx.set_stroke_style_str("#6ea8fe");
+        ctx.set_line_width(1.5);
+        for (i, &(_, p)) in self.pop_history.iter().enumerate() {
+            let x = i as f64 / (n - 1) as f64 * POP_CHART_W;
+            let y = POP_CHART_H - 3.0 - (f64::from(p - min_p) / span) * (POP_CHART_H - 6.0);
+            if i == 0 {
+                ctx.move_to(x, y);
+            } else {
+                ctx.line_to(x, y);
+            }
+        }
+        ctx.stroke();
+    }
+
     fn invalidate_terrain(&mut self) {
         self.terrain_valid = false;
     }
@@ -533,20 +708,13 @@ impl App {
     }
 
     fn toggle_color_mode(&mut self) {
-        self.color_by_activity = !self.color_by_activity;
+        self.color_mode = self.color_mode.next();
         if let Some(el) = document().get_element_by_id("color-toggle") {
-            el.set_text_content(Some(if self.color_by_activity {
-                "Couleur : activité"
-            } else {
-                "Couleur : humain"
-            }));
+            el.set_text_content(Some(self.color_mode.label()));
         }
-        // La légende d'activité n'a de sens qu'en mode activité.
-        if let Some(el) = document().get_element_by_id("legend-activity") {
-            let _ = el
-                .dyn_ref::<web_sys::HtmlElement>()
-                .map(|h| h.style().set_property("display", if self.color_by_activity { "grid" } else { "none" }));
-        }
+        // Chaque légende n'a de sens que dans son propre mode.
+        set_display("legend-activity", self.color_mode == ColorMode::Activity);
+        set_display("legend-sexage", self.color_mode == ColorMode::SexAge);
     }
 
     fn set_follow(&mut self, on: bool) {
@@ -681,6 +849,28 @@ fn activity_color(activity: Activity) -> &'static str {
         Activity::Drinking => "#46b4ff",                 // bleu : boit
         Activity::Sleeping => "#6a6ad0",                 // indigo : dort
         Activity::Sheltering => "#b070c8",               // mauve : s'abrite
+    }
+}
+
+/// Couleur d'un agent selon son sexe et son stade de vie — le portrait
+/// démographique de la population en un coup d'œil.
+fn sex_age_color(sex: Sex, adult: bool) -> &'static str {
+    if !adult {
+        return "#f2c94c"; // jaune : enfant, indépendamment du sexe
+    }
+    match sex {
+        Sex::Female => "#e85ca0", // rose
+        Sex::Male => "#4a90e2",   // bleu
+    }
+}
+
+/// Affiche ou masque un élément par id (`display: grid`/`none`) — sert aux
+/// légendes qui n'ont de sens que dans leur propre mode de couleur.
+fn set_display(id: &str, visible: bool) {
+    if let Some(el) = document().get_element_by_id(id) {
+        let _ = el
+            .dyn_ref::<web_sys::HtmlElement>()
+            .map(|h| h.style().set_property("display", if visible { "grid" } else { "none" }));
     }
 }
 

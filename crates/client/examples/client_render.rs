@@ -11,7 +11,7 @@
 use cairn_client::palette::Layer;
 use cairn_client::render;
 use cairn_core::{WorldSeed, km_to_tiles};
-use cairn_sim::{Activity, Behavior, Herd, Pack, Position, Sim};
+use cairn_sim::{Activity, Behavior, Demographics, Herd, Pack, Position, Sim};
 use cairn_worldgen::{HumidityConfig, WorldGenConfig};
 
 const W: usize = 1100;
@@ -72,9 +72,12 @@ fn main() {
         let s = ((scale * 1.5) * (1.0 + f64::from(pack.population) / 8.0)).clamp(3.0, 12.0);
         fill_square(&mut buf, sx, sy, s, [139, 63, 176]);
     }
-    for (_, (pos, beh)) in sim.agents.query::<(&Position, &Behavior)>().iter() {
+    let tick = sim.time.tick;
+    let s = scale.clamp(2.5, 8.0);
+    for (_, (pos, beh, demo)) in sim.agents.query::<(&Position, &Behavior, &Demographics)>().iter() {
         let (sx, sy) = project(pos.x, pos.y);
-        fill_square(&mut buf, sx, sy, scale.clamp(2.5, 8.0), activity_rgb(beh.activity));
+        let s = if demo.is_adult(tick) { s } else { (s * 0.55).max(2.0) };
+        fill_square(&mut buf, sx, sy, s, activity_rgb(beh.activity));
     }
 
     let (g1, p1, _, _) = sim.fauna_census();

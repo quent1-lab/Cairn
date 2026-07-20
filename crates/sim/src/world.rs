@@ -4,11 +4,51 @@
 //! C'est la pièce qui rend le monde **infini de fait mais borné en mémoire**
 //! (BRIEF §2.1). L'éviction est sûre tant qu'un chunk est du baseline pur :
 //! décharger puis régénérer redonne l'identique. Depuis la Phase 2, une tuile
-//! peut être **modifiée** (biomasse consommée…) : le chunk est alors marqué
-//! **sale** et n'est plus jamais évincé — l'évincer perdrait l'état simulé.
-//! Il redevient évincable si la repousse le ramène exactement au baseline.
-//! La persistance des chunks sales (pour lever cette rétention) arrive en
-//! Phase 6.
+//! peut être **modifiée** (biomasse consommée…).
+//!
+//! **Deltas persistés (perf, Phase 3)** : un chunk sale n'est plus
+//! spécialement protégé — il est évincé en LRU pur, comme n'importe quel
+//! autre. Ce qui rendait ça dangereux (perdre la consommation simulée) est
+//! résolu par un **instantané léger** : à l'éviction, les tuiles qui
+//! diffèrent du baseline (quelques octets chacune, pas les 16 o × 4096 du
+//! chunk entier — voir `Chunk::touched`, qui les repère sans scanner le
+//! chunk) sont copiées dans [`deltas`](World::deltas) ; à la prochaine
+//! résidence, elles sont réappliquées sur le baseline frais. La repousse **se
+//! met en pause** pendant l'éviction plutôt que de reprendre au baseline —
+//! plus fidèle que l'ancien comportement.
+//!
+//! **Ce que la mesure a vraiment montré** (3 000 ticks, 100 agents dispersés,
+//! capacité 16 384 — `dirty_count`/`delta_count` distinguent résident et en
+//! pause) :
+//! - **Référence** (protection dirty à l'ancienne) : 5,5 tps.
+//! - **Plafond sans éviction** (capacité 65 536, 0 évincé) : 9,3 tps — mais
+//!   ~4 Go à cette capacité, hors budget serveur (§8.3). Sert de repère : la
+//!   marge de manœuvre réelle plafonne là, pas plus haut.
+//! - **Écologie désactivée** (pour vérifier si la repousse quotidienne
+//!   coûtait cher) : 1,6 tps, bien **pire** — c'est `daily_regrowth` qui
+//!   nettoie les chunks sales (`clear_dirty_if_pristine`) ; sans elle, plus
+//!   rien ne redevient jamais propre. Hypothèse écartée par la mesure.
+//! - **1ʳᵉ tentative de déltas** : dirty ne distinguait pas résident/en
+//!   pause → `dirty_coords()` (parcourue chaque jour par l'écologie)
+//!   grossissait sans borne avec *tous* les chunks jamais touchés. **6,2 tps**
+//!   : le gain de l'éviction non protégée était mangé par ce scan quotidien
+//!   qui grossissait sans cesse.
+//! - **2ᵉ tentative, borne corrigée** (`dirty` résident seulement, `deltas`
+//!   séparé) mais instantané par scan complet des 4096 tuiles à chaque
+//!   éviction : **4,8 tps**, encore **pire que la référence** — le scan
+//!   coûtait plus qu'il ne faisait gagner l'éviction non protégée.
+//! - **Version finale** (`Chunk::touched`, instantané en O(tuiles vraiment
+//!   modifiées)) : **6,3 tps**. Gain modeste (+15 %) mais net, plus un vrai
+//!   gain de correction indépendant du chiffre : l'ancienne éviction
+//!   remettait un chunk sale évincé pile au baseline (perte silencieuse de
+//!   la consommation simulée) ; ici, rien n'est perdu.
+//!
+//! Le reste de l'écart avec le plafond de 9,3 tps est structurel, pas un bug
+//! de politique d'éviction : la Phase 3 (curiosité, errance, sociabilité)
+//! fait visiter à la population bien plus de chunks **distincts** qu'avant,
+//! et régénérer un chunk (bruit du worldgen) coûte ce qu'il coûte, deltas ou
+//! pas. Ceci est un cache **en mémoire seulement** ; la persistance
+//! **durable** (disque, redémarrage) reste pour la Phase 6.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -18,6 +58,13 @@ use cairn_worldgen::{WorldGen, WorldGenConfig};
 use crate::chunk::{CHUNK_SIZE, Chunk, ChunkCoord};
 use crate::tile::{Tile, baseline_biomass, baseline_fertility};
 
+/// Instantané léger d'un chunk sale évincé : seulement les tuiles qui
+/// diffèrent du baseline. `(lx, ly, biomass, soil_fertility)` — les deux
+/// seuls champs mutables (`tile.rs`).
+struct ChunkDelta {
+    tiles: Vec<(u8, u8, u8, u8)>,
+}
+
 pub struct World {
     worldgen: WorldGen,
     /// Chunks résidents. `BTreeMap` et non `HashMap` : ordre d'itération
@@ -25,9 +72,13 @@ pub struct World {
     chunks: BTreeMap<ChunkCoord, Chunk>,
     /// Tick d'accès le plus récent par chunk, pour le LRU.
     last_access: BTreeMap<ChunkCoord, u64>,
-    /// Chunks modifiés depuis leur génération : non régénérables, donc
-    /// protégés de l'éviction.
+    /// Chunks modifiés depuis leur génération : **résidents ou non**. Un
+    /// chunk sale évincé y reste — sa repousse est en pause, pas guérie —
+    /// tant que [`deltas`](Self::deltas) porte son instantané.
     dirty: BTreeSet<ChunkCoord>,
+    /// Instantanés des chunks sales évincés (voir le commentaire de module).
+    /// Une entrée pèse quelques dizaines d'octets, pas 64 Kio.
+    deltas: BTreeMap<ChunkCoord, ChunkDelta>,
     /// Cache des sources d'eau par chunk, calculées **sans** générer le chunk
     /// (voir `chunk::springs_for`). Jamais évincé : une entrée pèse quelques
     /// dizaines d'octets, et la requête « où est l'eau ? » porte sur le
@@ -55,6 +106,7 @@ impl World {
             chunks: BTreeMap::new(),
             last_access: BTreeMap::new(),
             dirty: BTreeSet::new(),
+            deltas: BTreeMap::new(),
             springs: BTreeMap::new(),
             clock: 0,
             capacity: capacity.max(1),
@@ -68,9 +120,19 @@ impl World {
         self.chunks.len()
     }
 
-    /// Nombre de chunks retenus car modifiés.
+    /// Nombre de chunks **résidents** modifiés depuis le baseline — borné par
+    /// la capacité, comme `loaded()`. Les chunks sales évincés (en pause)
+    /// n'y comptent pas : voir [`delta_count`](Self::delta_count).
     pub fn dirty_count(&self) -> usize {
         self.dirty.len()
+    }
+
+    /// Nombre de chunks sales **en pause** (évincés, instantané léger dans
+    /// `deltas`) : leur repousse est suspendue jusqu'à la prochaine
+    /// résidence. Pas de plafond dédié — chaque entrée ne coûte que
+    /// quelques octets, sans commune mesure avec un chunk résident (64 Kio).
+    pub fn delta_count(&self) -> usize {
+        self.deltas.len()
     }
 
     pub fn seed(&self) -> WorldSeed {
@@ -84,10 +146,24 @@ impl World {
 
     /// Renvoie le chunk demandé, le générant s'il est absent. Marque l'accès
     /// (pour le LRU) et évince si la capacité est dépassée.
+    ///
+    /// Si un instantané sale existait (le chunk avait été évincé sans être
+    /// revenu au baseline), il est réappliqué sur le baseline frais : la
+    /// consommation simulée reprend exactement où elle en était.
     pub fn chunk(&mut self, coord: ChunkCoord) -> &Chunk {
         self.clock += 1;
         if !self.chunks.contains_key(&coord) {
-            let chunk = Chunk::generate(coord, &self.worldgen);
+            let mut chunk = Chunk::generate(coord, &self.worldgen);
+            if let Some(delta) = self.deltas.remove(&coord) {
+                for (lx, ly, biomass, soil_fertility) in delta.tiles {
+                    let t = chunk.tile_mut(lx as usize, ly as usize);
+                    t.biomass = biomass;
+                    t.soil_fertility = soil_fertility;
+                }
+                // De nouveau résident : redevient sale « pour de vrai »,
+                // l'écologie peut reprendre sa repousse là où elle était.
+                self.dirty.insert(coord);
+            }
             self.chunks.insert(coord, chunk);
             self.generated += 1;
             self.evict_down_to_capacity(coord);
@@ -104,9 +180,10 @@ impl World {
         *self.chunk(coord).tile(lx, ly)
     }
 
-    /// Accès **mutable** à une tuile : marque le chunk sale, donc protégé de
-    /// l'éviction. C'est l'unique porte d'entrée de la simulation vers l'état
-    /// du monde — tout ce qui évolue passe ici.
+    /// Accès **mutable** à une tuile : marque le chunk sale (une éviction
+    /// ultérieure en sauvera un instantané plutôt que de le perdre, voir le
+    /// commentaire de module). C'est l'unique porte d'entrée de la
+    /// simulation vers l'état du monde — tout ce qui évolue passe ici.
     pub fn tile_mut(&mut self, x: i64, y: i64) -> &mut Tile {
         let (coord, lx, ly) = split(x, y);
         // S'assure que le chunk est résident (et paie l'éviction éventuelle)…
@@ -114,32 +191,40 @@ impl World {
         self.dirty.insert(coord);
         // …puis le remprunte en mutable. `get_mut` ne peut pas échouer :
         // le chunk vient d'être chargé et `keep` interdit son éviction.
-        self.chunks.get_mut(&coord).unwrap().tile_mut(lx, ly)
+        let chunk = self.chunks.get_mut(&coord).unwrap();
+        chunk.mark_touched(lx, ly);
+        chunk.tile_mut(lx, ly)
     }
 
-    /// Les chunks actuellement sales, dans l'ordre déterministe du BTreeSet.
-    /// C'est le domaine de travail de l'écologie : seuls eux dévient du
-    /// baseline, donc seuls eux ont quelque chose à faire repousser.
+    /// Les chunks **résidents** actuellement sales, dans l'ordre déterministe
+    /// du BTreeSet — donc bornés par la capacité, comme `dirty_count()`.
+    /// C'est le domaine de travail de l'écologie quotidienne : seuls des
+    /// chunks résidents ont des tuiles à faire repousser. Les chunks sales en
+    /// pause (évincés) n'y figurent pas — inutile de les parcourir chaque
+    /// jour pour ne rien y trouver de résident ; leur repousse reprendra
+    /// d'elle-même à la prochaine résidence (voir `deltas` / `delta_count`).
     pub fn dirty_coords(&self) -> Vec<ChunkCoord> {
         self.dirty.iter().copied().collect()
     }
 
-    /// Accès mutable direct à un chunk **déjà résident** (les chunks sales le
-    /// sont toujours). Réservé aux systèmes du crate ; ne marque pas sale.
+    /// Accès mutable direct à un chunk **déjà résident** (`None` sinon).
+    /// Réservé aux systèmes du crate ; ne marque pas sale. En pratique,
+    /// toujours `Some` pour un coord venu de `dirty_coords()` — celle-ci ne
+    /// renvoie que des résidents.
     pub(crate) fn chunk_mut(&mut self, coord: ChunkCoord) -> Option<&mut Chunk> {
         self.chunks.get_mut(&coord)
     }
 
-    /// Si le chunk est revenu exactement au baseline (repousse complète),
-    /// lève la protection : il redevient régénérable donc évincable.
+    /// Si le chunk est revenu exactement au baseline (repousse complète), il
+    /// n'est plus sale. Ne vérifie que les tuiles **touchées** : une tuile
+    /// jamais mutée est par construction déjà au baseline — inutile de
+    /// rescanner les 4096 tuiles du chunk chaque jour pour ne trouver que la
+    /// poignée qui a vraiment bougé.
     pub(crate) fn clear_dirty_if_pristine(&mut self, coord: ChunkCoord) {
         let Some(chunk) = self.chunks.get(&coord) else { return };
-        let pristine = (0..CHUNK_SIZE as usize).all(|ly| {
-            (0..CHUNK_SIZE as usize).all(|lx| {
-                let t = chunk.tile(lx, ly);
-                t.biomass == baseline_biomass(t.biome)
-                    && t.soil_fertility == baseline_fertility(t.biome)
-            })
+        let pristine = chunk.touched().iter().all(|&(lx, ly)| {
+            let t = chunk.tile(lx as usize, ly as usize);
+            t.biomass == baseline_biomass(t.biome) && t.soil_fertility == baseline_fertility(t.biome)
         });
         if pristine {
             self.dirty.remove(&coord);
@@ -149,46 +234,48 @@ impl World {
     /// Évince les chunks les moins récemment accédés jusqu'à revenir sous la
     /// capacité. `keep` (celui qu'on vient de charger) n'est jamais évincé.
     ///
-    /// **Politique en deux temps.** On sacrifie d'abord les chunks **propres**
-    /// (régénérables sans perte) ; ce n'est que si tous les résidents restants
-    /// sont sales qu'on évince un chunk sale, en LRU.
-    ///
-    /// Évincer un chunk sale « perd » sa biomasse broutée — mais c'est le
-    /// chunk le **moins récemment touché**, donc sans troupeau ni agent depuis
-    /// longtemps : sur ce laps, la repousse l'aurait de toute façon ramené
-    /// près du baseline. Le régénérer, c'est le **rattrapage analytique** du
-    /// LOD temporel (§8.2), en instantané plutôt que graduel. Ce qui compte
-    /// pour la surchasse — l'effectif des troupeaux — vit dans des entités,
-    /// jamais évincées. La mémoire reste ainsi **bornée** quoi qu'il arrive,
-    /// au lieu de déborder puis de thrasher (mesuré : 0,6 tick/s au débordement
-    /// contre 15 sous la capacité).
+    /// **LRU pur, sans traitement spécial pour les chunks sales** : depuis
+    /// que l'éviction en prend un instantané (voir le commentaire de module),
+    /// évincer un sale ne perd plus rien — inutile de le protéger au prix de
+    /// geler la capacité résidente autour de vieux chunks froids pendant
+    /// qu'une population dispersée en salit des milliers.
     fn evict_down_to_capacity(&mut self, keep: ChunkCoord) {
-        // 1er temps : les propres.
-        self.evict_pass(keep, false);
-        // 2e temps, si toujours au-dessus : les sales, à contrecœur.
-        self.evict_pass(keep, true);
-    }
-
-    fn evict_pass(&mut self, keep: ChunkCoord, allow_dirty: bool) {
         while self.chunks.len() > self.capacity {
             // Victime = plus petit tick d'accès. Les ex æquo sont départagés
             // par l'ordre du BTreeMap → déterministe.
             let victim = self
                 .last_access
                 .iter()
-                .filter(|(c, _)| **c != keep && (allow_dirty || !self.dirty.contains(c)))
+                .filter(|(c, _)| **c != keep)
                 .min_by_key(|(_, t)| **t)
                 .map(|(c, _)| *c);
             match victim {
-                Some(c) => {
-                    self.chunks.remove(&c);
-                    self.last_access.remove(&c);
-                    self.dirty.remove(&c);
-                    self.evicted += 1;
-                }
+                Some(c) => self.evict_one(c),
                 None => break,
             }
         }
+    }
+
+    /// Décharge un chunk résident. S'il est sale, instantané léger d'abord
+    /// (voir le commentaire de module) — sauf s'il est en fait revenu pile au
+    /// baseline entre-temps, auquel cas il n'y a rien à sauver.
+    ///
+    /// `dirty` ne garde que les chunks **résidents** modifiés : un chunk en
+    /// pause quitte `dirty` et entre dans `deltas`. Sans cette distinction,
+    /// `dirty_coords()` (parcourue chaque jour par l'écologie) grossirait
+    /// avec **tous** les chunks jamais touchés, résidents ou non — régression
+    /// mesurée à l'implémentation : ça a nivelé le gain de l'éviction non
+    /// protégée (5,5 → 6,2 tps au lieu du potentiel ~9 tps).
+    fn evict_one(&mut self, coord: ChunkCoord) {
+        if self.dirty.remove(&coord) {
+            let delta = snapshot_delta(&self.chunks[&coord]);
+            if !delta.tiles.is_empty() {
+                self.deltas.insert(coord, delta);
+            }
+        }
+        self.chunks.remove(&coord);
+        self.last_access.remove(&coord);
+        self.evicted += 1;
     }
 
     /// Les sources d'eau du chunk, via le cache — sans générer le chunk.
@@ -232,6 +319,25 @@ impl World {
         }
         best.map(|(_, p)| p)
     }
+}
+
+/// Instantané léger d'un chunk : parmi les tuiles **déjà notées touchées**
+/// (`Chunk::touched` — quelques-unes, jamais les 4096), celles dont
+/// `biomass` ou `soil_fertility` diffère encore du baseline de leur biome.
+/// Ne scanne **pas** le chunk entier : mesuré, ce scan complet à chaque
+/// éviction coûtait plus qu'il ne faisait gagner l'éviction non protégée
+/// (4,8 tps, pire que sans instantané du tout).
+fn snapshot_delta(chunk: &Chunk) -> ChunkDelta {
+    let mut tiles = Vec::new();
+    for &(lx, ly) in chunk.touched() {
+        let t = chunk.tile(lx as usize, ly as usize);
+        let (base_biomass, base_fertility) =
+            (baseline_biomass(t.biome), baseline_fertility(t.biome));
+        if t.biomass != base_biomass || t.soil_fertility != base_fertility {
+            tiles.push((lx, ly, t.biomass, t.soil_fertility));
+        }
+    }
+    ChunkDelta { tiles }
 }
 
 /// Décompose une coordonnée de tuile en (chunk, position locale). `div_euclid`
@@ -288,23 +394,29 @@ mod tests {
     }
 
     #[test]
-    fn un_chunk_sale_est_prefere_aux_propres_a_l_eviction() {
-        // Capacité 8 : un chunk sale et assez de propres pour absorber la
-        // pression. Le sale doit survivre — on sacrifie les propres d'abord.
+    fn un_chunk_sale_evince_garde_son_etat_via_l_instantane() {
+        // Capacité 8, largement dépassée : le chunk salit tôt est forcément
+        // évincé (LRU pur, plus de protection spéciale). Sa modification doit
+        // pourtant survivre — c'est tout l'intérêt de l'instantané léger.
         let mut world = World::new(WorldSeed(42), 8);
         world.tile_mut(100, 200).biomass = 7;
         for cx in 50..70 {
             world.chunk(ChunkCoord { x: cx, y: cx });
         }
-        assert_eq!(world.tile(100, 200).biomass, 7, "le sale a été régénéré à tort");
+        assert!(world.evicted > 0, "le chunk sale aurait dû être évincé (LRU pur)");
+        assert_eq!(
+            world.tile(100, 200).biomass,
+            7,
+            "l'instantané aurait dû restaurer la modification à la réaccession"
+        );
         assert_eq!(world.dirty_count(), 1);
         assert!(world.loaded() <= 8, "mémoire non bornée : {}", world.loaded());
     }
 
     #[test]
     fn sous_pression_maximale_la_memoire_reste_bornee() {
-        // Plus de chunks sales que la capacité : on ne peut pas tous les
-        // retenir sans déborder. La mémoire prime — on évince des sales.
+        // Beaucoup de chunks sales, capacité minuscule : sans protection
+        // spéciale, l'éviction LRU les traite comme n'importe quel chunk.
         let mut world = World::new(WorldSeed(42), 4);
         for cx in 0..20 {
             // Chaque tile_mut salit un chunk distinct.
@@ -312,6 +424,28 @@ mod tests {
         }
         assert!(world.loaded() <= 4, "capacité dépassée : {}", world.loaded());
         assert!(world.evicted >= 16, "des sales auraient dû être évincés");
+    }
+
+    /// Passage à l'échelle du test précédent : beaucoup de chunks sales
+    /// distincts, tous évincés (capacité minuscule), chacun avec **sa propre**
+    /// tuile modifiée. Vérifie que la table des instantanés ne mélange pas
+    /// les entrées entre chunks voisins.
+    #[test]
+    fn plusieurs_instantanes_distincts_ne_se_melangent_pas() {
+        let mut world = World::new(WorldSeed(42), 2);
+        for cx in 0..50 {
+            // Une valeur différente par chunk : une éventuelle confusion
+            // d'entrée (mauvaise clé, mauvais index local) se verrait.
+            world.tile_mut(cx * 64, 0).biomass = (cx % 250 + 1) as u8;
+        }
+        assert!(world.evicted >= 40, "la plupart doivent avoir été évincés");
+        for cx in 0..50 {
+            assert_eq!(
+                world.tile(cx * 64, 0).biomass,
+                (cx % 250 + 1) as u8,
+                "chunk {cx} : état perdu ou mélangé avec un voisin"
+            );
+        }
     }
 
     #[test]
