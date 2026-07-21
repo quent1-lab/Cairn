@@ -1,5 +1,5 @@
 //! Le graphe social et l'émergence du clan (BRIEF §5.1, Phase 4 « LE CLAN »,
-//! incrément 1).
+//! incréments 1 et 2).
 //!
 //! C'est la phase la plus délicate en conception (BRIEF §9) : **le clan ne
 //! doit être qu'une conséquence détectée, jamais une cause**. Il est donc
@@ -45,19 +45,31 @@
 //! ses membres ou les tue, le groupe ne se reforme plus assez fort le
 //! lendemain, et il n'y a rien de plus à coder.
 //!
-//! ## Limite connue : la co-résidence n'est pas encore *voulue*
+//! ## Le territoire (incrément 2) : de la co-résidence constatée à la
+//! co-résidence *voulue*
 //!
-//! Calibré (voir les tests) sur une scène de 24 agents : rien, dans les
-//! comportements des Phases 2-3, ne pousse un agent à rester près de ses
-//! liens sociaux — `TaskKind::Socialize` ne fait que rejoindre le **plus
-//! proche** congénère quand on est isolé, pas revenir vers un clan précis.
-//! Résultat mesuré : la population diffuse sans borne (plusieurs km en
-//! quelques semaines, sans jamais se stabiliser), si bien qu'un clan formé
-//! peut se dissoudre de lui-même quelques semaines plus tard, simplement
-//! parce que ses membres ont continué à errer chacun de leur côté — pas
-//! parce qu'il « s'est effondré » au sens du brief. Un vrai territoire qui
-//! **attire** ses membres (au lieu de seulement être constaté après coup)
-//! est le sujet de l'incrément suivant.
+//! L'incrément 1 avait une limite mesurée : rien, dans les comportements des
+//! Phases 2-3, ne poussait un agent à rester près de ses liens sociaux —
+//! `TaskKind::Socialize` ne fait que rejoindre le **plus proche** congénère
+//! quand on est isolé, pas revenir vers un clan précis. Résultat mesuré sur
+//! la scène de calibrage (24 agents) : la population diffusait sans borne,
+//! au point qu'un clan formé pouvait se dissoudre de lui-même par pure
+//! dérive spatiale — pas par un vrai effondrement au sens du brief.
+//!
+//! `Clan::home` (le centroïde des membres, recalculé par `detect_clans` en
+//! même temps que tout le reste) devient ce **territoire** au sens le plus
+//! simple : pas encore un champ diffusé sur la grille (ça viendra avec les
+//! structures, qui touchent enfin les tuiles — BRIEF §2.3), juste un point
+//! qui **attire**. `brain::decide` lit ce point (`AgentCtx::clan` +
+//! `clan_homes`, passés par `Sim::step`) et propose un candidat
+//! `TaskKind::ReturnToClan` dès qu'un membre s'éloigne du foyer de plus que
+//! `RESIDENCE_RADIUS_TILES` — **le même rayon** que celui utilisé par la
+//! détection pour juger de la co-résidence, pour que l'attraction et le
+//! critère se répondent : rester en dessous du seuil, c'est rester
+//! détectable. Mesuré sur la même scène (`sim::tests::
+//! le_territoire_stabilise_la_derive_apres_formation`) : l'étalement du clan
+//! **plafonne** (4,5 km à 60 j → 5,1 km à 100 j) là où il grossissait sans
+//! fin auparavant (~8 km à 85 j, et toujours en croissance).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -112,7 +124,10 @@ const COHESION_THRESHOLD: f32 = 0.28;
 /// scène de calibrage, voir `sim::tests::un_clan_emerge_sans_regle_explicite`
 /// — une seule jambe d'errance ou d'exploration dépasse déjà les 120 m de
 /// portée de conversation, et rien ne ramène la population vers un point fixe).
-const RESIDENCE_RADIUS_TILES: f64 = km_to_tiles(4.5);
+/// `pub(crate)` : c'est aussi le rayon au-delà duquel `brain::decide` tire un
+/// membre vers le foyer de son clan — même seuil des deux côtés, pour que
+/// l'attraction comportementale et le critère de détection se répondent.
+pub(crate) const RESIDENCE_RADIUS_TILES: f64 = km_to_tiles(4.5);
 /// Fraction des membres qui doivent être dans ce rayon : pas tous — un
 /// chasseur ou un éclaireur temporairement loin reste du clan. En dessous de
 /// cette proportion, le groupe n'est plus « co-résident », il est dispersé.
@@ -127,14 +142,19 @@ const IDENTITY_OVERLAP_DEN: usize = 2;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ClanId(pub u64);
 
-/// Un clan détecté : pour l'instant, une identité et un rôle. Territoire,
-/// stock, chef et normes viendront avec les incréments suivants de la
-/// Phase 4 — ce socle suffit à tester l'émergence elle-même.
+/// Un clan détecté : identité, membres, et le **territoire** au sens le plus
+/// simple qui vaille (BRIEF §5.1) — le centroïde de ses membres au moment de
+/// la dernière détection, recalculé chaque jour comme le reste. Stock, chef
+/// et normes viendront avec les incréments suivants de la Phase 4.
 #[derive(Debug, Clone)]
 pub struct Clan {
     pub id: ClanId,
     pub founded_tick: u64,
     pub members: BTreeSet<AgentId>,
+    /// Centre du territoire (moyenne des positions des membres à la dernière
+    /// détection). Lu par `brain::decide` pour attirer les membres qui s'en
+    /// éloignent — voir le commentaire de module sur la co-résidence *voulue*.
+    pub home: (f64, f64),
 }
 
 /// Le clan d'appartenance d'un agent, `None` s'il n'en a pas. Composant à
@@ -352,7 +372,10 @@ fn detect_clans(sim: &mut Sim) {
 
     // Chaque composante connexe est un **candidat** — encore faut-il qu'il
     // soit assez gros, assez dense (cohésion) et assez compact (résidence).
-    let mut clusters: Vec<BTreeSet<AgentId>> = Vec::new();
+    // Le centroïde calculé ici pour le test de résidence devient, pour les
+    // clusters retenus, le **territoire** du clan (`Clan::home`) — même
+    // calcul, deux usages.
+    let mut clusters: Vec<(BTreeSet<AgentId>, (f64, f64))> = Vec::new();
     for members in groups.values() {
         if members.len() < MIN_CLAN_SIZE {
             continue;
@@ -374,20 +397,22 @@ fn detect_clans(sim: &mut Sim) {
         }
         let (sx, sy) = positions.iter().fold((0.0, 0.0), |(sx, sy), &(x, y)| (sx + x, sy + y));
         let (cx, cy) = (sx / positions.len() as f64, sy / positions.len() as f64);
-        let home = positions.iter().filter(|&&(x, y)| (x - cx).hypot(y - cy) <= RESIDENCE_RADIUS_TILES).count();
-        if (home as f32) < RESIDENCE_FRACTION * positions.len() as f32 {
+        let resident_count =
+            positions.iter().filter(|&&(x, y)| (x - cx).hypot(y - cy) <= RESIDENCE_RADIUS_TILES).count();
+        if (resident_count as f32) < RESIDENCE_FRACTION * positions.len() as f32 {
             continue;
         }
-        clusters.push(member_set.into_iter().map(AgentId).collect());
+        clusters.push((member_set.into_iter().map(AgentId).collect(), (cx, cy)));
     }
     // Ordre déterministe et stable pour l'attribution des nouveaux
     // identifiants : par plus petit membre.
-    clusters.sort_by_key(|c| c.iter().next().copied());
+    clusters.sort_by_key(|(c, _)| c.iter().next().copied());
 
     // Réconciliation avec les clans existants : chacun cherche, parmi les
     // clusters encore libres, celui avec lequel il partage le plus de
     // membres. S'ils se recouvrent majoritairement dans les deux sens,
-    // c'est le même clan qui continue ; sinon il s'efface.
+    // c'est le même clan qui continue (et son territoire se recentre sur le
+    // nouveau centroïde) ; sinon il s'efface.
     let mut matched = vec![false; clusters.len()];
     let mut next: Vec<Clan> = Vec::new();
     for clan in std::mem::take(&mut sim.clans) {
@@ -395,16 +420,21 @@ fn detect_clans(sim: &mut Sim) {
             .iter()
             .enumerate()
             .filter(|(i, _)| !matched[*i])
-            .map(|(i, c)| (i, clan.members.intersection(c).count()))
+            .map(|(i, (c, _))| (i, clan.members.intersection(c).count()))
             .filter(|&(_, overlap)| overlap > 0)
             .max_by_key(|&(_, overlap)| overlap);
         let kept = best.is_some_and(|(i, overlap)| {
-            let cluster = &clusters[i];
+            let (cluster, home) = &clusters[i];
             let majority_old = overlap * IDENTITY_OVERLAP_DEN >= clan.members.len() * IDENTITY_OVERLAP_NUM;
             let majority_new = overlap * IDENTITY_OVERLAP_DEN >= cluster.len() * IDENTITY_OVERLAP_NUM;
             if majority_old && majority_new {
                 matched[i] = true;
-                next.push(Clan { id: clan.id, founded_tick: clan.founded_tick, members: cluster.clone() });
+                next.push(Clan {
+                    id: clan.id,
+                    founded_tick: clan.founded_tick,
+                    members: cluster.clone(),
+                    home: *home,
+                });
                 true
             } else {
                 false
@@ -419,7 +449,7 @@ fn detect_clans(sim: &mut Sim) {
             });
         }
     }
-    for (i, cluster) in clusters.into_iter().enumerate() {
+    for (i, (cluster, home)) in clusters.into_iter().enumerate() {
         if matched[i] {
             continue;
         }
@@ -431,7 +461,7 @@ fn detect_clans(sim: &mut Sim) {
             kind: ClanEventKind::Formed,
             members: cluster.len(),
         });
-        next.push(Clan { id, founded_tick: sim.time.tick, members: cluster });
+        next.push(Clan { id, founded_tick: sim.time.tick, members: cluster, home });
     }
     next.sort_by_key(|c| c.id.0);
 

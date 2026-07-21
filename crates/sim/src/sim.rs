@@ -30,7 +30,7 @@
 
 use std::collections::BTreeMap;
 
-use cairn_core::{SimTime, TICKS_PER_DAY, WorldSeed};
+use cairn_core::{SimTime, TICKS_PER_DAY, WorldSeed, km_to_tiles};
 use cairn_worldgen::WorldGenConfig;
 
 use crate::agent::{
@@ -45,7 +45,7 @@ use crate::fauna::{self, FaunaId, Herd, HerdView, Kill, Pack};
 use crate::memory::{self, Memory};
 use crate::pathfind;
 use crate::skills::{self, Skills};
-use crate::social::{self, Clan, ClanEvent, ClanMembership, SocialGraph};
+use crate::social::{self, Clan, ClanEvent, ClanId, ClanMembership, SocialGraph};
 use crate::world::World;
 
 /// Un agent est « arrivé » sous une tuile et demie de sa cible.
@@ -306,22 +306,30 @@ impl Sim {
 
         // 0. Instantanés : l'état de la faune et des humains tel qu'il est
         // *au début* du tick. Tout le monde délibère sur la même photo.
+        // Le territoire de chaque clan (voir `social::detect_clans`) est
+        // recalculé une fois par jour ; on n'en prend ici qu'une lecture.
         let herds = self.herd_views();
         let humans = self.human_views();
+        let clan_homes: BTreeMap<ClanId, (f64, f64)> =
+            self.clans.iter().map(|c| (c.id, c.home)).collect();
 
         // 1. Délibération — bucketée : l'agent i ne repense sa tâche qu'aux
         // ticks (tick + i) % période == 0, ou dès qu'il n'a plus de tâche.
         // Les nourrissons ne délibèrent pas : ils sont portés.
-        for (_, (id, pos, phys, traits, demo, kin, behavior, mem)) in self.agents.query_mut::<(
-            &AgentId,
-            &Position,
-            &Physiology,
-            &Traits,
-            &Demographics,
-            &Kinship,
-            &mut Behavior,
-            &mut Memory,
-        )>() {
+        for (_, (id, pos, phys, traits, demo, kin, membership, behavior, mem)) in self
+            .agents
+            .query_mut::<(
+                &AgentId,
+                &Position,
+                &Physiology,
+                &Traits,
+                &Demographics,
+                &Kinship,
+                &ClanMembership,
+                &mut Behavior,
+                &mut Memory,
+            )>()
+        {
             if demo.is_infant(time.tick) {
                 continue;
             }
@@ -329,9 +337,17 @@ impl Sim {
                 || (time.tick.wrapping_add(id.0)) % DELIBERATION_PERIOD == 0;
             if due {
                 let current = behavior.task.map(|t| t.kind);
-                let ctx = AgentCtx { id: *id, pos, phys, traits, demo, kin };
-                behavior.task =
-                    brain::decide(&mut self.world, time, ctx, mem, current, &herds, &humans);
+                let ctx = AgentCtx { id: *id, pos, phys, traits, demo, kin, clan: membership.0 };
+                behavior.task = brain::decide(
+                    &mut self.world,
+                    time,
+                    ctx,
+                    mem,
+                    current,
+                    &herds,
+                    &humans,
+                    &clan_homes,
+                );
             }
         }
 
@@ -607,7 +623,11 @@ fn execute(
                 behavior.task = None;
             }
         }
-        TaskKind::Wander | TaskKind::Follow | TaskKind::Socialize | TaskKind::Explore => {
+        TaskKind::Wander
+        | TaskKind::Follow
+        | TaskKind::Socialize
+        | TaskKind::Explore
+        | TaskKind::ReturnToClan => {
             behavior.activity = Activity::Idle;
             behavior.task = None; // arrivé — on re-délibérera aussitôt
         }
@@ -1311,11 +1331,9 @@ mod tests {
     /// Fait avancer `sim` jour par jour jusqu'à `max_days`, et renvoie
     /// l'identifiant du premier clan formé (`None` si aucun ne s'est formé).
     /// On s'arrête **dès** la formation plutôt que de courir jusqu'au bout :
-    /// la population continue de se disperser après coup (aucune force ne la
-    /// ramène — c'est une caractéristique déjà connue des Phases 2-3, pas un
-    /// bug de ce module), et un clan formé peut très bien se dissoudre à
-    /// nouveau de lui-même quelques semaines plus tard. Le critère de la
-    /// Phase 4 est « un clan se forme », pas « un clan dure indéfiniment ».
+    /// le critère de ce test est « un clan se forme », pas « un clan dure » —
+    /// la persistance dans la durée, elle, est couverte par
+    /// `le_territoire_stabilise_la_derive_apres_formation` ci-dessous.
     fn run_until_clan_formed(sim: &mut Sim, max_days: u64) -> Option<crate::social::ClanId> {
         for _ in 0..max_days {
             for _ in 0..24 {
@@ -1409,6 +1427,59 @@ mod tests {
         };
         assert_eq!(fingerprint(&a), fingerprint(&b));
         assert_eq!(a.clan_events.len(), b.clan_events.len());
+    }
+
+    /// La plus grande distance entre un membre du clan et le foyer courant du
+    /// clan (`Clan::home`) — la mesure d'étalement utilisée pour ce test.
+    fn clan_spread(sim: &Sim, clan: &social::Clan) -> f64 {
+        let humans = sim.human_views();
+        clan.members
+            .iter()
+            .filter_map(|&id| demography::find_human(&humans, id))
+            .map(|h| (h.pos.0 - clan.home.0).hypot(h.pos.1 - clan.home.1))
+            .fold(0.0_f64, f64::max)
+    }
+
+    /// L'incrément 2 de la Phase 4 (rétroaction comportementale vers le
+    /// territoire) répond directement à une limite mesurée à l'incrément 1 :
+    /// sans rien pour ramener un agent vers son clan, la même scène (24
+    /// agents, seed 42) dérivait sans jamais se stabiliser (jusqu'à ~8 km en
+    /// 85 j, voir CLAUDE.md). On ne rejoue pas cette mesure historique ici
+    /// (trop lente, trop sensible aux aléas) ; on teste la propriété qui doit
+    /// désormais tenir à la place : une fois le clan formé, son étalement
+    /// **cesse de croître** au lieu de s'éloigner indéfiniment. On compare
+    /// deux instantanés espacés de 40 jours plutôt qu'une borne absolue : la
+    /// dérive sans borne, par définition, continue de croître entre deux
+    /// mesures aussi éloignées ; une dérive rappelée par le territoire, non.
+    /// Mesuré sur cette scène : 4,5 km à 60 j → 5,1 km à 100 j (+0,6 km en
+    /// 40 j, contre les ~8 km en 85 j sans rappel — un plateau, pas une
+    /// dérive).
+    #[test]
+    fn le_territoire_stabilise_la_derive_apres_formation() {
+        let (mut sim, _) = scenario_setup(42, 24, 0);
+        run_until_clan_formed(&mut sim, 40).expect("scénario invalide : aucun clan formé");
+
+        for _ in 0..24 * 20 {
+            sim.step();
+        }
+        let clan = sim.clans.first().cloned().expect("le clan doit exister à 60 j (40 + 20)");
+        let spread_60d = clan_spread(&sim, &clan);
+
+        for _ in 0..24 * 40 {
+            sim.step();
+        }
+        let clan = sim
+            .clans
+            .first()
+            .cloned()
+            .expect("le clan doit avoir survécu jusqu'à 100 j grâce au territoire");
+        let spread_100d = clan_spread(&sim, &clan);
+
+        assert!(
+            spread_100d < spread_60d + km_to_tiles(1.5),
+            "l'étalement ne doit plus croître sans borne une fois le territoire actif \
+             ({spread_60d:.0} tuiles à 60 j, {spread_100d:.0} tuiles à 100 j)"
+        );
     }
 
     #[test]

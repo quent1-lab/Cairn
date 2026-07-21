@@ -119,6 +119,11 @@ pub enum TaskKind {
     /// Marcher vers une cellule jamais visitée : le drive « comprendre »,
     /// réservé aux curieux dont les besoins sont contenus (voir `brain`).
     Explore,
+    /// Rejoindre le territoire de son clan (voir `crate::social::Clan::home`)
+    /// quand on s'en est trop éloigné. La rétroaction qui donne un sens à la
+    /// co-résidence : sans elle, la population diffuse sans jamais revenir
+    /// (voir le commentaire de module de `social`).
+    ReturnToClan,
 }
 
 /// Le composant « comportement » : la tâche en cours et l'activité de l'heure.

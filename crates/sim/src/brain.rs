@@ -15,6 +15,8 @@
 //! praticable — sans elle, s'aventurer hors de la perception locale, c'est
 //! s'aventurer hors de l'eau.
 
+use std::collections::BTreeMap;
+
 use cairn_core::{Pcg32, SimTime, km_to_tiles, splitmix64};
 use cairn_worldgen::Biome;
 
@@ -24,6 +26,7 @@ use crate::demography::{Demographics, HumanView, Kinship, Traits, find_human};
 use crate::fauna::HerdView;
 use crate::memory::{Memory, cell_of};
 use crate::salt;
+use crate::social::{ClanId, RESIDENCE_RADIUS_TILES};
 use crate::world::World;
 
 /// Un agent re-délibère toutes les 4 h (et dès qu'il n'a plus de tâche).
@@ -78,6 +81,7 @@ pub struct AgentCtx<'a> {
     pub traits: &'a Traits,
     pub demo: &'a Demographics,
     pub kin: &'a Kinship,
+    pub clan: Option<ClanId>,
 }
 
 /// Choisit la prochaine tâche de l'agent. Déterministe : le tirage dérive de
@@ -92,8 +96,9 @@ pub fn decide(
     current: Option<TaskKind>,
     herds: &[HerdView],
     humans: &[HumanView],
+    clan_homes: &BTreeMap<ClanId, (f64, f64)>,
 ) -> Option<Task> {
-    let AgentCtx { id, pos, phys, traits, demo, kin } = agent;
+    let AgentCtx { id, pos, phys, traits, demo, kin, clan } = agent;
     let adult = demo.is_adult(time.tick);
     let here = pos.tile();
     let mut candidates: Vec<(TaskKind, (i64, i64), f32)> = Vec::new();
@@ -195,6 +200,25 @@ pub fn decide(
                 let score = 0.4 * traits.sociability;
                 let target = (hpos.0.floor() as i64, hpos.1.floor() as i64);
                 candidates.push((TaskKind::Socialize, target, score));
+            }
+        }
+    }
+
+    // — Revenir au territoire du clan : le pendant de `Socialize` à l'échelle
+    //   du groupe plutôt que du congénère le plus proche. Sans elle, rien ne
+    //   ramène un membre vers son clan (voir `social` — la population
+    //   diffusait sans borne) ; avec elle, le foyer d'hier (le centroïde
+    //   calculé par `social::detect_clans`) exerce une attraction dès qu'on
+    //   s'en éloigne de plus que le rayon de résidence — **le même rayon**
+    //   qui sert à la détection, pour que l'attraction et le critère se
+    //   répondent : rester en dessous du seuil, c'est rester détectable.
+    if let Some(clan_id) = clan {
+        if let Some(&home) = clan_homes.get(&clan_id) {
+            let d = (pos.x - home.0).hypot(pos.y - home.1);
+            if d > RESIDENCE_RADIUS_TILES {
+                let score = ((d / RESIDENCE_RADIUS_TILES) as f32 - 1.0).clamp(0.3, 1.0);
+                let target = (home.0.floor() as i64, home.1.floor() as i64);
+                candidates.push((TaskKind::ReturnToClan, target, score));
             }
         }
     }
