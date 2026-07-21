@@ -31,6 +31,7 @@ pub mod pathfind;
 pub mod scenario;
 pub mod sim;
 pub mod skills;
+pub mod social;
 pub mod tile;
 pub mod world;
 
@@ -42,6 +43,7 @@ pub use fauna::{FaunaId, Herd, HerdState, Pack};
 pub use memory::Memory;
 pub use sim::{BirthRecord, DeathRecord, Sim};
 pub use skills::Skills;
+pub use social::{Clan, ClanEvent, ClanEventKind, ClanId, ClanMembership, SocialGraph};
 pub use tile::{Tile, TileFlags};
 pub use world::World;
 

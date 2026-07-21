@@ -45,6 +45,7 @@ use crate::fauna::{self, FaunaId, Herd, HerdView, Kill, Pack};
 use crate::memory::{self, Memory};
 use crate::pathfind;
 use crate::skills::{self, Skills};
+use crate::social::{self, Clan, ClanEvent, ClanMembership, SocialGraph};
 use crate::world::World;
 
 /// Un agent est « arrivé » sous une tuile et demie de sa cible.
@@ -127,8 +128,16 @@ pub struct Sim {
     pub shelter_ticks: u64,
     /// Trajets d'évitement d'eau en cours, par identifiant d'agent.
     pub(crate) routes: BTreeMap<u64, Route>,
+    /// Le graphe d'affinités entre agents (Phase 4, voir `social`).
+    pub social: SocialGraph,
+    /// Les clans détectés — reconstruit en entier chaque jour, jamais
+    /// modifié à la main : voir `social::daily`.
+    pub clans: Vec<Clan>,
+    /// Formations et effondrements de clans depuis le début du monde.
+    pub clan_events: Vec<ClanEvent>,
     pub(crate) next_agent_id: u64,
     next_fauna_id: u64,
+    pub(crate) next_clan_id: u64,
 }
 
 impl Sim {
@@ -155,8 +164,12 @@ impl Sim {
             path_calls: 0,
             shelter_ticks: 0,
             routes: BTreeMap::new(),
+            social: SocialGraph::default(),
+            clans: Vec::new(),
+            clan_events: Vec::new(),
             next_agent_id: 0,
             next_fauna_id: 0,
+            next_clan_id: 0,
         }
     }
 
@@ -177,6 +190,7 @@ impl Sim {
             Kinship { mother: None, father: None },
             Memory::default(),
             Skills::founder(&traits),
+            ClanMembership::default(),
         ));
         id
     }
@@ -212,6 +226,9 @@ impl Sim {
             // apprendre — c'est ce qui rend l'oubli générationnel possible.
             Memory::default(),
             Skills::default(),
+            // Pas de clan à la naissance : il en hérite dès le lendemain,
+            // simplement en vivant collé à sa mère (voir `social`).
+            ClanMembership::default(),
         ));
         id
     }
@@ -415,17 +432,22 @@ impl Sim {
         }
 
         // 3 bis. Démographie quotidienne à minuit : naissances, conceptions,
-        // sénescence.
+        // sénescence. Puis entretien du graphe social et détection des
+        // clans (Phase 4) : le graphe doit voir la population du jour, pas
+        // celle d'hier (un mort ne doit pas peser sur la cohésion).
         if time.tick.is_multiple_of(TICKS_PER_DAY) {
             demography::daily(self);
+            social::daily(self);
         }
 
-        // 3 ter. Échange de savoirs toutes les 4 h : un instantané quotidien
-        // raterait les croisements de la journée (on se parle en se
-        // rencontrant, pas à minuit pile). Les enfants héritent ainsi des
-        // sources de leurs parents simplement en vivant à leurs côtés.
+        // 3 ter. Échange de savoirs et renforcement des liens sociaux toutes
+        // les 4 h : un instantané quotidien raterait les croisements de la
+        // journée (on se parle en se rencontrant, pas à minuit pile). Les
+        // enfants héritent ainsi des sources — et du clan — de leurs
+        // parents simplement en vivant à leurs côtés.
         if time.tick % 4 == 0 {
             memory::exchange_knowledge(self);
+            social::encounter(self);
         }
 
         // 4. Faune. Les meutes chassent d'abord (sur l'instantané), puis
@@ -1284,6 +1306,109 @@ mod tests {
             "les curieux doivent connaître nettement plus de terrain \
              ({mean_curious:.1} cellules contre {mean_dull:.1})"
         );
+    }
+
+    /// Fait avancer `sim` jour par jour jusqu'à `max_days`, et renvoie
+    /// l'identifiant du premier clan formé (`None` si aucun ne s'est formé).
+    /// On s'arrête **dès** la formation plutôt que de courir jusqu'au bout :
+    /// la population continue de se disperser après coup (aucune force ne la
+    /// ramène — c'est une caractéristique déjà connue des Phases 2-3, pas un
+    /// bug de ce module), et un clan formé peut très bien se dissoudre à
+    /// nouveau de lui-même quelques semaines plus tard. Le critère de la
+    /// Phase 4 est « un clan se forme », pas « un clan dure indéfiniment ».
+    fn run_until_clan_formed(sim: &mut Sim, max_days: u64) -> Option<crate::social::ClanId> {
+        for _ in 0..max_days {
+            for _ in 0..24 {
+                sim.step();
+            }
+            if let Some(e) =
+                sim.clan_events.iter().find(|e| e.kind == social::ClanEventKind::Formed)
+            {
+                return Some(e.clan);
+            }
+        }
+        None
+    }
+
+    /// LE critère n°1 de la Phase 4 : « des clans se forment sans qu'aucune
+    /// règle ne dise "former un clan ici" ». Le témoin dispersé a exactement
+    /// la même taille de population que le groupe resserré, seule la
+    /// géographie diffère — ce n'est donc pas la taille de la population qui
+    /// déclenche la détection, mais bien la cohésion et la co-résidence.
+    #[test]
+    fn un_clan_emerge_sans_regle_explicite() {
+        let (mut sim, _) = scenario_setup(42, 24, 0);
+        assert!(
+            run_until_clan_formed(&mut sim, 40).is_some(),
+            "un groupe resserré de 24 personnes doit finir par former un clan"
+        );
+
+        // Témoin : même seed, même taille de population, mais dispersée à
+        // des kilomètres — jamais à portée de rencontre.
+        let mut scattered = Sim::new(WorldSeed(42), 512);
+        let home = find_land(&scattered);
+        for i in 0..10i64 {
+            let far = (home.0 + i * 4000, home.1);
+            if scattered.world.tile(far.0, far.1).is_walkable() {
+                scattered.spawn_agent(far.0 as f64 + 0.5, far.1 as f64 + 0.5);
+            }
+        }
+        assert!(
+            run_until_clan_formed(&mut scattered, 40).is_none(),
+            "une population dispersée à des km ne doit jamais former de clan"
+        );
+    }
+
+    /// Le pendant du critère précédent : « un clan affamé s'effondre, et ses
+    /// survivants rejoignent d'autres clans ou en fondent un nouveau ». On
+    /// teste ici le **mécanisme** de dissolution, pas une famine réaliste
+    /// (couverte par le calibrage) : rien ne code « si affamé, dissoudre » —
+    /// un clan n'est qu'un instantané recalculé chaque jour, il s'efface tout
+    /// seul dès qu'il ne retrouve plus son groupe le lendemain.
+    #[test]
+    fn un_clan_s_efface_quand_ses_membres_disparaissent() {
+        let (mut sim, _) = scenario_setup(42, 24, 0);
+        let clan_id = run_until_clan_formed(&mut sim, 40).expect("scénario invalide : aucun clan formé");
+        assert!(sim.clans.iter().any(|c| c.id == clan_id), "le clan tout juste formé doit exister");
+
+        let victims: Vec<hecs::Entity> =
+            sim.agents.query::<&AgentId>().iter().map(|(e, _)| e).collect();
+        for e in victims {
+            let _ = sim.agents.despawn(e);
+        }
+        for _ in 0..24 {
+            sim.step();
+        }
+        assert!(sim.clans.is_empty(), "sans le moindre membre, le clan ne peut plus être détecté");
+        assert!(
+            sim.clan_events
+                .iter()
+                .any(|e| e.clan == clan_id && e.kind == social::ClanEventKind::Dissolved),
+            "un événement de dissolution doit avoir été enregistré"
+        );
+    }
+
+    /// Déterminisme des clans, spécifiquement : même seed, même histoire de
+    /// formations/dissolutions, mêmes membres, bit à bit.
+    #[test]
+    fn les_clans_sont_deterministes() {
+        let run = || {
+            let (mut sim, _) = scenario_setup(42, 24, 0);
+            for _ in 0..24 * 40 {
+                sim.step();
+            }
+            sim
+        };
+        let a = run();
+        let b = run();
+        let fingerprint = |sim: &Sim| -> Vec<(u64, u64, Vec<u64>)> {
+            sim.clans
+                .iter()
+                .map(|c| (c.id.0, c.founded_tick, c.members.iter().map(|m| m.0).collect()))
+                .collect()
+        };
+        assert_eq!(fingerprint(&a), fingerprint(&b));
+        assert_eq!(a.clan_events.len(), b.clan_events.len());
     }
 
     #[test]
