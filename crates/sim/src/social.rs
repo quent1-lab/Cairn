@@ -1,5 +1,5 @@
 //! Le graphe social et l'émergence du clan (BRIEF §5.1, Phase 4 « LE CLAN »,
-//! incréments 1 et 2).
+//! incréments 1, 2 et 3).
 //!
 //! C'est la phase la plus délicate en conception (BRIEF §9) : **le clan ne
 //! doit être qu'une conséquence détectée, jamais une cause**. Il est donc
@@ -61,7 +61,7 @@
 //! simple : pas encore un champ diffusé sur la grille (ça viendra avec les
 //! structures, qui touchent enfin les tuiles — BRIEF §2.3), juste un point
 //! qui **attire**. `brain::decide` lit ce point (`AgentCtx::clan` +
-//! `clan_homes`, passés par `Sim::step`) et propose un candidat
+//! `clan_views`, passés par `Sim::step`) et propose un candidat
 //! `TaskKind::ReturnToClan` dès qu'un membre s'éloigne du foyer de plus que
 //! `RESIDENCE_RADIUS_TILES` — **le même rayon** que celui utilisé par la
 //! détection pour juger de la co-résidence, pour que l'attraction et le
@@ -70,6 +70,27 @@
 //! le_territoire_stabilise_la_derive_apres_formation`) : l'étalement du clan
 //! **plafonne** (4,5 km à 60 j → 5,1 km à 100 j) là où il grossissait sans
 //! fin auparavant (~8 km à 85 j, et toujours en croissance).
+//!
+//! ## Le stock commun (incrément 3)
+//!
+//! BRIEF §5.1 : « stock commun, ressources mises en commun ». Rien, avant
+//! cet incrément, ne faisait vivre une réserve de nourriture plus loin que
+//! l'instant présent — chasser et cueillir rechargent directement la faim de
+//! l'individu, sans jamais rien laisser derrière. `Clan::stock` change ça
+//! *a minima* : une chasse fructueuse nourrit rarement pile ce qu'il fallait
+//! (`HUNT_NUTRITION` est une bête tuée, pas une portion calibrée) — le
+//! surplus, qui partait auparavant dans le `.max(0.0)` de la faim déjà à
+//! zéro, part désormais dans le stock du clan du chasseur (`sim::execute`,
+//! bras `Hunt`). À l'autre bout, un membre affamé sans cueillette ni gibier
+//! à portée (même garde que le désespoir d'errance) peut rentrer au foyer du
+//! clan pour y puiser (`TaskKind::EatFromStock`) — le stock n'est pas un
+//! porte-monnaie magique, il faut physiquement y être. **Rien n'a été
+//! ajouté au budget de délibération** : `EatFromStock` est un candidat de
+//! plus dans le même softmax que tous les autres, pas un système à part.
+//! La cueillette, elle, n'alimente pas le stock : son prélèvement est déjà
+//! borné à ce que la faim du moment réclame (`wanted = hunger.min(bite)`
+//! dans `sim::execute`), il n'y a structurellement pas de surplus à y
+//! capter sans changer aussi *comment* on cueille — hors scope ici.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -142,10 +163,9 @@ const IDENTITY_OVERLAP_DEN: usize = 2;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ClanId(pub u64);
 
-/// Un clan détecté : identité, membres, et le **territoire** au sens le plus
-/// simple qui vaille (BRIEF §5.1) — le centroïde de ses membres au moment de
-/// la dernière détection, recalculé chaque jour comme le reste. Stock, chef
-/// et normes viendront avec les incréments suivants de la Phase 4.
+/// Un clan détecté : identité, membres, **territoire** (BRIEF §5.1) et
+/// **stock commun**. Chef et normes viendront avec les incréments suivants
+/// de la Phase 4.
 #[derive(Debug, Clone)]
 pub struct Clan {
     pub id: ClanId,
@@ -155,6 +175,24 @@ pub struct Clan {
     /// détection). Lu par `brain::decide` pour attirer les membres qui s'en
     /// éloignent — voir le commentaire de module sur la co-résidence *voulue*.
     pub home: (f64, f64),
+    /// Réserve alimentaire commune (mêmes unités que `Physiology::hunger` :
+    /// combien de faim elle peut éponger). Alimentée par le surplus des
+    /// chasses fructueuses, puisée par les membres affamés sans ressource
+    /// locale — voir le commentaire de module. Persiste d'un jour à l'autre
+    /// tant que le clan garde son identité (`detect_clans` le reporte) ; un
+    /// clan qui s'efface perd son stock avec lui, comme un campement
+    /// abandonné — aucune règle de redistribution n'est nécessaire pour un
+    /// cas déjà rare.
+    pub stock: f32,
+}
+
+/// Instantané minimal d'un clan pour la délibération (`brain::decide`) : ce
+/// qu'un membre a besoin de savoir sur **son** clan pour décider d'y
+/// retourner ou d'y puiser, sans lui donner accès à la liste des membres.
+#[derive(Debug, Clone, Copy)]
+pub struct ClanView {
+    pub home: (f64, f64),
+    pub stock: f32,
 }
 
 /// Le clan d'appartenance d'un agent, `None` s'il n'en a pas. Composant à
@@ -434,6 +472,7 @@ fn detect_clans(sim: &mut Sim) {
                     founded_tick: clan.founded_tick,
                     members: cluster.clone(),
                     home: *home,
+                    stock: clan.stock,
                 });
                 true
             } else {
@@ -461,7 +500,7 @@ fn detect_clans(sim: &mut Sim) {
             kind: ClanEventKind::Formed,
             members: cluster.len(),
         });
-        next.push(Clan { id, founded_tick: sim.time.tick, members: cluster, home });
+        next.push(Clan { id, founded_tick: sim.time.tick, members: cluster, home, stock: 0.0 });
     }
     next.sort_by_key(|c| c.id.0);
 

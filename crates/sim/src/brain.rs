@@ -26,7 +26,7 @@ use crate::demography::{Demographics, HumanView, Kinship, Traits, find_human};
 use crate::fauna::HerdView;
 use crate::memory::{Memory, cell_of};
 use crate::salt;
-use crate::social::{ClanId, RESIDENCE_RADIUS_TILES};
+use crate::social::{ClanId, ClanView, RESIDENCE_RADIUS_TILES};
 use crate::world::World;
 
 /// Un agent re-délibère toutes les 4 h (et dès qu'il n'a plus de tâche).
@@ -71,6 +71,9 @@ const EXPLORE_LEG_TILES: f64 = 600.0;
 /// Une cible d'exploration doit rester à ~2 km d'une source **connue** :
 /// l'arrimage au réseau d'eau, qui borne la dérive (voir le candidat).
 const EXPLORE_TETHER_TILES: i64 = 1000;
+/// En dessous de ce niveau, le stock du clan n'est pas un but de trajet
+/// (même idiome que `FORAGE_MIN_BIOMASS`).
+const MIN_STOCK_WORTH_TRIP: f32 = 0.1;
 
 /// L'agent vu par la délibération : son identité et ses composants, groupés
 /// pour ne pas trimballer sept paramètres.
@@ -88,6 +91,7 @@ pub struct AgentCtx<'a> {
 /// (seed, tick, id agent) — deux exécutions rejouent la même hésitation.
 /// `mem` est lue (où boire, où explorer) **et** écrite (une source aperçue
 /// s'apprend) : délibérer, c'est déjà mémoriser.
+#[allow(clippy::too_many_arguments)]
 pub fn decide(
     world: &mut World,
     time: SimTime,
@@ -96,7 +100,7 @@ pub fn decide(
     current: Option<TaskKind>,
     herds: &[HerdView],
     humans: &[HumanView],
-    clan_homes: &BTreeMap<ClanId, (f64, f64)>,
+    clan_views: &BTreeMap<ClanId, ClanView>,
 ) -> Option<Task> {
     let AgentCtx { id, pos, phys, traits, demo, kin, clan } = agent;
     let adult = demo.is_adult(time.tick);
@@ -141,6 +145,23 @@ pub fn decide(
         let size = Curve::Power { k: 0.5 }.eval(herd.population / 60.0);
         let score = urgency * (0.55 + 0.45 * size) * travel_discount(pos.distance_tiles(target));
         candidates.push((TaskKind::Hunt, target, score));
+    }
+
+    // — Puiser dans le stock du clan : le pendant collectif de la cueillette
+    //   et de la chasse (BRIEF §5.1). Même garde que le désespoir alimentaire
+    //   de l'errance plus bas — rien de local ne répond — pour qu'un membre
+    //   ne vide le stock commun que quand il en a vraiment besoin, pas parce
+    //   qu'il existe. La cible est le foyer du clan : le stock se puise sur
+    //   place, il ne se livre pas.
+    if let Some(clan_id) = clan {
+        if let Some(view) = clan_views.get(&clan_id) {
+            if view.stock > MIN_STOCK_WORTH_TRIP && forage_biomass < FORAGE_MIN_BIOMASS && nearest_herd.is_none() {
+                let urgency = Curve::Logistic { steepness: 6.0, midpoint: 0.4 }.eval(phys.hunger);
+                let target = (view.home.0.floor() as i64, view.home.1.floor() as i64);
+                let score = urgency * travel_discount(pos.distance_tiles(target));
+                candidates.push((TaskKind::EatFromStock, target, score));
+            }
+        }
     }
 
     // — Dormir : sur place, surtout la nuit ; la fatigue extrême s'impose.
@@ -213,11 +234,11 @@ pub fn decide(
     //   qui sert à la détection, pour que l'attraction et le critère se
     //   répondent : rester en dessous du seuil, c'est rester détectable.
     if let Some(clan_id) = clan {
-        if let Some(&home) = clan_homes.get(&clan_id) {
-            let d = (pos.x - home.0).hypot(pos.y - home.1);
+        if let Some(view) = clan_views.get(&clan_id) {
+            let d = (pos.x - view.home.0).hypot(pos.y - view.home.1);
             if d > RESIDENCE_RADIUS_TILES {
                 let score = ((d / RESIDENCE_RADIUS_TILES) as f32 - 1.0).clamp(0.3, 1.0);
-                let target = (home.0.floor() as i64, home.1.floor() as i64);
+                let target = (view.home.0.floor() as i64, view.home.1.floor() as i64);
                 candidates.push((TaskKind::ReturnToClan, target, score));
             }
         }

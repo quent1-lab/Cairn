@@ -124,6 +124,10 @@ pub enum TaskKind {
     /// co-résidence : sans elle, la population diffuse sans jamais revenir
     /// (voir le commentaire de module de `social`).
     ReturnToClan,
+    /// Puiser dans le stock commun du clan (`crate::social::Clan::stock`)
+    /// quand rien de local ne répond à la faim. La cible est le foyer du
+    /// clan : le stock se puise sur place, il ne se livre pas.
+    EatFromStock,
 }
 
 /// Le composant « comportement » : la tâche en cours et l'activité de l'heure.

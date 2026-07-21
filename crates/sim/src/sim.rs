@@ -30,12 +30,12 @@
 
 use std::collections::BTreeMap;
 
-use cairn_core::{SimTime, TICKS_PER_DAY, WorldSeed, km_to_tiles};
+use cairn_core::{SimTime, TICKS_PER_DAY, WorldSeed};
 use cairn_worldgen::WorldGenConfig;
 
 use crate::agent::{
     Activity, AgentId, Behavior, DeathCause, FOREST_BONUS_C, Physiology, Position,
-    SHELTER_BONUS_C, TaskKind, WALK_TILES_PER_TICK,
+    SHELTER_BONUS_C, Task, TaskKind, WALK_TILES_PER_TICK,
 };
 use crate::brain::{self, AgentCtx, DELIBERATION_PERIOD};
 use crate::climate::Climate;
@@ -45,7 +45,7 @@ use crate::fauna::{self, FaunaId, Herd, HerdView, Kill, Pack};
 use crate::memory::{self, Memory};
 use crate::pathfind;
 use crate::skills::{self, Skills};
-use crate::social::{self, Clan, ClanEvent, ClanId, ClanMembership, SocialGraph};
+use crate::social::{self, Clan, ClanEvent, ClanId, ClanMembership, ClanView, SocialGraph};
 use crate::world::World;
 
 /// Un agent est « arrivé » sous une tuile et demie de sa cible.
@@ -64,6 +64,11 @@ const HUNT_YIELD_HEAD: f32 = 1.0;
 /// Ce qu'une prise retire de faim : une bête nourrit bien mieux que des
 /// baies — c'est tout l'intérêt du risque et du trajet.
 const HUNT_NUTRITION: f32 = 0.7;
+/// Plafond du stock commun d'un clan, par membre : quelques portions de
+/// réserve, pas un grenier sans fond. `HUNT_NUTRITION` vaut jusqu'à ~0,88
+/// (au meilleur skill) — 3 portions, c'est de quoi absorber un mauvais jour
+/// de chasse pour chaque membre, pas accumuler indéfiniment.
+const STOCK_CAP_PER_MEMBER: f32 = 3.0;
 /// Requêtes A* autorisées par tick (BRIEF §8.2 : « pathfinding budgété »).
 /// Seuls les agents que l'eau bloque en consomment ; les autres marchent en
 /// ligne droite pour rien.
@@ -310,8 +315,11 @@ impl Sim {
         // recalculé une fois par jour ; on n'en prend ici qu'une lecture.
         let herds = self.herd_views();
         let humans = self.human_views();
-        let clan_homes: BTreeMap<ClanId, (f64, f64)> =
-            self.clans.iter().map(|c| (c.id, c.home)).collect();
+        let clan_views: BTreeMap<ClanId, ClanView> = self
+            .clans
+            .iter()
+            .map(|c| (c.id, ClanView { home: c.home, stock: c.stock }))
+            .collect();
 
         // 1. Délibération — bucketée : l'agent i ne repense sa tâche qu'aux
         // ticks (tick + i) % période == 0, ou dès qu'il n'a plus de tâche.
@@ -346,7 +354,7 @@ impl Sim {
                     current,
                     &herds,
                     &humans,
-                    &clan_homes,
+                    &clan_views,
                 );
             }
         }
@@ -354,10 +362,14 @@ impl Sim {
         // 2. Exécution des tâches. Les chasses réussies sont collectées : on
         // n'entame pas le gibier pendant que les autres délibèrent dessus.
         // `path_budget` borne le nombre d'A* lancés ce tick (agents bloqués
-        // par l'eau).
+        // par l'eau). `clan_stock` est une copie de travail des réserves —
+        // dépôts (chasse) et retraits (`EatFromStock`) s'y accumulent au fil
+        // des agents, reportée sur `self.clans` une fois la boucle finie.
         let mut kills: Vec<Kill> = Vec::new();
         let mut path_budget = PATH_REQUESTS_PER_TICK;
-        for (_, (id, pos, phys, traits, demo, behavior, mem, agent_skills)) in
+        let mut clan_stock: BTreeMap<ClanId, f32> =
+            self.clans.iter().map(|c| (c.id, c.stock)).collect();
+        for (_, (id, pos, phys, traits, demo, behavior, mem, agent_skills, membership)) in
             self.agents.query_mut::<(
                 &AgentId,
                 &mut Position,
@@ -367,6 +379,7 @@ impl Sim {
                 &mut Behavior,
                 &mut Memory,
                 &mut Skills,
+                &ClanMembership,
             )>()
         {
             if demo.is_infant(time.tick) {
@@ -388,6 +401,8 @@ impl Sim {
                 work,
                 traits,
                 agent_skills,
+                membership.0,
+                &mut clan_stock,
             );
             // Où que la tâche l'ait mené, l'agent note où il a mis les pieds.
             mem.note_visit(pos.tile());
@@ -397,6 +412,13 @@ impl Sim {
         }
         self.hunted_head += kills.iter().map(|k| k.head).sum::<f32>();
         self.path_calls += u64::from(PATH_REQUESTS_PER_TICK - path_budget);
+        // Report des dépôts/retraits de la boucle, plafonné par membre
+        // (`STOCK_CAP_PER_MEMBER` — voir le commentaire de la constante).
+        for clan in &mut self.clans {
+            if let Some(&stock) = clan_stock.get(&clan.id) {
+                clan.stock = stock.min(STOCK_CAP_PER_MEMBER * clan.members.len() as f32);
+            }
+        }
 
         // 2 bis. Les nourrissons : portés par leur mère, allaités par elle.
         demography::nurse_infants(self);
@@ -534,6 +556,8 @@ fn execute(
     work: f32,
     traits: &Traits,
     agent_skills: &mut Skills,
+    clan: Option<ClanId>,
+    clan_stock: &mut BTreeMap<ClanId, f32>,
 ) -> Option<Kill> {
     let task = match behavior.task {
         Some(task) => task,
@@ -570,7 +594,15 @@ fn execute(
             skills::hunt_cap(traits),
             skills::KILL_PRACTICE_BOOST,
         );
+        // Une bête tuée n'est pas une portion calibrée : ce qui dépasse la
+        // faim du moment part au stock commun du clan (BRIEF §5.1) plutôt
+        // que d'être perdu dans le `.max(0.0)` — voir le commentaire de
+        // module de `social` sur le stock.
+        let surplus = (nutrition - phys.hunger).max(0.0);
         phys.hunger = (phys.hunger - nutrition).max(0.0);
+        if surplus > 0.0 && let Some(clan_id) = clan {
+            *clan_stock.entry(clan_id).or_insert(0.0) += surplus;
+        }
         behavior.task = None;
         return Some(Kill { herd: prey.entity, head: HUNT_YIELD_HEAD });
     }
@@ -609,6 +641,19 @@ fn execute(
             if phys.hunger <= 0.05 || tile.biomass == 0 {
                 behavior.task = None; // rassasié, ou tuile épuisée
             }
+        }
+        TaskKind::EatFromStock => {
+            behavior.activity = Activity::Eating;
+            // Conservation stricte : ce que l'agent gagne, le stock le perd,
+            // au même montant — pas de nourriture créée ni perdue au passage.
+            if let Some(clan_id) = clan
+                && let Some(stock) = clan_stock.get_mut(&clan_id)
+            {
+                let taken = stock.min(phys.hunger);
+                *stock -= taken;
+                phys.hunger = (phys.hunger - taken).max(0.0);
+            }
+            behavior.task = None; // un puisage, puis on redélibère
         }
         TaskKind::Sleep => {
             behavior.activity = Activity::Sleeping;
@@ -1476,10 +1521,110 @@ mod tests {
         let spread_100d = clan_spread(&sim, &clan);
 
         assert!(
-            spread_100d < spread_60d + km_to_tiles(1.5),
+            spread_100d < spread_60d + cairn_core::km_to_tiles(1.5),
             "l'étalement ne doit plus croître sans borne une fois le territoire actif \
              ({spread_60d:.0} tuiles à 60 j, {spread_100d:.0} tuiles à 100 j)"
         );
+    }
+
+    /// L'incrément 3 de la Phase 4 (stock commun, BRIEF §5.1) : une chasse
+    /// fructueuse nourrit rarement pile ce qu'il fallait — `HUNT_NUTRITION`
+    /// est une bête tuée, pas une portion calibrée. Le surplus, qui partait
+    /// auparavant dans le `.max(0.0)` de la faim déjà comblée, doit
+    /// désormais alimenter le stock du clan du chasseur. Test au niveau du
+    /// mécanisme (`execute` appelé directement, comme le permet `mod tests`
+    /// dans le même fichier) plutôt qu'un scénario complet : un clan
+    /// injecté à la main ne survivrait pas à la prochaine détection de
+    /// minuit (`social::daily` le remplacerait par ce qu'il détecte vraiment
+    /// dans le graphe), donc un run multi-jours ne testerait pas ce qu'on
+    /// veut isoler ici.
+    #[test]
+    fn une_chasse_fructueuse_alimente_le_stock_du_clan() {
+        let mut sim = Sim::new(WorldSeed(42), 512);
+        let home = find_land(&sim);
+        let mut pos = Position { x: home.0 as f64 + 0.5, y: home.1 as f64 + 0.5 };
+        let mut phys = Physiology { hunger: 0.3, ..Physiology::default() };
+        let mut behavior =
+            Behavior { task: Some(Task { kind: TaskKind::Hunt, target: home }), ..Behavior::default() };
+        let traits = Traits::default();
+        let mut skills = Skills::default();
+        let mut routes: BTreeMap<u64, Route> = BTreeMap::new();
+        let mut budget = PATH_REQUESTS_PER_TICK;
+        let clan_id = social::ClanId(3);
+        let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::new();
+        // Le troupeau est juste sous la main : cette scène teste la
+        // mécanique de mise à mort, pas l'approche.
+        let herd = HerdView { entity: hecs::Entity::DANGLING, pos: (pos.x, pos.y), population: 20.0 };
+
+        let kill = execute(
+            &mut sim.world,
+            &mut routes,
+            &mut budget,
+            AgentId(0),
+            &mut pos,
+            &mut phys,
+            &mut behavior,
+            &[herd],
+            1.0,
+            &traits,
+            &mut skills,
+            Some(clan_id),
+            &mut clan_stock,
+        );
+
+        assert!(kill.is_some(), "le troupeau est à portée : la chasse doit réussir");
+        assert!(phys.hunger < 1e-6, "la faim doit être totalement comblée (nutrition > faim initiale)");
+        assert!(
+            clan_stock.get(&clan_id).copied().unwrap_or(0.0) > 0.0,
+            "le surplus (nutrition au-delà de la faim comblée) doit alimenter le stock du clan"
+        );
+    }
+
+    /// Le pendant du dépôt : puiser dans le stock au foyer réduit la faim
+    /// **et** le stock, du même montant — ni nourriture créée, ni perdue.
+    #[test]
+    fn puiser_dans_le_stock_reduit_la_faim_et_le_stock_a_parts_egales() {
+        let mut sim = Sim::new(WorldSeed(42), 512);
+        let home = find_land(&sim);
+        let mut pos = Position { x: home.0 as f64 + 0.5, y: home.1 as f64 + 0.5 };
+        let hunger_avant = 0.6;
+        let mut phys = Physiology { hunger: hunger_avant, ..Physiology::default() };
+        let mut behavior =
+            Behavior { task: Some(Task { kind: TaskKind::EatFromStock, target: home }), ..Behavior::default() };
+        let traits = Traits::default();
+        let mut skills = Skills::default();
+        let mut routes: BTreeMap<u64, Route> = BTreeMap::new();
+        let mut budget = PATH_REQUESTS_PER_TICK;
+        let clan_id = social::ClanId(7);
+        let stock_avant = 0.5; // moins que la faim : le retrait doit être partiel
+        let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::from([(clan_id, stock_avant)]);
+
+        execute(
+            &mut sim.world,
+            &mut routes,
+            &mut budget,
+            AgentId(0),
+            &mut pos,
+            &mut phys,
+            &mut behavior,
+            &[],
+            1.0,
+            &traits,
+            &mut skills,
+            Some(clan_id),
+            &mut clan_stock,
+        );
+
+        let stock_apres = clan_stock[&clan_id];
+        assert!(phys.hunger < hunger_avant, "la faim doit avoir baissé");
+        assert!(stock_apres < stock_avant, "le stock doit avoir baissé");
+        assert!(
+            (hunger_avant - phys.hunger - (stock_avant - stock_apres)).abs() < 1e-6,
+            "conservation : ce que l'agent gagne, le stock le perd, au même montant \
+             (faim {hunger_avant} → {}, stock {stock_avant} → {stock_apres})",
+            phys.hunger
+        );
+        assert!(stock_apres <= 1e-6, "le stock, plus petit que la faim, doit être vidé entièrement");
     }
 
     #[test]
