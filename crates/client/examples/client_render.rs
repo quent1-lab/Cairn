@@ -80,6 +80,17 @@ fn main() {
         fill_square(&mut buf, sx, sy, s, activity_rgb(beh.activity));
     }
 
+    // Foyers de clan (Phase 4) : un contour carré (le buffer RGBA brut ne
+    // prête pas à un cercle sans plus d'outillage) à la position de
+    // `Clan::home` — vérifie que la géométrie et la présence sont bonnes ;
+    // la couleur par clan, elle, ne s'exerce que dans le vrai rendu canvas
+    // (`App::draw_entities`), vérifiée en navigateur.
+    for clan in &sim.clans {
+        let (sx, sy) = project(clan.home.0, clan.home.1);
+        stroke_square(&mut buf, sx, sy, (scale * 12.0).clamp(12.0, 80.0), [255, 255, 255]);
+    }
+    println!("clans : {} actif(s)", sim.clans.len());
+
     let (g1, p1, _, _) = sim.fauna_census();
     println!(
         "après {ticks} ticks (an {}, jour {}) : {} humains, {g1:.0} gibier, {p1:.0} prédateurs",
@@ -113,6 +124,28 @@ fn fill_square(buf: &mut [u8], cx: f64, cy: f64, size: f64, rgb: [u8; 3]) {
             buf[o + 2] = rgb[2];
             buf[o + 3] = 255;
         }
+    }
+}
+
+/// Peint le contour d'un carré (pas le remplissage) centré sur (cx, cy).
+fn stroke_square(buf: &mut [u8], cx: f64, cy: f64, size: f64, rgb: [u8; 3]) {
+    let half = (size / 2.0).max(1.0) as i64;
+    let (cxi, cyi) = (cx as i64, cy as i64);
+    let mut put = |x: i64, y: i64| {
+        if x < 0 || y < 0 || x >= W as i64 || y >= H as i64 {
+            return;
+        }
+        let o = (y as usize * W + x as usize) * 4;
+        buf[o] = rgb[0];
+        buf[o + 1] = rgb[1];
+        buf[o + 2] = rgb[2];
+        buf[o + 3] = 255;
+    };
+    for d in -half..=half {
+        put(cxi + d, cyi - half);
+        put(cxi + d, cyi + half);
+        put(cxi - half, cyi + d);
+        put(cxi + half, cyi + d);
     }
 }
 

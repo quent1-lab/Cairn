@@ -67,8 +67,10 @@ const HUNT_NUTRITION: f32 = 0.7;
 /// Plafond du stock commun d'un clan, par membre : quelques portions de
 /// réserve, pas un grenier sans fond. `HUNT_NUTRITION` vaut jusqu'à ~0,88
 /// (au meilleur skill) — 3 portions, c'est de quoi absorber un mauvais jour
-/// de chasse pour chaque membre, pas accumuler indéfiniment.
-const STOCK_CAP_PER_MEMBER: f32 = 3.0;
+/// de chasse pour chaque membre, pas accumuler indéfiniment. `pub` (même
+/// patron que `memory::MEMORY_CELL_TILES`) : le client en a besoin pour
+/// afficher un stock relatif à son plafond plutôt qu'un nombre nu.
+pub const STOCK_CAP_PER_MEMBER: f32 = 3.0;
 /// Requêtes A* autorisées par tick (BRIEF §8.2 : « pathfinding budgété »).
 /// Seuls les agents que l'eau bloque en consomment ; les autres marchent en
 /// ligne droite pour rien.

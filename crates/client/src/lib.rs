@@ -440,6 +440,7 @@ impl App {
         self.draw_entities();
         self.update_readout();
         self.update_population_stats();
+        self.update_clan_panel();
         self.draw_population_chart();
     }
 
@@ -461,6 +462,26 @@ impl App {
             let wy = py + (cury - py) * a;
             ((wx - cx) * scale + w / 2.0, (wy - cy) * scale + h / 2.0)
         };
+
+        // Foyers de clan (Phase 4) : le territoire au sens le plus simple,
+        // un point qui attire (voir `Clan::home`) — dessiné en premier,
+        // sous les agents, comme un repère de fond plutôt qu'une entité.
+        // Une couleur par `ClanId` : le nombre de clans n'est pas borné a
+        // priori, donc pas de palette figée — angle d'or pour répartir les
+        // teintes sur le cercle même si beaucoup de clans coexistent.
+        self.ctx.set_line_width(2.0);
+        for clan in &self.sim.clans {
+            let (sx, sy) =
+                ((clan.home.0 - cx) * scale + w / 2.0, (clan.home.1 - cy) * scale + h / 2.0);
+            if !visible(sx, sy) {
+                continue;
+            }
+            let r = (scale * 6.0).clamp(6.0, 40.0);
+            self.ctx.set_stroke_style_str(&clan_color(clan.id));
+            self.ctx.begin_path();
+            self.ctx.arc(sx, sy, r, 0.0, std::f64::consts::TAU).expect("arc");
+            self.ctx.stroke();
+        }
 
         // Gibier (fauve) : la taille suit l'effectif du troupeau.
         self.ctx.set_fill_style_str("#c8a24a");
@@ -642,6 +663,34 @@ impl App {
                 hunt_sum / n as f32,
             )));
         }
+    }
+
+    /// Panneau d'inspection des clans (onglet Population, Phase 4) :
+    /// effectif, stock (relatif à son plafond) et âge de chaque clan actif —
+    /// jusqu'ici, `sim.clans` ne se lisait que dans les tests. `sim.clans`
+    /// est déjà trié par `ClanId` (`social::detect_clans`), donc l'ordre
+    /// d'affichage est stable d'une frame à l'autre sans tri ici.
+    fn update_clan_panel(&self) {
+        let Some(el) = document().get_element_by_id("clan-panel") else {
+            return;
+        };
+        if self.sim.clans.is_empty() {
+            el.set_text_content(Some("aucun clan formé"));
+            return;
+        }
+        let tick = self.sim.time.tick;
+        let mut lines = Vec::with_capacity(self.sim.clans.len());
+        for clan in &self.sim.clans {
+            let age_days = tick.saturating_sub(clan.founded_tick) / cairn_core::TICKS_PER_DAY;
+            let cap = cairn_sim::sim::STOCK_CAP_PER_MEMBER * clan.members.len() as f32;
+            lines.push(format!(
+                "#{:<3} {:>3} membres   stock {:>4.1}/{cap:<4.1}   {age_days:>3} j",
+                clan.id.0,
+                clan.members.len(),
+                clan.stock,
+            ));
+        }
+        el.set_text_content(Some(&lines.join("\n")));
     }
 
     /// Le petit graphique d'évolution de la population (onglet Population) :
@@ -862,6 +911,15 @@ fn sex_age_color(sex: Sex, adult: bool) -> &'static str {
         Sex::Female => "#e85ca0", // rose
         Sex::Male => "#4a90e2",   // bleu
     }
+}
+
+/// Couleur déterministe du halo de foyer d'un clan. Le nombre de clans
+/// n'est pas borné (contrairement au sexe/l'activité, des enums fermées) :
+/// angle d'or (~137°) plutôt qu'une palette figée, pour que deux clans
+/// voisins en id restent visuellement distincts même si beaucoup coexistent.
+fn clan_color(id: cairn_sim::ClanId) -> String {
+    let hue = (id.0.wrapping_mul(137) % 360) as f64;
+    format!("hsl({hue}, 70%, 55%)")
 }
 
 /// Affiche ou masque un élément par id (`display: grid`/`none`) — sert aux
