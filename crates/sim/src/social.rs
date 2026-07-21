@@ -80,13 +80,18 @@
 //! *a minima* : une chasse fructueuse nourrit rarement pile ce qu'il fallait
 //! (`HUNT_NUTRITION` est une bête tuée, pas une portion calibrée) — le
 //! surplus, qui partait auparavant dans le `.max(0.0)` de la faim déjà à
-//! zéro, part désormais dans le stock du clan du chasseur (`sim::execute`,
-//! bras `Hunt`). À l'autre bout, un membre affamé sans cueillette ni gibier
-//! à portée (même garde que le désespoir d'errance) peut rentrer au foyer du
-//! clan pour y puiser (`TaskKind::EatFromStock`) — le stock n'est pas un
-//! porte-monnaie magique, il faut physiquement y être. **Rien n'a été
-//! ajouté au budget de délibération** : `EatFromStock` est un candidat de
-//! plus dans le même softmax que tous les autres, pas un système à part.
+//! zéro, est désormais **porté** par le chasseur (`Carrying`, `sim::execute`,
+//! bras `Hunt`) puis rapporté au foyer de son clan pour y rejoindre le stock
+//! (`TaskKind::BringSurplusHome`) — la viande ne se téléporte pas depuis le
+//! lieu de la chasse : le dépôt exige d'y être, exactement comme le retrait.
+//! Un chasseur qui meurt ou change durablement de priorité en chemin perd
+//! simplement ce qu'il portait, sans code dédié pour ce cas. À l'autre bout,
+//! un membre affamé sans cueillette ni gibier à portée (même garde que le
+//! désespoir d'errance) peut rentrer au foyer du clan pour y puiser
+//! (`TaskKind::EatFromStock`) — le stock n'est pas un porte-monnaie magique,
+//! il faut physiquement y être. **Rien n'a été ajouté au budget de
+//! délibération** : `EatFromStock` et `BringSurplusHome` sont deux candidats
+//! de plus dans le même softmax que tous les autres, pas un système à part.
 //! La cueillette, elle, n'alimente pas le stock : son prélèvement est déjà
 //! borné à ce que la faim du moment réclame (`wanted = hunger.min(bite)`
 //! dans `sim::execute`), il n'y a structurellement pas de surplus à y

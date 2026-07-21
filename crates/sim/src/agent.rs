@@ -128,6 +128,10 @@ pub enum TaskKind {
     /// quand rien de local ne répond à la faim. La cible est le foyer du
     /// clan : le stock se puise sur place, il ne se livre pas.
     EatFromStock,
+    /// Rapporter au foyer le surplus d'une chasse (`Carrying`) pour qu'il
+    /// rejoigne le stock commun. Symétrique d'`EatFromStock` : le dépôt, comme
+    /// le retrait, exige d'être sur place — la viande ne se téléporte pas.
+    BringSurplusHome,
 }
 
 /// Le composant « comportement » : la tâche en cours et l'activité de l'heure.
@@ -136,6 +140,15 @@ pub struct Behavior {
     pub task: Option<Task>,
     pub activity: Activity,
 }
+
+/// Surplus de chasse porté vers le foyer du clan, en attente de dépôt
+/// (`TaskKind::BringSurplusHome`) — mêmes unités que `Physiology::hunger`.
+/// **Perdu si l'agent meurt en chemin**, ou change durablement de priorité
+/// sans jamais rentrer : la viande crue livrée à elle-même ne se conserve
+/// pas, et rien ne force le retour — c'est juste un candidat de plus parmi
+/// d'autres à la délibération (voir `brain::decide`).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Carrying(pub f32);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeathCause {

@@ -34,8 +34,8 @@ use cairn_core::{SimTime, TICKS_PER_DAY, WorldSeed};
 use cairn_worldgen::WorldGenConfig;
 
 use crate::agent::{
-    Activity, AgentId, Behavior, DeathCause, FOREST_BONUS_C, Physiology, Position,
-    SHELTER_BONUS_C, Task, TaskKind, WALK_TILES_PER_TICK,
+    Activity, AgentId, Behavior, Carrying, DeathCause, FOREST_BONUS_C, Physiology, Position,
+    SHELTER_BONUS_C, TaskKind, WALK_TILES_PER_TICK,
 };
 use crate::brain::{self, AgentCtx, DELIBERATION_PERIOD};
 use crate::climate::Climate;
@@ -196,6 +196,7 @@ impl Sim {
             Memory::default(),
             Skills::founder(&traits),
             ClanMembership::default(),
+            Carrying::default(),
         ));
         id
     }
@@ -234,6 +235,7 @@ impl Sim {
             // Pas de clan à la naissance : il en hérite dès le lendemain,
             // simplement en vivant collé à sa mère (voir `social`).
             ClanMembership::default(),
+            Carrying::default(),
         ));
         id
     }
@@ -324,7 +326,7 @@ impl Sim {
         // 1. Délibération — bucketée : l'agent i ne repense sa tâche qu'aux
         // ticks (tick + i) % période == 0, ou dès qu'il n'a plus de tâche.
         // Les nourrissons ne délibèrent pas : ils sont portés.
-        for (_, (id, pos, phys, traits, demo, kin, membership, behavior, mem)) in self
+        for (_, (id, pos, phys, traits, demo, kin, membership, carrying, behavior, mem)) in self
             .agents
             .query_mut::<(
                 &AgentId,
@@ -334,6 +336,7 @@ impl Sim {
                 &Demographics,
                 &Kinship,
                 &ClanMembership,
+                &Carrying,
                 &mut Behavior,
                 &mut Memory,
             )>()
@@ -345,7 +348,16 @@ impl Sim {
                 || (time.tick.wrapping_add(id.0)) % DELIBERATION_PERIOD == 0;
             if due {
                 let current = behavior.task.map(|t| t.kind);
-                let ctx = AgentCtx { id: *id, pos, phys, traits, demo, kin, clan: membership.0 };
+                let ctx = AgentCtx {
+                    id: *id,
+                    pos,
+                    phys,
+                    traits,
+                    demo,
+                    kin,
+                    clan: membership.0,
+                    carrying: carrying.0,
+                };
                 behavior.task = brain::decide(
                     &mut self.world,
                     time,
@@ -369,7 +381,7 @@ impl Sim {
         let mut path_budget = PATH_REQUESTS_PER_TICK;
         let mut clan_stock: BTreeMap<ClanId, f32> =
             self.clans.iter().map(|c| (c.id, c.stock)).collect();
-        for (_, (id, pos, phys, traits, demo, behavior, mem, agent_skills, membership)) in
+        for (_, (id, pos, phys, traits, demo, behavior, mem, agent_skills, membership, carrying)) in
             self.agents.query_mut::<(
                 &AgentId,
                 &mut Position,
@@ -380,6 +392,7 @@ impl Sim {
                 &mut Memory,
                 &mut Skills,
                 &ClanMembership,
+                &mut Carrying,
             )>()
         {
             if demo.is_infant(time.tick) {
@@ -403,6 +416,7 @@ impl Sim {
                 agent_skills,
                 membership.0,
                 &mut clan_stock,
+                carrying,
             );
             // Où que la tâche l'ait mené, l'agent note où il a mis les pieds.
             mem.note_visit(pos.tile());
@@ -558,6 +572,7 @@ fn execute(
     agent_skills: &mut Skills,
     clan: Option<ClanId>,
     clan_stock: &mut BTreeMap<ClanId, f32>,
+    carrying: &mut Carrying,
 ) -> Option<Kill> {
     let task = match behavior.task {
         Some(task) => task,
@@ -595,13 +610,14 @@ fn execute(
             skills::KILL_PRACTICE_BOOST,
         );
         // Une bête tuée n'est pas une portion calibrée : ce qui dépasse la
-        // faim du moment part au stock commun du clan (BRIEF §5.1) plutôt
-        // que d'être perdu dans le `.max(0.0)` — voir le commentaire de
-        // module de `social` sur le stock.
+        // faim du moment ne rejoint pas le stock du clan sur-le-champ (voir
+        // le commentaire de module de `social`) — il faut d'abord le
+        // rapporter au foyer (`Carrying`, `TaskKind::BringSurplusHome`),
+        // sans quoi la viande se téléporterait depuis le lieu de la chasse.
         let surplus = (nutrition - phys.hunger).max(0.0);
         phys.hunger = (phys.hunger - nutrition).max(0.0);
-        if surplus > 0.0 && let Some(clan_id) = clan {
-            *clan_stock.entry(clan_id).or_insert(0.0) += surplus;
+        if surplus > 0.0 && clan.is_some() {
+            carrying.0 += surplus;
         }
         behavior.task = None;
         return Some(Kill { herd: prey.entity, head: HUNT_YIELD_HEAD });
@@ -654,6 +670,16 @@ fn execute(
                 phys.hunger = (phys.hunger - taken).max(0.0);
             }
             behavior.task = None; // un puisage, puis on redélibère
+        }
+        TaskKind::BringSurplusHome => {
+            behavior.activity = Activity::Idle;
+            // Symétrique du puisage : ce que l'agent portait, le stock le
+            // gagne, au même montant.
+            if let Some(clan_id) = clan {
+                *clan_stock.entry(clan_id).or_insert(0.0) += carrying.0;
+            }
+            carrying.0 = 0.0;
+            behavior.task = None;
         }
         TaskKind::Sleep => {
             behavior.activity = Activity::Sleeping;
@@ -804,6 +830,7 @@ fn walk_line(world: &mut World, pos: &mut Position, target: (i64, i64)) -> Move 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agent::Task;
 
     /// Empreinte compacte de l'état complet : positions, physiologies,
     /// traits hérités, mémoire et compétences dans l'ordre des identifiants.
@@ -1530,16 +1557,17 @@ mod tests {
     /// L'incrément 3 de la Phase 4 (stock commun, BRIEF §5.1) : une chasse
     /// fructueuse nourrit rarement pile ce qu'il fallait — `HUNT_NUTRITION`
     /// est une bête tuée, pas une portion calibrée. Le surplus, qui partait
-    /// auparavant dans le `.max(0.0)` de la faim déjà comblée, doit
-    /// désormais alimenter le stock du clan du chasseur. Test au niveau du
-    /// mécanisme (`execute` appelé directement, comme le permet `mod tests`
-    /// dans le même fichier) plutôt qu'un scénario complet : un clan
+    /// auparavant dans le `.max(0.0)` de la faim déjà comblée, charge
+    /// désormais `Carrying` — **pas** le stock directement : la viande doit
+    /// encore être rapportée au foyer (voir le test suivant). Test au niveau
+    /// du mécanisme (`execute` appelé directement, comme le permet `mod
+    /// tests` dans le même fichier) plutôt qu'un scénario complet : un clan
     /// injecté à la main ne survivrait pas à la prochaine détection de
     /// minuit (`social::daily` le remplacerait par ce qu'il détecte vraiment
     /// dans le graphe), donc un run multi-jours ne testerait pas ce qu'on
     /// veut isoler ici.
     #[test]
-    fn une_chasse_fructueuse_alimente_le_stock_du_clan() {
+    fn une_chasse_fructueuse_charge_le_surplus_porte() {
         let mut sim = Sim::new(WorldSeed(42), 512);
         let home = find_land(&sim);
         let mut pos = Position { x: home.0 as f64 + 0.5, y: home.1 as f64 + 0.5 };
@@ -1552,6 +1580,7 @@ mod tests {
         let mut budget = PATH_REQUESTS_PER_TICK;
         let clan_id = social::ClanId(3);
         let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::new();
+        let mut carrying = Carrying::default();
         // Le troupeau est juste sous la main : cette scène teste la
         // mécanique de mise à mort, pas l'approche.
         let herd = HerdView { entity: hecs::Entity::DANGLING, pos: (pos.x, pos.y), population: 20.0 };
@@ -1570,13 +1599,66 @@ mod tests {
             &mut skills,
             Some(clan_id),
             &mut clan_stock,
+            &mut carrying,
         );
 
         assert!(kill.is_some(), "le troupeau est à portée : la chasse doit réussir");
         assert!(phys.hunger < 1e-6, "la faim doit être totalement comblée (nutrition > faim initiale)");
         assert!(
-            clan_stock.get(&clan_id).copied().unwrap_or(0.0) > 0.0,
-            "le surplus (nutrition au-delà de la faim comblée) doit alimenter le stock du clan"
+            carrying.0 > 0.0,
+            "le surplus (nutrition au-delà de la faim comblée) doit être porté par le chasseur"
+        );
+        assert_eq!(
+            clan_stock.get(&clan_id).copied().unwrap_or(0.0),
+            0.0,
+            "le stock du clan ne doit RIEN recevoir tant que le surplus n'a pas été rapporté au foyer"
+        );
+    }
+
+    /// Le pendant du dépôt : rapporter le surplus porté au foyer
+    /// (`TaskKind::BringSurplusHome`) vide `Carrying` **dans** le stock, du
+    /// même montant — ni nourriture créée, ni perdue en chemin.
+    #[test]
+    fn rapporter_le_surplus_au_foyer_alimente_le_stock_a_parts_egales() {
+        let mut sim = Sim::new(WorldSeed(42), 512);
+        let home = find_land(&sim);
+        let mut pos = Position { x: home.0 as f64 + 0.5, y: home.1 as f64 + 0.5 };
+        let mut phys = Physiology::default();
+        let mut behavior = Behavior {
+            task: Some(Task { kind: TaskKind::BringSurplusHome, target: home }),
+            ..Behavior::default()
+        };
+        let traits = Traits::default();
+        let mut skills = Skills::default();
+        let mut routes: BTreeMap<u64, Route> = BTreeMap::new();
+        let mut budget = PATH_REQUESTS_PER_TICK;
+        let clan_id = social::ClanId(9);
+        let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::new();
+        let porte_avant = 0.4;
+        let mut carrying = Carrying(porte_avant);
+
+        execute(
+            &mut sim.world,
+            &mut routes,
+            &mut budget,
+            AgentId(0),
+            &mut pos,
+            &mut phys,
+            &mut behavior,
+            &[],
+            1.0,
+            &traits,
+            &mut skills,
+            Some(clan_id),
+            &mut clan_stock,
+            &mut carrying,
+        );
+
+        assert_eq!(carrying.0, 0.0, "le surplus rapporté doit être entièrement déposé, plus rien porté");
+        assert_eq!(
+            clan_stock.get(&clan_id).copied().unwrap_or(0.0),
+            porte_avant,
+            "le stock doit gagner exactement ce que le chasseur portait"
         );
     }
 
@@ -1598,6 +1680,7 @@ mod tests {
         let clan_id = social::ClanId(7);
         let stock_avant = 0.5; // moins que la faim : le retrait doit être partiel
         let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::from([(clan_id, stock_avant)]);
+        let mut carrying = Carrying::default();
 
         execute(
             &mut sim.world,
@@ -1613,6 +1696,7 @@ mod tests {
             &mut skills,
             Some(clan_id),
             &mut clan_stock,
+            &mut carrying,
         );
 
         let stock_apres = clan_stock[&clan_id];

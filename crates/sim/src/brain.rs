@@ -74,6 +74,13 @@ const EXPLORE_TETHER_TILES: i64 = 1000;
 /// En dessous de ce niveau, le stock du clan n'est pas un but de trajet
 /// (même idiome que `FORAGE_MIN_BIOMASS`).
 const MIN_STOCK_WORTH_TRIP: f32 = 0.1;
+/// En dessous de ce niveau, un surplus porté ne vaut pas le détour par le
+/// foyer (même idiome que `MIN_STOCK_WORTH_TRIP`).
+const MIN_CARRYING_WORTH_TRIP: f32 = 0.05;
+/// Ce qu'une chasse au meilleur skill peut charger d'un coup (voir
+/// `HUNT_NUTRITION` dans `sim.rs`) : sert à normaliser l'urgence du retour,
+/// pas une limite dure — porter plus ne fait qu'accentuer le plafond.
+const CARRYING_FULL_LOAD: f32 = 0.9;
 
 /// L'agent vu par la délibération : son identité et ses composants, groupés
 /// pour ne pas trimballer sept paramètres.
@@ -85,6 +92,9 @@ pub struct AgentCtx<'a> {
     pub demo: &'a Demographics,
     pub kin: &'a Kinship,
     pub clan: Option<ClanId>,
+    /// Surplus de chasse actuellement porté (`crate::agent::Carrying`),
+    /// déballé ici en `f32` brut — même traitement que `clan`.
+    pub carrying: f32,
 }
 
 /// Choisit la prochaine tâche de l'agent. Déterministe : le tirage dérive de
@@ -102,7 +112,7 @@ pub fn decide(
     humans: &[HumanView],
     clan_views: &BTreeMap<ClanId, ClanView>,
 ) -> Option<Task> {
-    let AgentCtx { id, pos, phys, traits, demo, kin, clan } = agent;
+    let AgentCtx { id, pos, phys, traits, demo, kin, clan, carrying } = agent;
     let adult = demo.is_adult(time.tick);
     let here = pos.tile();
     let mut candidates: Vec<(TaskKind, (i64, i64), f32)> = Vec::new();
@@ -153,15 +163,34 @@ pub fn decide(
     //   ne vide le stock commun que quand il en a vraiment besoin, pas parce
     //   qu'il existe. La cible est le foyer du clan : le stock se puise sur
     //   place, il ne se livre pas.
-    if let Some(clan_id) = clan {
-        if let Some(view) = clan_views.get(&clan_id) {
-            if view.stock > MIN_STOCK_WORTH_TRIP && forage_biomass < FORAGE_MIN_BIOMASS && nearest_herd.is_none() {
-                let urgency = Curve::Logistic { steepness: 6.0, midpoint: 0.4 }.eval(phys.hunger);
-                let target = (view.home.0.floor() as i64, view.home.1.floor() as i64);
-                let score = urgency * travel_discount(pos.distance_tiles(target));
-                candidates.push((TaskKind::EatFromStock, target, score));
-            }
-        }
+    if let Some(clan_id) = clan
+        && let Some(view) = clan_views.get(&clan_id)
+        && view.stock > MIN_STOCK_WORTH_TRIP
+        && forage_biomass < FORAGE_MIN_BIOMASS
+        && nearest_herd.is_none()
+    {
+        let urgency = Curve::Logistic { steepness: 6.0, midpoint: 0.4 }.eval(phys.hunger);
+        let target = (view.home.0.floor() as i64, view.home.1.floor() as i64);
+        let score = urgency * travel_discount(pos.distance_tiles(target));
+        candidates.push((TaskKind::EatFromStock, target, score));
+    }
+
+    // — Rapporter le surplus de chasse au foyer : le pendant du dépôt de
+    //   `EatFromStock` — la viande ne rejoint le stock qu'une fois portée
+    //   jusqu'au clan (voir `Carrying`), elle ne s'y téléporte pas depuis le
+    //   lieu de la mise à mort. Un candidat de plus dans le même softmax que
+    //   `ReturnToClan` : rien ne force le retour, un besoin plus pressant
+    //   (soif, froid) peut encore l'emporter — et si l'agent meurt ou change
+    //   durablement de priorité en chemin, le surplus porté est simplement
+    //   perdu, sans code dédié pour ce cas.
+    if carrying > MIN_CARRYING_WORTH_TRIP
+        && let Some(clan_id) = clan
+        && let Some(view) = clan_views.get(&clan_id)
+    {
+        let target = (view.home.0.floor() as i64, view.home.1.floor() as i64);
+        let urgency = (carrying / CARRYING_FULL_LOAD).clamp(0.3, 1.0);
+        let score = urgency * travel_discount(pos.distance_tiles(target));
+        candidates.push((TaskKind::BringSurplusHome, target, score));
     }
 
     // — Dormir : sur place, surtout la nuit ; la fatigue extrême s'impose.
@@ -233,14 +262,14 @@ pub fn decide(
     //   s'en éloigne de plus que le rayon de résidence — **le même rayon**
     //   qui sert à la détection, pour que l'attraction et le critère se
     //   répondent : rester en dessous du seuil, c'est rester détectable.
-    if let Some(clan_id) = clan {
-        if let Some(view) = clan_views.get(&clan_id) {
-            let d = (pos.x - view.home.0).hypot(pos.y - view.home.1);
-            if d > RESIDENCE_RADIUS_TILES {
-                let score = ((d / RESIDENCE_RADIUS_TILES) as f32 - 1.0).clamp(0.3, 1.0);
-                let target = (view.home.0.floor() as i64, view.home.1.floor() as i64);
-                candidates.push((TaskKind::ReturnToClan, target, score));
-            }
+    if let Some(clan_id) = clan
+        && let Some(view) = clan_views.get(&clan_id)
+    {
+        let d = (pos.x - view.home.0).hypot(pos.y - view.home.1);
+        if d > RESIDENCE_RADIUS_TILES {
+            let score = ((d / RESIDENCE_RADIUS_TILES) as f32 - 1.0).clamp(0.3, 1.0);
+            let target = (view.home.0.floor() as i64, view.home.1.floor() as i64);
+            candidates.push((TaskKind::ReturnToClan, target, score));
         }
     }
 
