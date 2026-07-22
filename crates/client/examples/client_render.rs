@@ -6,7 +6,13 @@
 //! support (PNG au lieu d'un canvas) — la boucle rAF et le DOM sont du
 //! plombage testé séparément.
 //!
-//! Usage : cargo run --release -p cairn-client --example client_render -- [seed] [ticks]
+//! Usage : cargo run --release -p cairn-client --example client_render -- [seed] [ticks] [scale] [log_every_days]
+//!
+//! `log_every_days` (0 = silencieux, défaut) : imprime une ligne d'état par
+//! jour de jeu simulé — population, gibier/troupeaux, prédateurs/meutes,
+//! `hunted_head` cumulé, clans actifs. Sert à diagnostiquer visuellement une
+//! trajectoire (ex. l'extinction du gibier) sans rejouer toute la sim pour
+//! chaque hypothèse.
 
 use cairn_client::palette::Layer;
 use cairn_client::render;
@@ -23,6 +29,7 @@ fn main() {
     let ticks: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(0);
     // Échelle en px/tuile : ~0,6 cadre les ~3 km où vivent agents et gibier.
     let scale: f64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(0.6);
+    let log_every_days: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(0);
 
     // — Même construction que le client (humidité rapide). —
     let cfg = WorldGenConfig {
@@ -36,8 +43,23 @@ fn main() {
     let (g0, p0, nh0, np0) = sim.fauna_census();
     println!("foyer {home:?}, {placed} humains, {g0:.0} gibier ({nh0} troupeaux), {p0:.0} prédateurs ({np0} meutes)");
 
+    if log_every_days > 0 {
+        println!("jour   humains  gibier  troupeaux  prédateurs  meutes  chassé(cumul)  clans");
+    }
     for _ in 0..ticks {
         sim.step();
+        if log_every_days > 0 && sim.time.tick.is_multiple_of(cairn_core::TICKS_PER_DAY) {
+            let day = sim.time.tick / cairn_core::TICKS_PER_DAY;
+            if day.is_multiple_of(log_every_days) {
+                let (g, p, nh, np) = sim.fauna_census();
+                println!(
+                    "{day:>4}   {:>7}  {g:>6.0}  {nh:>9}  {p:>10.0}  {np:>6}  {:>13.0}  {:>5}",
+                    sim.population(),
+                    sim.hunted_head,
+                    sim.clans.len(),
+                );
+            }
+        }
     }
 
     // — Caméra cadrant toute la population (comme le mode « Suivre »). —

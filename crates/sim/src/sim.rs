@@ -142,6 +142,15 @@ pub struct Sim {
     pub clans: Vec<Clan>,
     /// Formations et effondrements de clans depuis le début du monde.
     pub clan_events: Vec<ClanEvent>,
+    /// L'immigration de gibier (`fauna::daily_immigration`) est-elle active
+    /// pour cette simulation ? Vrai par défaut (le monde est censé être
+    /// habité) ; les scènes de test qui veulent isoler une mécanique de
+    /// toute interférence de faune le mettent à faux explicitement — voir
+    /// `sim::tests::scenario_setup`. Ce n'est plus déduit indirectement
+    /// (l'ancienne garde `hunted_head > 0` ne se déclenchait jamais si la
+    /// faune était épuisée par les prédateurs seuls, ou si la densité de
+    /// gibier initiale était nulle) : un choix explicite, pas une heuristique.
+    pub allow_fauna_immigration: bool,
     pub(crate) next_agent_id: u64,
     next_fauna_id: u64,
     pub(crate) next_clan_id: u64,
@@ -174,6 +183,7 @@ impl Sim {
             social: SocialGraph::default(),
             clans: Vec::new(),
             clan_events: Vec::new(),
+            allow_fauna_immigration: true,
             next_agent_id: 0,
             next_fauna_id: 0,
             next_clan_id: 0,
@@ -546,15 +556,13 @@ impl Sim {
         }
 
         // 4 bis. Immigration de gibier, quotidienne : sans elle, une zone
-        // qui perd tous ses troupeaux (chasse sous `HERD_MIN`) reste vide
-        // pour toujours — rien ne fait *repousser* un troupeau depuis zéro
-        // individu, contrairement à la végétation (banque de graines).
-        // Gardée par `hunted_head > 0` : ce n'est **jamais** une apparition
-        // depuis le néant, seulement la repopulation d'une zone déjà
-        // chassée — sans cette garde, un scénario délibérément sans gibier
-        // (`herd_grid=0`, utilisé par les tests de cohésion sociale) en
-        // recevrait quand même, changeant leur dynamique par effet de bord.
-        if time.tick.is_multiple_of(TICKS_PER_DAY) && self.hunted_head > 0.0 {
+        // qui perd tous ses troupeaux (chasse sous `HERD_MIN`, prédation
+        // comprise) reste vide pour toujours — rien ne fait *repousser* un
+        // troupeau depuis zéro individu, contrairement à la végétation
+        // (banque de graines). Gardée par `allow_fauna_immigration` — voir
+        // le commentaire du champ : un choix explicite du contexte
+        // d'exécution, pas une heuristique déduite de l'état de la sim.
+        if time.tick.is_multiple_of(TICKS_PER_DAY) && self.allow_fauna_immigration {
             let human_positions: Vec<(f64, f64)> = humans.iter().map(|h| h.pos).collect();
             let herd_positions: Vec<(f64, f64)> = self
                 .fauna
@@ -936,6 +944,10 @@ mod tests {
         // Capacité large : à 512 chunks, 60 agents dispersés dépassent le
         // working set et le LRU thrash (mesuré : 0,8 tick/s contre 15).
         let mut sim = Sim::new(WorldSeed(seed), 2048);
+        // Scène de test contrôlée : la faune (dont son immigration
+        // stochastique) ne doit pas interférer avec la mécanique isolée par
+        // le test qui appelle ce helper — voir `Sim::allow_fauna_immigration`.
+        sim.allow_fauna_immigration = false;
         let home = find_land(&sim);
         let (mut placed, mut k) = (0, 0i64);
         while placed < agents && k < 10_000 {
@@ -1462,6 +1474,7 @@ mod tests {
         // Témoin : même seed, même taille de population, mais dispersée à
         // des kilomètres — jamais à portée de rencontre.
         let mut scattered = Sim::new(WorldSeed(42), 512);
+        scattered.allow_fauna_immigration = false; // scène contrôlée, voir plus haut
         let home = find_land(&scattered);
         for i in 0..10i64 {
             let far = (home.0 + i * 4000, home.1);
@@ -1735,6 +1748,40 @@ mod tests {
             phys.hunger
         );
         assert!(stock_apres <= 1e-6, "le stock, plus petit que la faim, doit être vidé entièrement");
+    }
+
+    /// Le bug réellement signalé par l'utilisateur : le client permet de
+    /// lancer une scène à densité de gibier **nulle** (`herd_grid=0`, champ
+    /// « Densité de gibier » de l'onglet Paramètres). Un `Sim` construit
+    /// directement (donc `allow_fauna_immigration` à sa valeur par défaut —
+    /// contrairement à `scenario_setup`, qui le désactive pour les scènes de
+    /// test contrôlées) doit malgré tout voir du gibier apparaître avec le
+    /// temps. Avec l'ancienne garde (`hunted_head > 0`), ce test aurait
+    /// échoué : sans le moindre troupeau initial, aucun humain ne peut
+    /// jamais chasser, `hunted_head` restait nul indéfiniment.
+    #[test]
+    fn une_scene_sans_gibier_initial_finit_par_en_recevoir() {
+        let mut sim = Sim::new(WorldSeed(42), 1024);
+        let home = find_land(&sim);
+        for i in 0..6i64 {
+            let (dx, dy) = (i * 6, 0);
+            sim.spawn_agent(home.0 as f64 + dx as f64 + 0.5, home.1 as f64 + dy as f64 + 0.5);
+        }
+        assert_eq!(
+            sim.fauna.query::<&Herd>().iter().count(),
+            0,
+            "scénario invalide : du gibier existe déjà avant le premier pas"
+        );
+
+        let mut got_herd = false;
+        for _ in 0..24 * 150 {
+            sim.step();
+            if sim.fauna.query::<&Herd>().iter().count() > 0 {
+                got_herd = true;
+                break;
+            }
+        }
+        assert!(got_herd, "aucun gibier apparu en 150 j malgré allow_fauna_immigration=true par défaut");
     }
 
     #[test]

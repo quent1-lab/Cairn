@@ -459,10 +459,17 @@ pub fn apply_kills(fauna: &mut hecs::World, kills: &[Kill]) {
 // afflux de gibier »). Ce module ajoute cet afflux : chaque jour, une petite
 // chance qu'un troupeau apparaisse près de la population, sur une tuile
 // giboyeuse loin de tout troupeau existant. **`Sim::step` (pas ce module)
-// garde l'appel derrière `hunted_head > 0`** : l'immigration ne repeuple
-// qu'une zone déjà chassée, elle ne fait jamais apparaître de gibier depuis
-// le néant — sans cette garde, un scénario délibérément sans faune (tests
-// de cohésion sociale, `herd_grid=0`) en recevrait quand même.
+// garde l'appel derrière `Sim::allow_fauna_immigration`** (vrai par défaut) :
+// les scènes de test qui veulent isoler une mécanique de toute interférence
+// de faune (`herd_grid=0`, tests de cohésion sociale) le désactivent
+// explicitement — voir le commentaire du champ. Une première version
+// gardait l'appel derrière `hunted_head > 0` (« ça n'a jamais tué de gibier
+// depuis le néant si personne n'a jamais chassé ») : heuristique séduisante
+// mais fausse deux fois — une zone où *seuls les prédateurs* ont vidé le
+// gibier ne voit jamais `hunted_head` monter, et une scène qui démarre à
+// densité de gibier nulle (`herd_grid=0`, y compris côté client) n'a
+// simplement personne à qui donner une chance de chasser. Le drapeau
+// explicite règle les deux cas sans deviner l'intention depuis l'état.
 
 /// Chance qu'un site candidat soit tenté par jour (indépendante du succès :
 /// la plupart des tentatives échouent simplement le test de distance dans
