@@ -545,6 +545,30 @@ impl Sim {
             self.spawn_herd(x, y, population);
         }
 
+        // 4 bis. Immigration de gibier, quotidienne : sans elle, une zone
+        // qui perd tous ses troupeaux (chasse sous `HERD_MIN`) reste vide
+        // pour toujours — rien ne fait *repousser* un troupeau depuis zéro
+        // individu, contrairement à la végétation (banque de graines).
+        // Gardée par `hunted_head > 0` : ce n'est **jamais** une apparition
+        // depuis le néant, seulement la repopulation d'une zone déjà
+        // chassée — sans cette garde, un scénario délibérément sans gibier
+        // (`herd_grid=0`, utilisé par les tests de cohésion sociale) en
+        // recevrait quand même, changeant leur dynamique par effet de bord.
+        if time.tick.is_multiple_of(TICKS_PER_DAY) && self.hunted_head > 0.0 {
+            let human_positions: Vec<(f64, f64)> = humans.iter().map(|h| h.pos).collect();
+            let herd_positions: Vec<(f64, f64)> = self
+                .fauna
+                .query::<(&Herd, &Position)>()
+                .iter()
+                .map(|(_, (_, pos))| (pos.x, pos.y))
+                .collect();
+            if let Some((x, y)) =
+                fauna::daily_immigration(&human_positions, &herd_positions, &mut self.world, seed, time)
+            {
+                self.spawn_herd(x, y, fauna::HERD_START);
+            }
+        }
+
         // 5. Écologie quotidienne, à minuit.
         if time.tick.is_multiple_of(TICKS_PER_DAY) {
             ecology::daily_regrowth(&mut self.world, &self.climate, time);

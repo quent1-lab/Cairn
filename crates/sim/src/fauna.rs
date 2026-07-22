@@ -448,6 +448,81 @@ pub fn apply_kills(fauna: &mut hecs::World, kills: &[Kill]) {
     }
 }
 
+// — Immigration —
+//
+// Un troupeau qui tombe sous `HERD_MIN` disparaît, et rien d'autre ne le
+// remplace : contrairement à la végétation, qui repart toujours d'une
+// banque de graines (`ecology::logistic_step`), un troupeau à 0 individu
+// n'a pas de descendance possible. Une zone surchassée au point de perdre
+// tous ses troupeaux restait donc vide *pour toujours* — observé et déjà
+// noté comme limite en Phase 2 (« la coexistence durable suppose... un
+// afflux de gibier »). Ce module ajoute cet afflux : chaque jour, une petite
+// chance qu'un troupeau apparaisse près de la population, sur une tuile
+// giboyeuse loin de tout troupeau existant. **`Sim::step` (pas ce module)
+// garde l'appel derrière `hunted_head > 0`** : l'immigration ne repeuple
+// qu'une zone déjà chassée, elle ne fait jamais apparaître de gibier depuis
+// le néant — sans cette garde, un scénario délibérément sans faune (tests
+// de cohésion sociale, `herd_grid=0`) en recevrait quand même.
+
+/// Chance qu'un site candidat soit tenté par jour (indépendante du succès :
+/// la plupart des tentatives échouent simplement le test de distance dans
+/// une zone déjà giboyeuse — voir plus bas pourquoi c'est voulu).
+const IMMIGRATION_CHANCE_PER_DAY: f32 = 0.15;
+/// Le site candidat est tiré autour d'un humain vivant pris au hasard, entre
+/// ces deux rayons : assez loin pour ne pas apparaître sous les pieds de
+/// quelqu'un, assez proche pour rester dans la zone chargée (chunks déjà
+/// résidents pour la plupart — pas de génération forcée au loin).
+const IMMIGRATION_MIN_RADIUS_TILES: f64 = km_to_tiles(1.0);
+const IMMIGRATION_MAX_RADIUS_TILES: f64 = km_to_tiles(4.0);
+/// Aucun troupeau ne doit déjà se trouver à moins de cette distance du site
+/// candidat. **C'est ce qui rend le mécanisme auto-limitant** : une zone
+/// déjà giboyeuse n'a simplement jamais de site candidat valide — pas besoin
+/// d'écrire « seulement si le gibier local est rare », l'effet en découle.
+const IMMIGRATION_MIN_HERD_DISTANCE_TILES: f64 = km_to_tiles(3.0);
+/// Biomasse minimale du site pour valoir la peine (même seuil que le
+/// placement initial des troupeaux, `scenario::populate`).
+const IMMIGRATION_MIN_BIOMASS: u8 = 40;
+
+/// Le site `candidate` convainc-il ? Fonction pure (pas de RNG) : testable
+/// sans tirage, séparée de [`daily_immigration`] qui, elle, choisit le site.
+fn is_valid_immigration_site(
+    candidate: (f64, f64),
+    tile: &crate::Tile,
+    herds: &[(f64, f64)],
+) -> bool {
+    if !tile.is_walkable() || tile.biomass < IMMIGRATION_MIN_BIOMASS {
+        return false;
+    }
+    !herds.iter().any(|&(hx, hy)| {
+        let d2 = (hx - candidate.0).powi(2) + (hy - candidate.1).powi(2);
+        d2 < IMMIGRATION_MIN_HERD_DISTANCE_TILES * IMMIGRATION_MIN_HERD_DISTANCE_TILES
+    })
+}
+
+/// Passe quotidienne : tire un site candidat près d'un humain au hasard, le
+/// valide, et renvoie sa position si un troupeau doit y apparaître (au
+/// crate appelant de le faire naître — ce module ne connaît pas
+/// `Sim::spawn_herd`, comme le reste de `fauna` ne connaît pas `Sim`).
+pub fn daily_immigration(
+    humans: &[(f64, f64)],
+    herds: &[(f64, f64)],
+    world: &mut World,
+    seed: WorldSeed,
+    time: SimTime,
+) -> Option<(f64, f64)> {
+    let mut rng = Pcg32::new(seed.derive(salt::IMMIGRATION) ^ splitmix64(time.tick), 0);
+    if humans.is_empty() || rng.next_f32() >= IMMIGRATION_CHANCE_PER_DAY {
+        return None;
+    }
+    let anchor = humans[(rng.next_u32() as usize) % humans.len()];
+    let angle = rng.next_f64() * std::f64::consts::TAU;
+    let r = IMMIGRATION_MIN_RADIUS_TILES
+        + rng.next_f64() * (IMMIGRATION_MAX_RADIUS_TILES - IMMIGRATION_MIN_RADIUS_TILES);
+    let candidate = (anchor.0 + angle.cos() * r, anchor.1 + angle.sin() * r);
+    let tile = world.tile(candidate.0.floor() as i64, candidate.1.floor() as i64);
+    is_valid_immigration_site(candidate, &tile, herds).then_some(candidate)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -521,5 +596,120 @@ mod tests {
         // La plus proche gagne.
         let t = nearest_threat((0.0, 0.0), &[(200.0, 0.0), (10.0, 0.0)]).unwrap();
         assert_eq!(t, (10.0, 0.0));
+    }
+
+    /// Cherche une tuile praticable et giboyeuse près de `from`, pour les
+    /// tests — même idiome que `sim::tests::find_land` (sondage par pas de
+    /// 16 km dans 8 directions, jusqu'à 6 400 km — les océans entre
+    /// continents font des milliers de km), avec la biomasse en plus de la
+    /// terre : `find_land` seul retomberait parfois sur une plage ou un
+    /// désert, pas assez giboyeux pour ces tests.
+    fn find_lush(world: &mut World, from: (i64, i64)) -> (i64, i64) {
+        let step = cairn_core::km_to_tiles(16.0) as i64;
+        for r in 0..400i64 {
+            let d = r * step;
+            for &(x, y) in &[
+                (d, 0), (-d, 0), (0, d), (0, -d),
+                (d, d), (-d, d), (d, -d), (-d, -d),
+            ] {
+                let p = (from.0 + x, from.1 + y);
+                let tile = world.tile(p.0, p.1);
+                if tile.is_walkable() && tile.biomass >= IMMIGRATION_MIN_BIOMASS {
+                    return p;
+                }
+            }
+        }
+        panic!("aucune tuile giboyeuse trouvée près de {from:?}");
+    }
+
+    #[test]
+    fn un_site_giboyeux_sans_troupeau_voisin_est_valide() {
+        let mut world = World::new(WorldSeed(42), 64);
+        let lush = find_lush(&mut world, (0, 0));
+        let tile = world.tile(lush.0, lush.1);
+        let candidate = (lush.0 as f64 + 0.5, lush.1 as f64 + 0.5);
+        assert!(
+            is_valid_immigration_site(candidate, &tile, &[]),
+            "une tuile giboyeuse sans troupeau à proximité doit être un site valide"
+        );
+    }
+
+    #[test]
+    fn un_troupeau_proche_invalide_le_site_mais_pas_un_troupeau_lointain() {
+        let mut world = World::new(WorldSeed(42), 64);
+        let lush = find_lush(&mut world, (0, 0));
+        let tile = world.tile(lush.0, lush.1);
+        let candidate = (lush.0 as f64 + 0.5, lush.1 as f64 + 0.5);
+
+        let tout_pres = [(candidate.0 + 10.0, candidate.1)];
+        assert!(
+            !is_valid_immigration_site(candidate, &tile, &tout_pres),
+            "un troupeau à 10 tuiles doit invalider le site (bien sous IMMIGRATION_MIN_HERD_DISTANCE_TILES)"
+        );
+
+        let tres_loin = [(candidate.0 + km_to_tiles(50.0), candidate.1)];
+        assert!(
+            is_valid_immigration_site(candidate, &tile, &tres_loin),
+            "un troupeau à 50 km ne doit pas gêner un site par ailleurs valide"
+        );
+    }
+
+    /// LE critère de ce mécanisme : une zone vidée de tout troupeau finit par
+    /// être réensemencée. Beaucoup de jours simulés (le tirage n'a que 15 %
+    /// de chances par jour) pour une confiance statistique, comme les autres
+    /// tests stochastiques de ce projet (émergence de clan, exploration…).
+    #[test]
+    fn une_zone_giboyeuse_sans_troupeau_finit_par_etre_reensemencee() {
+        let mut world = World::new(WorldSeed(42), 64);
+        let lush = find_lush(&mut world, (0, 0));
+        let anchor = (lush.0 as f64 + 0.5, lush.1 as f64 + 0.5);
+        let humans = [anchor];
+
+        let mut found = false;
+        for day in 0..2000u64 {
+            let time = SimTime { tick: day * 24 };
+            if daily_immigration(&humans, &[], &mut world, WorldSeed(42), time).is_some() {
+                found = true;
+                break;
+            }
+        }
+        assert!(found, "aucune immigration en ~5,5 ans simulés sur une zone giboyeuse vide");
+    }
+
+    /// Le pendant du critère précédent : une zone déjà dense en troupeaux
+    /// (tous les candidats retombent à moins d'`IMMIGRATION_MIN_HERD_DISTANCE_TILES`)
+    /// ne doit **jamais** recevoir d'immigrant — le mécanisme est
+    /// auto-limitant sans qu'aucune règle ne dise « pas si déjà peuplé ».
+    #[test]
+    fn une_zone_deja_dense_en_troupeaux_ne_recoit_jamais_d_immigrant() {
+        let mut world = World::new(WorldSeed(42), 64);
+        let lush = find_lush(&mut world, (0, 0));
+        let anchor = (lush.0 as f64 + 0.5, lush.1 as f64 + 0.5);
+        let humans = [anchor];
+        // Un quadrillage serré de troupeaux couvrant largement le rayon
+        // d'apparition possible (jusqu'à IMMIGRATION_MAX_RADIUS_TILES).
+        let step = km_to_tiles(2.0);
+        let mut herds = Vec::new();
+        for gy in -3..=3 {
+            for gx in -3..=3 {
+                herds.push((anchor.0 + gx as f64 * step, anchor.1 + gy as f64 * step));
+            }
+        }
+        for day in 0..2000u64 {
+            let time = SimTime { tick: day * 24 };
+            assert!(
+                daily_immigration(&humans, &herds, &mut world, WorldSeed(42), time).is_none(),
+                "jour {day} : une zone déjà dense en troupeaux ne doit jamais recevoir d'immigrant"
+            );
+        }
+    }
+
+    #[test]
+    fn sans_humain_aucune_immigration() {
+        let mut world = World::new(WorldSeed(42), 16);
+        for day in 0..500u64 {
+            let time = SimTime { tick: day * 24 };
+            assert!(daily_immigration(&[], &[], &mut world, WorldSeed(42), time).is_none());
+        }
     }
 }

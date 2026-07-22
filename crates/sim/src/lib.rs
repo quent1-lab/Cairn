@@ -72,4 +72,6 @@ pub(crate) mod salt {
     pub const SENESCENCE: u64 = 1008;
     /// Exploration : choix de l'azimut vers l'inconnu.
     pub const EXPLORE: u64 = 1009;
+    /// Immigration de gibier : tirage du site candidat quotidien.
+    pub const IMMIGRATION: u64 = 1010;
 }
