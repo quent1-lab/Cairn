@@ -161,6 +161,50 @@
 //! un clan qui s'efface (fission, effondrement) emporte ses tensions avec
 //! lui sans code de nettoyage dédié — la paire disparaît simplement de la
 //! prochaine reconstruction.
+//!
+//! ## Le territoire diffusé (incrément 7)
+//!
+//! L'incrément 2 avait fait de `Clan::home` un point qui **attire** les
+//! membres. BRIEF §5.1 demande plus : un vrai « champ d'influence diffusé
+//! sur la grille » — pas juste un point, une valeur interrogeable à
+//! n'importe quelle position, qui décroît avec la distance.
+//!
+//! **Décision d'implémentation qui s'écarte du texte initial du projet** (qui
+//! anticipait un champ `Tile::claim` écrit en dur) : au vu de l'échelle
+//! réelle du monde (1 tuile = 2 m, un territoire de rayon
+//! `RESIDENCE_RADIUS_TILES` ≈ 2250 tuiles couvre à lui seul près de 16
+//! millions de tuiles), **écrire** cette valeur dans chaque tuile d'un
+//! disque de cette taille, chaque jour, pour chaque clan, serait
+//! incompatible avec l'architecture chunkée/LRU de `sim` (`Tile` reste
+//! volontairement à 16 octets, et l'éviction ne sait sauvegarder que deux
+//! champs mutables, voir `world::ChunkDelta`) — l'anti-pattern exact que le
+//! chunking existe pour éviter (BRIEF §8.2). `claim_at` est donc une
+//! fonction **pure et calculée à la demande** (`(position, clans) →
+//! Option<ClanId>`), exactement dans l'esprit du worldgen lui-même (baseline
+//! pur, jamais stocké) plutôt qu'une mutation de `Tile` : le champ existe
+//! au sens mathématique — interrogeable en tout point — sans jamais être
+//! matérialisé sur la grille.
+//!
+//! **La diffusion elle-même** : chaque clan projette une force
+//! `membres × (1 − distance / RESIDENCE_RADIUS_TILES)`, nulle au-delà de ce
+//! rayon (même seuil que le territoire-attracteur et la co-résidence — un
+//! seul rayon partagé par toute la Phase 4, pas un de plus à recaler). La
+//! tuile appartient au clan de force maximale en ce point, si elle est
+//! positive — sinon elle est libre. **Aucune règle de taille scriptée** :
+//! un clan plus peuplé projette naturellement plus loin dans les zones de
+//! recouvrement (conséquence arithmétique du facteur `membres`, comme la
+//! borne de fission), sans qu'aucun seuil de population ne soit jamais lu
+//! directement. Aux confins de deux territoires qui se chevauchent, la
+//! frontière est donc la même zone que celle où `update_relations` détecte
+//! une tension — les deux mécanismes lisent la même géométrie sans être
+//! couplés entre eux.
+//!
+//! **Portée limitée à ce que le critère demande** : ce champ ne modifie
+//! encore aucun comportement (personne ne le consulte pour se déplacer,
+//! chasser ou refuser l'accès) — il est désormais mesurable et testable,
+//! prêt à être consulté par un futur incrément (structures : où a-t-on le
+//! droit de bâtir ?) sans qu'aucun changement supplémentaire à ce module ne
+//! soit nécessaire.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -655,6 +699,34 @@ fn update_relations(sim: &mut Sim) {
     sim.clan_relations.tension = next;
 }
 
+/// La force d'influence d'un clan en un point : maximale à son foyer,
+/// décroît linéairement jusqu'à s'annuler à `RESIDENCE_RADIUS_TILES` — même
+/// rayon que le territoire-attracteur et la co-résidence (voir le
+/// commentaire de module). Pondérée par l'effectif : un clan plus peuplé
+/// projette naturellement plus loin dans une zone disputée, sans qu'aucun
+/// seuil de taille ne soit jamais lu directement (conséquence arithmétique,
+/// comme la borne de fission).
+fn territory_strength(point: (f64, f64), clan: &Clan) -> f32 {
+    let dist = (point.0 - clan.home.0).hypot(point.1 - clan.home.1);
+    clan.members.len() as f32 * (1.0 - (dist / RESIDENCE_RADIUS_TILES) as f32).max(0.0)
+}
+
+/// Le champ de territoire diffusé (voir le commentaire de module) : quel
+/// clan, s'il en existe un, revendique ce point — le clan de force maximale
+/// s'il en existe une strictement positive. Égalité départagée par le plus
+/// petit `ClanId` (déterminisme, même convention que `cap_bonds`) : n'arrive
+/// que si deux clans de même effectif ont leurs foyers exactement
+/// équidistants du point, un cas de mesure nulle en pratique mais qui doit
+/// rester reproductible.
+pub fn claim_at(point: (f64, f64), clans: &[Clan]) -> Option<ClanId> {
+    clans
+        .iter()
+        .map(|c| (c.id, territory_strength(point, c)))
+        .filter(|&(_, strength)| strength > 0.0)
+        .max_by(|(id_a, s_a), (id_b, s_b)| s_a.total_cmp(s_b).then(id_b.cmp(id_a)))
+        .map(|(id, _)| id)
+}
+
 /// Détecte les groupes du graphe d'affinités qui franchissent à la fois le
 /// seuil de cohésion et de co-résidence, puis réconcilie avec les clans
 /// existants (voir le commentaire de module sur la persistance d'identité).
@@ -1053,5 +1125,73 @@ mod tests {
             0.0,
             "hors de contact, deux clans ne doivent jamais entrer en tension, quelle que soit la ressource"
         );
+    }
+
+    fn synthetic_clan(id: u64, home: (f64, f64), members: usize) -> Clan {
+        Clan {
+            id: ClanId(id),
+            founded_tick: 0,
+            members: (0..members as u64).map(|m| AgentId(id * 1000 + m)).collect(),
+            home,
+            stock: 0.0,
+        }
+    }
+
+    /// Le champ de territoire (incrément 7) revendique le foyer lui-même :
+    /// la force d'un clan y est maximale (distance nulle).
+    #[test]
+    fn un_point_au_foyer_est_revendique_par_son_clan() {
+        let clan = synthetic_clan(1, (100.0, 200.0), 10);
+        assert_eq!(claim_at((100.0, 200.0), std::slice::from_ref(&clan)), Some(clan.id));
+    }
+
+    /// Au-delà de `RESIDENCE_RADIUS_TILES`, la force de tout clan est nulle
+    /// (clampée) — le point reste libre, pas revendiqué par défaut.
+    #[test]
+    fn un_point_hors_de_portee_de_tout_clan_reste_libre() {
+        let clan = synthetic_clan(1, (0.0, 0.0), 10);
+        let far = (RESIDENCE_RADIUS_TILES * 2.0, 0.0);
+        assert_eq!(claim_at(far, &[clan]), None, "hors du rayon de territoire, personne ne revendique le point");
+    }
+
+    /// Le cœur de la diffusion : entre deux clans de même effectif, un point
+    /// plus proche du foyer de A que de celui de B est revendiqué par A —
+    /// la force décroît avec la distance, ce n'est pas une simple présence
+    /// binaire.
+    #[test]
+    fn le_champ_favorise_le_clan_dont_le_foyer_est_le_plus_proche() {
+        let a = synthetic_clan(1, (0.0, 0.0), 10);
+        let b = synthetic_clan(2, (2000.0, 0.0), 10);
+        let closer_to_a = (400.0, 0.0);
+        assert_eq!(claim_at(closer_to_a, &[a, b]), Some(ClanId(1)));
+    }
+
+    /// Un clan plus peuplé projette une force plus forte à distance égale —
+    /// conséquence arithmétique du facteur `membres` dans
+    /// `territory_strength`, jamais un seuil de population lu directement
+    /// (même philosophie que la borne de fission).
+    #[test]
+    fn un_clan_plus_peuple_l_emporte_a_distance_egale() {
+        let small = synthetic_clan(1, (0.0, 0.0), 5);
+        let big = synthetic_clan(2, (1000.0, 0.0), 50);
+        let midpoint = (500.0, 0.0); // équidistant des deux foyers
+        assert_eq!(
+            claim_at(midpoint, &[small, big]),
+            Some(ClanId(2)),
+            "à distance strictement égale, le clan le plus peuplé doit l'emporter"
+        );
+    }
+
+    /// Égalité exacte (même effectif, point équidistant) : départagée par le
+    /// plus petit `ClanId`, et **indépendante de l'ordre du slice** — la
+    /// détermination ne doit jamais dépendre d'un ordre d'itération
+    /// accidentel (règle de déterminisme du projet).
+    #[test]
+    fn l_egalite_stricte_est_departagee_par_le_plus_petit_id_quel_que_soit_l_ordre() {
+        let a = synthetic_clan(1, (0.0, 0.0), 10);
+        let b = synthetic_clan(2, (1000.0, 0.0), 10);
+        let midpoint = (500.0, 0.0);
+        assert_eq!(claim_at(midpoint, &[a.clone(), b.clone()]), Some(ClanId(1)));
+        assert_eq!(claim_at(midpoint, &[b, a]), Some(ClanId(1)), "le résultat ne doit pas dépendre de l'ordre du slice");
     }
 }

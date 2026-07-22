@@ -294,6 +294,13 @@ impl Sim {
         views
     }
 
+    /// Le champ de territoire diffusé (Phase 4, incrément 7) : quel clan
+    /// revendique ce point, le cas échéant. Calculé à la demande — voir
+    /// `social::claim_at` pour le pourquoi (jamais matérialisé dans `Tile`).
+    pub fn claim_at(&self, x: f64, y: f64) -> Option<ClanId> {
+        social::claim_at((x, y), &self.clans)
+    }
+
     /// Instantané des troupeaux, dans l'ordre d'itération de `hecs`.
     pub fn herd_views(&self) -> Vec<HerdView> {
         self.fauna
