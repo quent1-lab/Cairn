@@ -96,6 +96,43 @@
 //! borné à ce que la faim du moment réclame (`wanted = hunger.min(bite)`
 //! dans `sim::execute`), il n'y a structurellement pas de surplus à y
 //! capter sans changer aussi *comment* on cueille — hors scope ici.
+//!
+//! ## La fission (incrément 5)
+//!
+//! BRIEF §9 : « un clan trop nombreux fissionne ». Jusqu'ici, un groupe
+//! connexe qui ne passait pas le seuil de cohésion était simplement
+//! **abandonné** — un clan qui grossissait trop finissait par se dissoudre
+//! plutôt que de se scinder. Écrire « si `members.len() > N`, couper en
+//! deux » serait, encore une fois, l'anti-pattern que le brief interdit
+//! (§11) : la taille ne doit jamais être lue directement, seulement ses
+//! conséquences sur la cohésion (voir plus haut, « une limite de bande
+//! passante sociale »).
+//!
+//! `resolve_cluster` cherche donc, dans un groupe qui échoue le test de
+//! cohésion, s'il cache en réalité **deux sous-groupes plus densément
+//! liés** : on relève progressivement le seuil de lien utilisé pour la
+//! recherche (jamais celui qui sert à *mesurer* la cohésion — ce dernier
+//! reste `BOND_THRESHOLD` pour tout le monde, tout le temps, sans quoi la
+//! notion même de « clan cohésif » deviendrait mouvante). C'est la coupure
+//! d'un dendrogramme à seuil (single-linkage) — une technique connue, pas
+//! une heuristique inventée pour l'occasion. Si le sous-graphe des liens
+//! *les plus forts* se sépare en plusieurs morceaux, chacun est réévalué
+//! **récursivement** par les mêmes règles que n'importe quel candidat clan
+//! (taille, cohésion, co-résidence) : rien de spécifique à la fission, la
+//! fonction qui valide un clan ordinaire est aussi celle qui valide chaque
+//! fille. Un groupe trop petit pour produire deux clans viables
+//! (`< 2 · MIN_CLAN_SIZE`), ou dont aucun seuil ne le sépare jamais
+//! proprement, s'efface — exactement le comportement d'avant cet
+//! incrément, préservé comme cas limite plutôt que remplacé.
+//!
+//! **Aucun changement nécessaire à la réconciliation d'identité** (voir
+//! plus haut) : quand un groupe scinde, chaque fille est comparée aux
+//! clans existants comme n'importe quel nouveau cluster. La fille qui
+//! retrouve la majorité des membres de l'ancien clan **hérite** de son
+//! identité (elle *est* le clan, juste plus petit) ; l'autre est traitée
+//! comme un `Formed` ordinaire. Une fission se lit donc dans les
+//! événements comme « le clan continue (amoindri) + un nouveau clan
+//! apparaît » — un signal déjà présent, pas une mécanique à ajouter.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -163,6 +200,19 @@ const RESIDENCE_FRACTION: f32 = 0.7;
 /// changé, et il ne s'est pas noyé dans quelque chose de bien plus gros).
 const IDENTITY_OVERLAP_NUM: usize = 1;
 const IDENTITY_OVERLAP_DEN: usize = 2;
+
+// — Fission —
+
+/// Pas de relèvement du seuil de lien à chaque tentative de scission d'un
+/// groupe trop lâche pour être un seul clan. Assez fin pour trouver la
+/// coupure naturelle entre deux sous-groupes réels sans la rater (voir le
+/// commentaire de module) ; assez grossier pour rester bon marché (au plus
+/// une poignée de paliers avant `FISSION_MAX_THRESHOLD`).
+const FISSION_THRESHOLD_STEP: f32 = 0.05;
+/// Au-delà de ce seuil de recherche, il ne reste plus que des paires ou des
+/// individus isolés dans le sous-graphe des liens les plus forts — inutile
+/// de chercher plus loin, aucune scission ne produira deux clans viables.
+const FISSION_MAX_THRESHOLD: f32 = 0.95;
 
 /// Identifiant stable d'un clan, monotone — comme `AgentId`/`FaunaId`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -371,6 +421,93 @@ impl DisjointSet {
     }
 }
 
+/// Sépare `members` en composantes connexes selon `edges` (restreintes aux
+/// paires dont les deux bouts sont dans `members`). Tout membre sans arête
+/// retenue forme sa propre composante à un seul élément — c'est voulu : un
+/// individu qui ne tient plus au groupe qu'à un lien trop faible pour la
+/// recherche de scission en cours n'appartient à aucune des deux filles.
+fn connected_components(members: &BTreeSet<u64>, edges: &[(u64, u64)]) -> Vec<BTreeSet<u64>> {
+    let ids: Vec<u64> = members.iter().copied().collect(); // BTreeSet → déjà trié
+    let mut dsu = DisjointSet::new(ids.len());
+    for &(a, b) in edges {
+        if let (Ok(ia), Ok(ib)) = (ids.binary_search(&a), ids.binary_search(&b)) {
+            dsu.union(ia, ib);
+        }
+    }
+    let mut groups: BTreeMap<usize, BTreeSet<u64>> = BTreeMap::new();
+    for (i, &id) in ids.iter().enumerate() {
+        groups.entry(dsu.find(i)).or_default().insert(id);
+    }
+    groups.into_values().collect()
+}
+
+/// Valide (ou non) un groupe candidat comme clan à part entière : taille,
+/// cohésion **toujours mesurée à `BOND_THRESHOLD`** (jamais au seuil de
+/// recherche, temporairement relevé, qui sert seulement à trouver une
+/// scission — voir le commentaire de module) et co-résidence. `edges` est
+/// la liste des relations réelles (poids ≥ `BOND_THRESHOLD`) de toute la
+/// population ; seules celles internes à `members` comptent ici. Renvoie le
+/// territoire (centroïde) du groupe s'il passe tous les tests.
+fn validate_cluster(
+    members: &BTreeSet<u64>,
+    edges: &[(u64, u64)],
+    humans: &[crate::demography::HumanView],
+) -> Option<(f64, f64)> {
+    if members.len() < MIN_CLAN_SIZE {
+        return None;
+    }
+    let internal_edges = edges.iter().filter(|(a, b)| members.contains(a) && members.contains(b)).count();
+    let possible = members.len() * (members.len() - 1) / 2;
+    let density = internal_edges as f32 / possible as f32;
+    if density < COHESION_THRESHOLD {
+        return None;
+    }
+    let positions: Vec<(f64, f64)> =
+        members.iter().filter_map(|&id| find_human(humans, AgentId(id)).map(|h| h.pos)).collect();
+    if positions.len() != members.len() {
+        return None; // sécurité : ne devrait pas arriver (agent introuvable)
+    }
+    let (sx, sy) = positions.iter().fold((0.0, 0.0), |(sx, sy), &(x, y)| (sx + x, sy + y));
+    let (cx, cy) = (sx / positions.len() as f64, sy / positions.len() as f64);
+    let resident_count =
+        positions.iter().filter(|&&(x, y)| (x - cx).hypot(y - cy) <= RESIDENCE_RADIUS_TILES).count();
+    if (resident_count as f32) < RESIDENCE_FRACTION * positions.len() as f32 {
+        return None;
+    }
+    Some((cx, cy))
+}
+
+/// Résout un groupe connexe candidat en zéro, un ou plusieurs clans (voir le
+/// commentaire de module, « La fission »). `bonds` est le graphe pondéré
+/// complet (pour la recherche de scission à seuil relevé), `edges` la même
+/// liste filtrée à `BOND_THRESHOLD` que `validate_cluster` utilise pour
+/// mesurer la cohésion — jamais celle, temporaire, de la recherche.
+fn resolve_cluster(
+    members: BTreeSet<u64>,
+    bonds: &BTreeMap<(u64, u64), f32>,
+    edges: &[(u64, u64)],
+    humans: &[crate::demography::HumanView],
+    search_threshold: f32,
+) -> Vec<(BTreeSet<AgentId>, (f64, f64))> {
+    if let Some(home) = validate_cluster(&members, edges, humans) {
+        return vec![(members.into_iter().map(AgentId).collect(), home)];
+    }
+    if members.len() < 2 * MIN_CLAN_SIZE || search_threshold > FISSION_MAX_THRESHOLD {
+        return Vec::new(); // trop petit ou trop lâche pour se scinder : s'efface, comme avant cet incrément.
+    }
+    let stronger: Vec<(u64, u64)> = bonds
+        .iter()
+        .filter(|&(&(a, b), &w)| w >= search_threshold && members.contains(&a) && members.contains(&b))
+        .map(|(&k, _)| k)
+        .collect();
+    let sub_groups = connected_components(&members, &stronger);
+    if sub_groups.len() <= 1 {
+        // Encore un seul morceau à ce seuil : essayer un cran plus haut.
+        return resolve_cluster(members, bonds, edges, humans, search_threshold + FISSION_THRESHOLD_STEP);
+    }
+    sub_groups.into_iter().flat_map(|g| resolve_cluster(g, bonds, edges, humans, search_threshold)).collect()
+}
+
 /// La passe quotidienne : entretien du graphe, puis détection des clans.
 /// Appelée à la même cadence que `demography::daily` — c'est le rythme
 /// « administratif » de la simulation.
@@ -415,37 +552,21 @@ fn detect_clans(sim: &mut Sim) {
 
     // Chaque composante connexe est un **candidat** — encore faut-il qu'il
     // soit assez gros, assez dense (cohésion) et assez compact (résidence).
-    // Le centroïde calculé ici pour le test de résidence devient, pour les
-    // clusters retenus, le **territoire** du clan (`Clan::home`) — même
-    // calcul, deux usages.
+    // `resolve_cluster` valide le groupe tel quel, ou, s'il échoue,
+    // cherche s'il cache plusieurs sous-groupes plus densément liés
+    // (fission, voir le commentaire de module) : dans les deux cas, le
+    // centroïde de chaque cluster retenu devient le **territoire** du clan
+    // (`Clan::home`).
     let mut clusters: Vec<(BTreeSet<AgentId>, (f64, f64))> = Vec::new();
-    for members in groups.values() {
-        if members.len() < MIN_CLAN_SIZE {
-            continue;
-        }
-        let member_set: BTreeSet<u64> = members.iter().copied().collect();
-        let internal_edges =
-            edges.iter().filter(|(a, b)| member_set.contains(a) && member_set.contains(b)).count();
-        let possible = members.len() * (members.len() - 1) / 2;
-        let density = internal_edges as f32 / possible as f32;
-        if density < COHESION_THRESHOLD {
-            continue;
-        }
-        let positions: Vec<(f64, f64)> = members
-            .iter()
-            .filter_map(|&id| find_human(&humans, AgentId(id)).map(|h| h.pos))
-            .collect();
-        if positions.len() != members.len() {
-            continue; // sécurité : ne devrait pas arriver (agent introuvable)
-        }
-        let (sx, sy) = positions.iter().fold((0.0, 0.0), |(sx, sy), &(x, y)| (sx + x, sy + y));
-        let (cx, cy) = (sx / positions.len() as f64, sy / positions.len() as f64);
-        let resident_count =
-            positions.iter().filter(|&&(x, y)| (x - cx).hypot(y - cy) <= RESIDENCE_RADIUS_TILES).count();
-        if (resident_count as f32) < RESIDENCE_FRACTION * positions.len() as f32 {
-            continue;
-        }
-        clusters.push((member_set.into_iter().map(AgentId).collect(), (cx, cy)));
+    for members in groups.into_values() {
+        let member_set: BTreeSet<u64> = members.into_iter().collect();
+        clusters.extend(resolve_cluster(
+            member_set,
+            &sim.social.bonds,
+            &edges,
+            &humans,
+            BOND_THRESHOLD + FISSION_THRESHOLD_STEP,
+        ));
     }
     // Ordre déterministe et stable pour l'attribution des nouveaux
     // identifiants : par plus petit membre.
@@ -604,5 +725,107 @@ mod tests {
         }
         g.cap_bonds(MAX_BONDS_PER_AGENT);
         assert_eq!(g.affinity(a, b), 0.0, "lien non mutuel dans le top : doit être coupé");
+    }
+
+    use crate::demography::{HumanView, Sex};
+
+    fn human_at(id: u64, x: f64, y: f64) -> HumanView {
+        HumanView { id: AgentId(id), pos: (x, y), sex: Sex::Female, adult: true }
+    }
+
+    type SocialFixture = (BTreeSet<u64>, BTreeMap<(u64, u64), f32>, Vec<HumanView>);
+
+    /// Deux sous-groupes de 10, chacun assez dense et compact pour être un
+    /// clan à lui seul, reliés par une poignée de liens plus faibles qu'eux
+    /// (mais tout de même au-dessus de `BOND_THRESHOLD`, donc comptés dans
+    /// la mesure de cohésion de l'ensemble). Le tout, pris comme un seul
+    /// groupe de 20, ne passe PAS le seuil de cohésion (les liens internes
+    /// des deux moitiés ne suffisent pas à densifier 190 paires possibles) —
+    /// exactement le cas que la fission doit résoudre.
+    fn two_dense_halves_bridged() -> SocialFixture {
+        let mut bonds: BTreeMap<(u64, u64), f32> = BTreeMap::new();
+        let mut humans: Vec<HumanView> = Vec::new();
+        for half in 0..2u64 {
+            let base = half * 10;
+            for i in 0..10u64 {
+                let id = base + i;
+                humans.push(human_at(id, half as f64 * 10_000.0 + i as f64 * 2.0, 0.0));
+            }
+            // Densité interne : chaînes de voisinage jusqu'à distance 3
+            // (24 arêtes sur 45 paires possibles = 0,53, largement au-dessus
+            // de COHESION_THRESHOLD).
+            for k in 1..=3u64 {
+                for i in 0..(10 - k) {
+                    bonds.insert(SocialGraph::key(AgentId(base + i), AgentId(base + i + k)), 0.9);
+                }
+            }
+        }
+        // Deux ponts, plus faibles que les liens internes : ce sont eux, et
+        // seulement eux, que la recherche de scission doit couper en premier.
+        bonds.insert(SocialGraph::key(AgentId(4), AgentId(14)), 0.55);
+        bonds.insert(SocialGraph::key(AgentId(7), AgentId(17)), 0.55);
+        humans.sort_by_key(|h| h.id.0);
+        let members: BTreeSet<u64> = (0..20).collect();
+        (members, bonds, humans)
+    }
+
+    /// Le cœur de l'incrément 5 (BRIEF §9 : « un clan trop nombreux
+    /// fissionne ») : un groupe qui échoue le test de cohésion pris en bloc
+    /// se scinde en deux clans filles viables plutôt que de s'effacer,
+    /// **sans qu'aucun seuil de taille ne soit jamais lu directement** —
+    /// seule la structure du graphe (deux sous-groupes densément liés,
+    /// faiblement reliés entre eux) décide.
+    #[test]
+    fn un_groupe_trop_lache_se_scinde_en_deux_clans_filles() {
+        let (members, bonds, humans) = two_dense_halves_bridged();
+        let edges: Vec<(u64, u64)> = bonds.keys().copied().collect(); // tous ≥ BOND_THRESHOLD ici
+
+        assert!(
+            validate_cluster(&members, &edges, &humans).is_none(),
+            "les 20 pris en bloc ne doivent PAS passer le seuil de cohésion (c'est le point de départ du test)"
+        );
+
+        let result = resolve_cluster(members, &bonds, &edges, &humans, BOND_THRESHOLD + FISSION_THRESHOLD_STEP);
+        assert_eq!(result.len(), 2, "doit se scinder en exactement deux clans filles");
+        for (cluster, _) in &result {
+            assert_eq!(cluster.len(), 10, "chaque fille doit retrouver sa moitié complète");
+        }
+        let mut all_members: BTreeSet<AgentId> = BTreeSet::new();
+        for (cluster, _) in &result {
+            all_members.extend(cluster.iter().copied());
+        }
+        assert_eq!(all_members.len(), 20, "aucun membre perdu ni dupliqué pendant la scission");
+        let (a, _) = &result[0];
+        let (b, _) = &result[1];
+        assert!(a.is_disjoint(b), "les deux clans filles ne doivent partager aucun membre");
+    }
+
+    /// Contre-épreuve : un groupe trop lâche mais **sans** structure interne
+    /// à exploiter (ici un simple anneau de voisinage, une seule force de
+    /// lien partout) ne doit produire AUCUN clan — la recherche de scission
+    /// ne doit pas fabriquer une coupure là où il n'y en a pas. Il finit par
+    /// se réduire à des paires/individus isolés, tous trop petits pour être
+    /// un clan : le même sort qu'avant l'incrément fission.
+    #[test]
+    fn un_groupe_sans_sous_structure_ne_fissionne_pas_et_s_efface() {
+        let mut bonds: BTreeMap<(u64, u64), f32> = BTreeMap::new();
+        let mut humans: Vec<HumanView> = Vec::new();
+        for i in 0..20u64 {
+            humans.push(human_at(i, i as f64 * 2.0, 0.0));
+            bonds.insert(SocialGraph::key(AgentId(i), AgentId((i + 1) % 20)), 0.9);
+        }
+        humans.sort_by_key(|h| h.id.0);
+        let members: BTreeSet<u64> = (0..20).collect();
+        let edges: Vec<(u64, u64)> = bonds.keys().copied().collect();
+
+        assert!(
+            validate_cluster(&members, &edges, &humans).is_none(),
+            "un anneau de 20 (densité ~0,1) ne doit pas passer le seuil de cohésion"
+        );
+        let result = resolve_cluster(members, &bonds, &edges, &humans, BOND_THRESHOLD + FISSION_THRESHOLD_STEP);
+        assert!(
+            result.is_empty(),
+            "sans sous-groupe réellement plus dense, le groupe doit s'effacer, pas fissionner artificiellement"
+        );
     }
 }
