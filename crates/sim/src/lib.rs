@@ -43,7 +43,7 @@ pub use fauna::{FaunaId, Herd, HerdState, Pack};
 pub use memory::Memory;
 pub use sim::{BirthRecord, DeathRecord, Sim};
 pub use skills::Skills;
-pub use social::{Clan, ClanEvent, ClanEventKind, ClanId, ClanMembership, SocialGraph};
+pub use social::{Clan, ClanEvent, ClanEventKind, ClanId, ClanMembership, ClanRelations, SocialGraph};
 pub use tile::{Tile, TileFlags};
 pub use world::World;
 

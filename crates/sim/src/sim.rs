@@ -45,7 +45,7 @@ use crate::fauna::{self, FaunaId, Herd, HerdView, Kill, Pack};
 use crate::memory::{self, Memory};
 use crate::pathfind;
 use crate::skills::{self, Skills};
-use crate::social::{self, Clan, ClanEvent, ClanId, ClanMembership, ClanView, SocialGraph};
+use crate::social::{self, Clan, ClanEvent, ClanId, ClanMembership, ClanRelations, ClanView, SocialGraph};
 use crate::world::World;
 
 /// Un agent est « arrivé » sous une tuile et demie de sa cible.
@@ -142,6 +142,10 @@ pub struct Sim {
     pub clans: Vec<Clan>,
     /// Formations et effondrements de clans depuis le début du monde.
     pub clan_events: Vec<ClanEvent>,
+    /// Tension mesurée entre clans voisins (Phase 4, incrément 6) —
+    /// reconstruite en entier chaque jour, juste après `clans` : voir
+    /// `social::update_relations`.
+    pub clan_relations: ClanRelations,
     /// L'immigration de gibier (`fauna::daily_immigration`) est-elle active
     /// pour cette simulation ? Vrai par défaut (le monde est censé être
     /// habité) ; les scènes de test qui veulent isoler une mécanique de
@@ -183,6 +187,7 @@ impl Sim {
             social: SocialGraph::default(),
             clans: Vec::new(),
             clan_events: Vec::new(),
+            clan_relations: ClanRelations::default(),
             allow_fauna_immigration: true,
             next_agent_id: 0,
             next_fauna_id: 0,

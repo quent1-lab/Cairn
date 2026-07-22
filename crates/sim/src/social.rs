@@ -133,10 +133,39 @@
 //! comme un `Formed` ordinaire. Une fission se lit donc dans les
 //! événements comme « le clan continue (amoindri) + un nouveau clan
 //! apparaît » — un signal déjà présent, pas une mécanique à ajouter.
+//!
+//! ## Les relations inter-clans (incrément 6)
+//!
+//! BRIEF §9 : « deux clans voisins sur une ressource rare entrent en
+//! tension de manière observable ». Le mot clé est *observable* : la
+//! tension n'est **jamais décidée**, seulement **mesurée** — exactement le
+//! même principe que la détection de clan elle-même. `update_relations`
+//! (appelée à la même cadence quotidienne que `detect_clans`, juste après)
+//! calcule, pour chaque paire de clans dont les foyers sont assez proches
+//! pour se disputer un territoire (`CONTACT_RADIUS_TILES`), le gibier
+//! disponible dans la zone qui les sépare (même notion d'effectif de
+//! troupeau que la chasse, `fauna::Herd::population`, sommée dans un rayon
+//! autour du point médian des deux foyers). Rapporté au nombre de bouches à
+//! nourrir des deux clans réunis, ce gibier par tête est soit rare
+//! (`SCARCITY_PER_CAPITA`), soit abondant. **Une seule règle, sans cas
+//! spécial** : rare ET en contact → la tension monte (nudge saturant,
+//! comme les liens sociaux) ; sinon (hors de contact, ou ressource
+//! abondante) → elle redescend. Aucune notion de conflit, de guerre ou de
+//! combat n'est ajoutée ici — `force`/`agressivité` restent en attente
+//! (voir Phase 3) : c'est une portée délibérément limitée à ce que le
+//! critère BRIEF demande, l'observabilité, pas la conclusion narrative
+//! qu'un joueur pourrait en tirer (Phase 5+, Chronique).
+//!
+//! `ClanRelations::tension` est reconstruite en entier chaque jour à partir
+//! des seuls clans qui existent encore (même logique que `Clan::home`) :
+//! un clan qui s'efface (fission, effondrement) emporte ses tensions avec
+//! lui sans code de nettoyage dédié — la paire disparaît simplement de la
+//! prochaine reconstruction.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::agent::{AgentId, Position};
+use crate::fauna::Herd;
 use crate::demography::{Kinship, find_human};
 use crate::memory::TALK_RADIUS_TILES;
 use crate::sim::Sim;
@@ -214,6 +243,38 @@ const FISSION_THRESHOLD_STEP: f32 = 0.05;
 /// de chercher plus loin, aucune scission ne produira deux clans viables.
 const FISSION_MAX_THRESHOLD: f32 = 0.95;
 
+// — Relations inter-clans —
+
+/// Distance entre deux foyers de clan en dessous de laquelle leurs
+/// territoires sont assez proches pour se disputer une même zone. Deux fois
+/// le rayon de résidence : le territoire de chacun s'étend déjà sur
+/// `RESIDENCE_RADIUS_TILES`, donc au-delà de deux fois cette distance, les
+/// deux zones ne se touchent structurellement plus.
+const CONTACT_RADIUS_TILES: f64 = RESIDENCE_RADIUS_TILES * 2.0;
+/// Rayon de dépouillement du gibier autour du point médian de deux foyers en
+/// contact : la même échelle que le territoire d'un clan (`RESIDENCE_RADIUS_TILES`),
+/// pas une zone à part — la ressource contestée, c'est ce que chacun aurait
+/// pu chasser depuis chez lui.
+const RESOURCE_SURVEY_RADIUS_TILES: f64 = RESIDENCE_RADIUS_TILES;
+/// Gibier disponible par personne (les deux clans réunis) en dessous duquel
+/// la zone disputée compte comme rare. Estimation de premier ordre (pas
+/// minée sur une scène multi-jours comme `COHESION_THRESHOLD` — un clan de
+/// quelques dizaines de membres a historiquement besoin d'un ordre de
+/// grandeur de plusieurs têtes de gibier par personne dans son rayon de
+/// chasse habituel pour ne jamais tomber à la famine, voir le calibrage
+/// Phase 2) ; à affiner si une vraie scène à deux clans le contredit.
+const SCARCITY_PER_CAPITA: f32 = 3.0;
+/// Nudge saturant quotidien de la tension quand la zone est rare et les
+/// clans en contact — même idiome que `ENCOUNTER_GAIN`/`skill::practice`.
+const TENSION_RISE_RATE: f32 = 0.12;
+/// Relâchement quotidien multiplicatif quand ce n'est plus le cas (hors de
+/// contact, ou ressource redevenue abondante) — même idiome que
+/// `DAILY_DECAY` du graphe d'affinités.
+const TENSION_DECAY_RATE: f32 = 0.08;
+/// En dessous de ce niveau, une tension résiduelle est oubliée plutôt que
+/// portée indéfiniment (borne mémoire, comme `FORGET_THRESHOLD`).
+const TENSION_FORGET_THRESHOLD: f32 = 0.02;
+
 /// Identifiant stable d'un clan, monotone — comme `AgentId`/`FaunaId`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ClanId(pub u64);
@@ -255,6 +316,30 @@ pub struct ClanView {
 /// chaque jour par `daily`, indépendamment de tout ce qui touche l'individu.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ClanMembership(pub Option<ClanId>);
+
+/// Tension mesurée entre paires de clans (BRIEF §9, voir le commentaire de
+/// module « Les relations inter-clans »). `BTreeMap` à clé normalisée
+/// `(min, max)`, exactement le même patron que `SocialGraph::bonds` — une
+/// relation non orientée, jamais itérée dans un ordre non déterministe.
+/// Reconstruite en entier chaque jour par `update_relations` : aucune paire
+/// n'est modifiée à la main, aucun nettoyage dédié n'est nécessaire quand un
+/// clan s'efface (voir le commentaire de module).
+#[derive(Debug, Clone, Default)]
+pub struct ClanRelations {
+    pub tension: BTreeMap<(u64, u64), f32>,
+}
+
+impl ClanRelations {
+    fn key(a: ClanId, b: ClanId) -> (u64, u64) {
+        if a.0 < b.0 { (a.0, b.0) } else { (b.0, a.0) }
+    }
+
+    /// La tension entre deux clans (0 s'ils ne se sont jamais côtoyés ou si
+    /// elle s'est éteinte depuis).
+    pub fn tension_between(&self, a: ClanId, b: ClanId) -> f32 {
+        self.tension.get(&Self::key(a, b)).copied().unwrap_or(0.0)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClanEventKind {
@@ -508,15 +593,66 @@ fn resolve_cluster(
     sub_groups.into_iter().flat_map(|g| resolve_cluster(g, bonds, edges, humans, search_threshold)).collect()
 }
 
-/// La passe quotidienne : entretien du graphe, puis détection des clans.
-/// Appelée à la même cadence que `demography::daily` — c'est le rythme
-/// « administratif » de la simulation.
+/// La passe quotidienne : entretien du graphe, détection des clans, puis
+/// mesure des relations inter-clans (qui a besoin des clans du jour, donc
+/// appelée après `detect_clans`). Appelée à la même cadence que
+/// `demography::daily` — c'est le rythme « administratif » de la simulation.
 pub(crate) fn daily(sim: &mut Sim) {
     let alive: BTreeSet<u64> = sim.agents.query::<&AgentId>().iter().map(|(_, id)| id.0).collect();
     sim.social.prune_dead(&alive);
     sim.social.decay(DAILY_DECAY, FORGET_THRESHOLD);
     sim.social.cap_bonds(MAX_BONDS_PER_AGENT);
     detect_clans(sim);
+    update_relations(sim);
+}
+
+/// Le gibier disponible (somme des effectifs de troupeaux, la même notion
+/// que la chasse) dans un rayon de `RESOURCE_SURVEY_RADIUS_TILES` autour
+/// d'un point — le proxy le plus simple pour « ce que ces deux clans
+/// pourraient se disputer », sans rien inventer de nouveau.
+fn contested_game(point: (f64, f64), herds: &[(f64, f64, f32)]) -> f32 {
+    herds
+        .iter()
+        .filter(|&&(x, y, _)| (x - point.0).hypot(y - point.1) <= RESOURCE_SURVEY_RADIUS_TILES)
+        .map(|&(_, _, population)| population)
+        .sum()
+}
+
+/// Mesure, pour chaque paire de clans, si leur voisinage justifie une
+/// tension — voir le commentaire de module. Reconstruit `sim.clan_relations`
+/// en entier à partir des seuls clans qui existent encore aujourd'hui,
+/// exactement comme `detect_clans` reconstruit `sim.clans`.
+fn update_relations(sim: &mut Sim) {
+    let herds: Vec<(f64, f64, f32)> = sim
+        .fauna
+        .query::<(&Herd, &Position)>()
+        .iter()
+        .map(|(_, (herd, pos))| (pos.x, pos.y, herd.population))
+        .collect();
+
+    let mut next: BTreeMap<(u64, u64), f32> = BTreeMap::new();
+    for i in 0..sim.clans.len() {
+        for j in (i + 1)..sim.clans.len() {
+            let (a, b) = (&sim.clans[i], &sim.clans[j]);
+            let dist = (a.home.0 - b.home.0).hypot(a.home.1 - b.home.1);
+            let scarce = dist <= CONTACT_RADIUS_TILES && {
+                let midpoint = ((a.home.0 + b.home.0) / 2.0, (a.home.1 + b.home.1) / 2.0);
+                let mouths = (a.members.len() + b.members.len()) as f32;
+                contested_game(midpoint, &herds) / mouths.max(1.0) < SCARCITY_PER_CAPITA
+            };
+            let key = ClanRelations::key(a.id, b.id);
+            let previous = sim.clan_relations.tension_between(a.id, b.id);
+            let updated = if scarce {
+                previous + TENSION_RISE_RATE * (1.0 - previous)
+            } else {
+                previous * (1.0 - TENSION_DECAY_RATE)
+            };
+            if updated > TENSION_FORGET_THRESHOLD {
+                next.insert(key, updated);
+            }
+        }
+    }
+    sim.clan_relations.tension = next;
 }
 
 /// Détecte les groupes du graphe d'affinités qui franchissent à la fois le
@@ -711,6 +847,8 @@ mod tests {
         assert!(g.affinity(hub, AgentId(1)) > 0.0, "le lien le plus fort doit rester");
     }
 
+    use cairn_core::WorldSeed;
+
     #[test]
     fn le_plafond_coupe_un_lien_non_mutuel() {
         // A considère B comme son ami le plus proche, mais B a par ailleurs
@@ -826,6 +964,94 @@ mod tests {
         assert!(
             result.is_empty(),
             "sans sous-groupe réellement plus dense, le groupe doit s'effacer, pas fissionner artificiellement"
+        );
+    }
+
+    /// Deux clans synthétiques de 10 membres chacun, positionnés à distance
+    /// contrôlée, avec un unique troupeau à leur point médian — assez pour
+    /// injecter `sim.clans`/`sim.fauna` sans passer par une scène complète
+    /// (même patron qu'à l'incrément 3 : tester le mécanisme directement).
+    fn two_clans_and_one_herd(gap_tiles: f64, herd_population: f32) -> Sim {
+        let mut sim = Sim::new(WorldSeed(1), 64);
+        let home_a = (0.0, 0.0);
+        let home_b = (gap_tiles, 0.0);
+        sim.clans.push(Clan {
+            id: ClanId(1),
+            founded_tick: 0,
+            members: (0..10u64).map(AgentId).collect(),
+            home: home_a,
+            stock: 0.0,
+        });
+        sim.clans.push(Clan {
+            id: ClanId(2),
+            founded_tick: 0,
+            members: (100..110u64).map(AgentId).collect(),
+            home: home_b,
+            stock: 0.0,
+        });
+        let midpoint = ((home_a.0 + home_b.0) / 2.0, (home_a.1 + home_b.1) / 2.0);
+        sim.spawn_herd(midpoint.0, midpoint.1, herd_population);
+        sim
+    }
+
+    /// LE critère n°2 de la Phase 4 (BRIEF §9) : « deux clans voisins sur
+    /// une ressource rare entrent en tension de manière observable ». Deux
+    /// clans en contact (foyers à moins de `CONTACT_RADIUS_TILES`) partagent
+    /// un seul petit troupeau (10 têtes pour 20 bouches, largement sous
+    /// `SCARCITY_PER_CAPITA`) : la tension doit monter, jour après jour,
+    /// sans jamais dépasser 1,0 (nudge saturant, même idiome que les liens
+    /// sociaux).
+    #[test]
+    fn deux_clans_voisins_sur_une_ressource_rare_entrent_en_tension() {
+        let mut sim = two_clans_and_one_herd(CONTACT_RADIUS_TILES - 500.0, 10.0);
+        let (a, b) = (ClanId(1), ClanId(2));
+        assert_eq!(sim.clan_relations.tension_between(a, b), 0.0, "aucune tension avant toute mesure");
+
+        let mut previous = 0.0;
+        for day in 0..20 {
+            update_relations(&mut sim);
+            let tension = sim.clan_relations.tension_between(a, b);
+            assert!(tension > previous, "jour {day} : la tension doit strictement monter tant que c'est rare");
+            assert!(tension < 1.0, "jour {day} : la tension sature sous 1,0, ne l'atteint jamais");
+            previous = tension;
+        }
+        assert!(previous > 0.6, "après 20 jours de disette partagée, la tension doit être clairement établie");
+    }
+
+    /// Contre-épreuve n°1 : les deux mêmes clans, mêmes foyers, mais un
+    /// troupeau surabondant (1000 têtes pour 20 bouches) — la ressource
+    /// n'est plus rare, donc **aucune** tension ne doit apparaître malgré la
+    /// proximité. La cohabitation seule ne suffit pas.
+    #[test]
+    fn deux_clans_voisins_sur_une_ressource_abondante_restent_en_paix() {
+        let mut sim = two_clans_and_one_herd(CONTACT_RADIUS_TILES - 500.0, 1000.0);
+        let (a, b) = (ClanId(1), ClanId(2));
+        for _ in 0..20 {
+            update_relations(&mut sim);
+        }
+        assert_eq!(
+            sim.clan_relations.tension_between(a, b),
+            0.0,
+            "une ressource abondante ne doit jamais faire monter la tension, même entre voisins"
+        );
+    }
+
+    /// Contre-épreuve n°2 : les deux mêmes clans, mais hors de portée de
+    /// contact (foyers à plus de `CONTACT_RADIUS_TILES`), avec le même
+    /// troupeau minuscule qui les ferait entrer en tension s'ils étaient
+    /// proches. Pas de tension non plus : la rareté seule ne suffit pas sans
+    /// voisinage — les deux conditions du critère BRIEF comptent vraiment.
+    #[test]
+    fn deux_clans_trop_eloignes_ne_se_disputent_jamais_la_ressource() {
+        let mut sim = two_clans_and_one_herd(CONTACT_RADIUS_TILES + 500.0, 10.0);
+        let (a, b) = (ClanId(1), ClanId(2));
+        for _ in 0..20 {
+            update_relations(&mut sim);
+        }
+        assert_eq!(
+            sim.clan_relations.tension_between(a, b),
+            0.0,
+            "hors de contact, deux clans ne doivent jamais entrer en tension, quelle que soit la ressource"
         );
     }
 }
