@@ -249,6 +249,7 @@ use crate::demography::{Kinship, Traits, find_human};
 use crate::memory::TALK_RADIUS_TILES;
 use crate::sim::Sim;
 use crate::skills::{self, Skills};
+use crate::structures::{self, StructureKind};
 use cairn_core::km_to_tiles;
 
 // — Affinités —
@@ -386,15 +387,22 @@ pub struct Clan {
     /// `elect_chiefs`, appelée juste après dans la même passe quotidienne,
     /// le recalcule toujours avant que quiconque d'autre ne lise `sim.clans`.
     pub chief: AgentId,
+    /// La structure que le clan désire bâtir, s'il en désire une
+    /// (`crate::structures::plan`, passe quotidienne) — `None` s'il est au
+    /// chaud, son stock vide et sans voisin menaçant. Lue par `brain::decide`
+    /// pour proposer un candidat `TaskKind::Build`.
+    pub desired: Option<StructureKind>,
 }
 
 /// Instantané minimal d'un clan pour la délibération (`brain::decide`) : ce
 /// qu'un membre a besoin de savoir sur **son** clan pour décider d'y
-/// retourner ou d'y puiser, sans lui donner accès à la liste des membres.
+/// retourner, d'y puiser ou d'y bâtir, sans lui donner accès à la liste des
+/// membres.
 #[derive(Debug, Clone, Copy)]
 pub struct ClanView {
     pub home: (f64, f64),
     pub stock: f32,
+    pub desired: Option<StructureKind>,
 }
 
 /// Le clan d'appartenance d'un agent, `None` s'il n'en a pas. Composant à
@@ -773,8 +781,17 @@ fn update_relations(sim: &mut Sim) {
             };
             let key = ClanRelations::key(a.id, b.id);
             let previous = sim.clan_relations.tension_between(a.id, b.id);
+            // Une palissade (de l'un ou l'autre) freine la montée : un clan
+            // qui tient sa position escalade moins (voir `structures`).
+            let defended = structures::has_palisade(a.id, &sim.structures)
+                || structures::has_palisade(b.id, &sim.structures);
+            let rise = if defended {
+                TENSION_RISE_RATE * structures::PALISADE_TENSION_FACTOR
+            } else {
+                TENSION_RISE_RATE
+            };
             let updated = if scarce {
-                previous + TENSION_RISE_RATE * (1.0 - previous)
+                previous + rise * (1.0 - previous)
             } else {
                 previous * (1.0 - TENSION_DECAY_RATE)
             };
@@ -895,6 +912,7 @@ fn detect_clans(sim: &mut Sim) {
                     home: *home,
                     stock: clan.stock,
                     chief: clan.chief, // provisoire : `elect_chiefs` le recalcule juste après
+                    desired: clan.desired, // reporté ; `structures::plan` le recalcule à minuit
                 });
                 true
             } else {
@@ -929,6 +947,7 @@ fn detect_clans(sim: &mut Sim) {
             members: cluster,
             home,
             stock: 0.0,
+            desired: None, // un clan neuf n'a encore rien mesuré ; `structures::plan` décidera
         });
     }
     next.sort_by_key(|c| c.id.0);
@@ -1149,6 +1168,7 @@ mod tests {
             home: home_a,
             stock: 0.0,
             chief: AgentId(0),
+            desired: None,
         });
         sim.clans.push(Clan {
             id: ClanId(2),
@@ -1157,6 +1177,7 @@ mod tests {
             home: home_b,
             stock: 0.0,
             chief: AgentId(100),
+            desired: None,
         });
         let midpoint = ((home_a.0 + home_b.0) / 2.0, (home_a.1 + home_b.1) / 2.0);
         sim.spawn_herd(midpoint.0, midpoint.1, herd_population);
@@ -1232,6 +1253,7 @@ mod tests {
             home,
             stock: 0.0,
             chief: AgentId(id * 1000),
+            desired: None,
         }
     }
 
@@ -1362,6 +1384,7 @@ mod tests {
             home: (0.0, 0.0),
             stock: 0.0,
             chief: low, // valeur de départ arbitraire : doit changer
+            desired: None,
         });
 
         elect_chiefs(&mut sim);
@@ -1386,6 +1409,7 @@ mod tests {
             home: (0.0, 0.0),
             stock: 0.0,
             chief: b,
+            desired: None,
         });
 
         elect_chiefs(&mut sim);

@@ -44,7 +44,7 @@ fn main() {
     println!("foyer {home:?}, {placed} humains, {g0:.0} gibier ({nh0} troupeaux), {p0:.0} prédateurs ({np0} meutes)");
 
     if log_every_days > 0 {
-        println!("jour   humains  gibier  troupeaux  prédateurs  meutes  chassé(cumul)  clans");
+        println!("jour   humains  gibier  troupeaux  prédateurs  meutes  chassé(cumul)  clans  struct");
     }
     for _ in 0..ticks {
         sim.step();
@@ -53,10 +53,11 @@ fn main() {
             if day.is_multiple_of(log_every_days) {
                 let (g, p, nh, np) = sim.fauna_census();
                 println!(
-                    "{day:>4}   {:>7}  {g:>6.0}  {nh:>9}  {p:>10.0}  {np:>6}  {:>13.0}  {:>5}",
+                    "{day:>4}   {:>7}  {g:>6.0}  {nh:>9}  {p:>10.0}  {np:>6}  {:>13.0}  {:>5}  {:>6}",
                     sim.population(),
                     sim.hunted_head,
                     sim.clans.len(),
+                    sim.structures.len(),
                 );
             }
         }
@@ -112,6 +113,21 @@ fn main() {
         stroke_square(&mut buf, sx, sy, (scale * 12.0).clamp(12.0, 80.0), [255, 255, 255]);
     }
     println!("clans : {} actif(s)", sim.clans.len());
+    {
+        use cairn_sim::StructureKind::*;
+        let (mut huts, mut greniers, mut palissades) = (0, 0, 0);
+        for s in &sim.structures {
+            match s.kind {
+                Hut => huts += 1,
+                Granary => greniers += 1,
+                Palisade => palissades += 1,
+            }
+        }
+        println!(
+            "structures : {} au total ({huts} huttes, {greniers} greniers, {palissades} palissades)",
+            sim.structures.len(),
+        );
+    }
 
     let (g1, p1, _, _) = sim.fauna_census();
     println!(

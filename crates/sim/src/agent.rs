@@ -132,6 +132,11 @@ pub enum TaskKind {
     /// rejoigne le stock commun. Symétrique d'`EatFromStock` : le dépôt, comme
     /// le retrait, exige d'être sur place — la viande ne se téléporte pas.
     BringSurplusHome,
+    /// Bâtir, au foyer du clan, la structure que le clan désire
+    /// (`crate::structures`). Le type est porté par la tâche : un membre
+    /// s'engage sur *cette* construction précise. Payée par le stock commun,
+    /// exige d'être sur place — un chantier ne se mène pas à distance.
+    Build(crate::structures::StructureKind),
 }
 
 /// Le composant « comportement » : la tâche en cours et l'activité de l'heure.

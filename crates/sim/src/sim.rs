@@ -46,6 +46,7 @@ use crate::memory::{self, Memory};
 use crate::pathfind;
 use crate::skills::{self, Skills};
 use crate::social::{self, Clan, ClanEvent, ClanId, ClanMembership, ClanRelations, ClanView, SocialGraph};
+use crate::structures::{self, Structure, StructureKind};
 use crate::world::World;
 
 /// Un agent est « arrivé » sous une tuile et demie de sa cible.
@@ -146,6 +147,10 @@ pub struct Sim {
     /// reconstruite en entier chaque jour, juste après `clans` : voir
     /// `social::update_relations`.
     pub clan_relations: ClanRelations,
+    /// Les structures bâties par les clans (Phase 4, incrément 9) — un
+    /// registre clairsemé côté `Sim`, jamais un champ de `Tile` (voir
+    /// `crate::structures`). Chaque clan en a au plus une par type.
+    pub structures: Vec<Structure>,
     /// L'immigration de gibier (`fauna::daily_immigration`) est-elle active
     /// pour cette simulation ? Vrai par défaut (le monde est censé être
     /// habité) ; les scènes de test qui veulent isoler une mécanique de
@@ -188,6 +193,7 @@ impl Sim {
             clans: Vec::new(),
             clan_events: Vec::new(),
             clan_relations: ClanRelations::default(),
+            structures: Vec::new(),
             allow_fauna_immigration: true,
             next_agent_id: 0,
             next_fauna_id: 0,
@@ -346,7 +352,7 @@ impl Sim {
         let clan_views: BTreeMap<ClanId, ClanView> = self
             .clans
             .iter()
-            .map(|c| (c.id, ClanView { home: c.home, stock: c.stock }))
+            .map(|c| (c.id, ClanView { home: c.home, stock: c.stock, desired: c.desired }))
             .collect();
 
         // 1. Délibération — bucketée : l'agent i ne repense sa tâche qu'aux
@@ -407,6 +413,10 @@ impl Sim {
         let mut path_budget = PATH_REQUESTS_PER_TICK;
         let mut clan_stock: BTreeMap<ClanId, f32> =
             self.clans.iter().map(|c| (c.id, c.stock)).collect();
+        // Copie de travail des structures : `Build` y pousse la structure
+        // achevée (financée par `clan_stock`), reportée sur `self` en fin de
+        // boucle. Clairsemé — quelques éléments par clan, clone négligeable.
+        let mut structures = self.structures.clone();
         for (
             _,
             (id, pos, phys, traits, demo, behavior, mem, agent_skills, membership, carrying, prestige),
@@ -446,6 +456,8 @@ impl Sim {
                 &mut clan_stock,
                 carrying,
                 prestige,
+                &mut structures,
+                time.tick,
             );
             // Où que la tâche l'ait mené, l'agent note où il a mis les pieds.
             mem.note_visit(pos.tile());
@@ -455,11 +467,24 @@ impl Sim {
         }
         self.hunted_head += kills.iter().map(|k| k.head).sum::<f32>();
         self.path_calls += u64::from(PATH_REQUESTS_PER_TICK - path_budget);
+        structures.sort_by_key(|s| (s.clan.0, s.kind));
+        self.structures = structures;
         // Report des dépôts/retraits de la boucle, plafonné par membre
-        // (`STOCK_CAP_PER_MEMBER` — voir le commentaire de la constante).
+        // (`STOCK_CAP_PER_MEMBER`) plus la capacité des greniers du clan. On
+        // efface aussi le désir déjà satisfait ce tick, pour ne pas faire
+        // marcher inutilement d'autres membres vers un chantier déjà achevé
+        // (le prochain `structures::plan` de minuit le referait de toute
+        // façon, mais autant couper court tout de suite).
         for clan in &mut self.clans {
             if let Some(&stock) = clan_stock.get(&clan.id) {
-                clan.stock = stock.min(STOCK_CAP_PER_MEMBER * clan.members.len() as f32);
+                let cap = STOCK_CAP_PER_MEMBER * clan.members.len() as f32
+                    + structures::granary_bonus(clan.id, &self.structures);
+                clan.stock = stock.min(cap);
+            }
+            if let Some(kind) = clan.desired
+                && self.structures.iter().any(|s| s.clan == clan.id && s.kind == kind)
+            {
+                clan.desired = None;
             }
         }
 
@@ -468,16 +493,28 @@ impl Sim {
 
         // 3. Physiologie et morts. On collecte d'abord (on ne peut pas
         // retirer une entité pendant qu'on itère dessus), on retire après.
+        // Instantané des huttes : un membre à portée d'une hutte de son clan
+        // gagne une chaleur passive (voir `structures`), sans s'arrêter pour
+        // s'abriter — c'est ce qui rend un foyer fixe survivable au froid.
+        let huts: Vec<(f64, f64, ClanId)> = self
+            .structures
+            .iter()
+            .filter(|s| s.kind == StructureKind::Hut)
+            .map(|s| (s.pos.0, s.pos.1, s.clan))
+            .collect();
         let mut dead = Vec::new();
         let mut sheltered = 0u64;
-        for (entity, (id, pos, phys, traits, demo, behavior)) in self.agents.query_mut::<(
-            &AgentId,
-            &Position,
-            &mut Physiology,
-            &Traits,
-            &Demographics,
-            &Behavior,
-        )>() {
+        for (entity, (id, pos, phys, traits, demo, behavior, membership)) in
+            self.agents.query_mut::<(
+                &AgentId,
+                &Position,
+                &mut Physiology,
+                &Traits,
+                &Demographics,
+                &Behavior,
+                &ClanMembership,
+            )>()
+        {
             let (x, y) = pos.tile();
             let tile = self.world.tile(x, y);
             let mut felt = self.climate.instant(&tile, y, time);
@@ -493,6 +530,7 @@ impl Sim {
                 felt += SHELTER_BONUS_C;
                 sheltered += 1;
             }
+            felt += structures::hut_warmth((pos.x, pos.y), membership.0, &huts);
             phys.drift(felt, behavior.activity, traits.endurance);
             // Une grossesse se nourrit : le surcoût s'ajoute à la dérive.
             if demo.pregnancy.is_some() {
@@ -519,6 +557,11 @@ impl Sim {
         if time.tick.is_multiple_of(TICKS_PER_DAY) {
             demography::daily(self);
             social::daily(self);
+            // Après que les clans du jour sont connus : réattribuer les
+            // structures à qui contrôle leur tuile (et ruiner les abandonnées),
+            // puis mesurer ce que chaque clan désire bâtir.
+            structures::maintain(self, time.tick / TICKS_PER_DAY);
+            structures::plan(self);
         }
 
         // 3 ter. Échange de savoirs et renforcement des liens sociaux toutes
@@ -625,6 +668,8 @@ fn execute(
     clan_stock: &mut BTreeMap<ClanId, f32>,
     carrying: &mut Carrying,
     prestige: &mut Prestige,
+    structures: &mut Vec<Structure>,
+    tick: u64,
 ) -> Option<Kill> {
     let task = match behavior.task {
         Some(task) => task,
@@ -735,6 +780,29 @@ fn execute(
             // le montant déposé ce tick, tout ce qui a jamais été rapporté.
             prestige.0 += carrying.0;
             carrying.0 = 0.0;
+            behavior.task = None;
+        }
+        TaskKind::Build(kind) => {
+            behavior.activity = Activity::Idle;
+            // Financé par le stock commun ; un seul exemplaire par clan et
+            // par type. Le premier arrivé bâtit ; si la structure existe déjà
+            // ou que le stock est retombé sous le coût entre-temps, no-op —
+            // l'agent re-délibérera au prochain tick.
+            if let Some(clan_id) = clan {
+                let already =
+                    structures.iter().any(|s| s.clan == clan_id && s.kind == kind);
+                let stock = clan_stock.get(&clan_id).copied().unwrap_or(0.0);
+                if !already && stock >= kind.cost() {
+                    *clan_stock.entry(clan_id).or_insert(0.0) -= kind.cost();
+                    structures.push(Structure {
+                        kind,
+                        clan: clan_id,
+                        pos: (task.target.0 as f64 + 0.5, task.target.1 as f64 + 0.5),
+                        built_tick: tick,
+                        abandoned_since: None,
+                    });
+                }
+            }
             behavior.task = None;
         }
         TaskKind::Sleep => {
@@ -1643,6 +1711,7 @@ mod tests {
         let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::new();
         let mut carrying = Carrying::default();
         let mut prestige = Prestige::default();
+        let mut structures: Vec<Structure> = Vec::new();
         // Le troupeau est juste sous la main : cette scène teste la
         // mécanique de mise à mort, pas l'approche.
         let herd = HerdView { entity: hecs::Entity::DANGLING, pos: (pos.x, pos.y), population: 20.0 };
@@ -1663,6 +1732,8 @@ mod tests {
             &mut clan_stock,
             &mut carrying,
             &mut prestige,
+            &mut structures,
+            0,
         );
 
         assert!(kill.is_some(), "le troupeau est à portée : la chasse doit réussir");
@@ -1700,6 +1771,7 @@ mod tests {
         let porte_avant = 0.4;
         let mut carrying = Carrying(porte_avant);
         let mut prestige = Prestige::default();
+        let mut structures: Vec<Structure> = Vec::new();
 
         execute(
             &mut sim.world,
@@ -1717,6 +1789,8 @@ mod tests {
             &mut clan_stock,
             &mut carrying,
             &mut prestige,
+            &mut structures,
+            0,
         );
 
         assert_eq!(carrying.0, 0.0, "le surplus rapporté doit être entièrement déposé, plus rien porté");
@@ -1751,6 +1825,7 @@ mod tests {
         let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::from([(clan_id, stock_avant)]);
         let mut carrying = Carrying::default();
         let mut prestige = Prestige::default();
+        let mut structures: Vec<Structure> = Vec::new();
 
         execute(
             &mut sim.world,
@@ -1768,6 +1843,8 @@ mod tests {
             &mut clan_stock,
             &mut carrying,
             &mut prestige,
+            &mut structures,
+            0,
         );
 
         let stock_apres = clan_stock[&clan_id];
@@ -1780,6 +1857,90 @@ mod tests {
             phys.hunger
         );
         assert!(stock_apres <= 1e-6, "le stock, plus petit que la faim, doit être vidé entièrement");
+    }
+
+    /// « Qui bâtit » — construire consomme le stock commun et crée la
+    /// structure au foyer, au même titre qu'un autre candidat de tâche. On
+    /// teste le mécanisme (`execute` avec une tâche `Build`) plutôt qu'une
+    /// scène complète : comme pour le stock, un clan injecté à la main ne
+    /// survivrait pas à la prochaine détection de minuit.
+    #[test]
+    fn batir_consomme_le_stock_et_cree_la_structure() {
+        let mut sim = Sim::new(WorldSeed(42), 512);
+        let home = find_land(&sim);
+        let mut pos = Position { x: home.0 as f64 + 0.5, y: home.1 as f64 + 0.5 };
+        let mut phys = Physiology::default();
+        let mut behavior = Behavior {
+            task: Some(Task { kind: TaskKind::Build(StructureKind::Hut), target: home }),
+            ..Behavior::default()
+        };
+        let traits = Traits::default();
+        let mut skills = Skills::default();
+        let mut routes: BTreeMap<u64, Route> = BTreeMap::new();
+        let mut budget = PATH_REQUESTS_PER_TICK;
+        let clan_id = social::ClanId(4);
+        let stock_avant = StructureKind::Hut.cost() + 5.0; // de quoi payer, et un reste
+        let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::from([(clan_id, stock_avant)]);
+        let mut carrying = Carrying::default();
+        let mut prestige = Prestige::default();
+        let mut structures: Vec<Structure> = Vec::new();
+
+        execute(
+            &mut sim.world,
+            &mut routes,
+            &mut budget,
+            AgentId(0),
+            &mut pos,
+            &mut phys,
+            &mut behavior,
+            &[],
+            1.0,
+            &traits,
+            &mut skills,
+            Some(clan_id),
+            &mut clan_stock,
+            &mut carrying,
+            &mut prestige,
+            &mut structures,
+            0,
+        );
+
+        assert_eq!(structures.len(), 1, "une structure doit avoir été bâtie");
+        assert_eq!(structures[0].kind, StructureKind::Hut);
+        assert_eq!(structures[0].clan, clan_id);
+        assert!(
+            (clan_stock[&clan_id] - 5.0).abs() < 1e-6,
+            "le coût de la hutte doit avoir été prélevé sur le stock commun"
+        );
+
+        // Deuxième chantier identique, stock encore suffisant mais la hutte
+        // existe déjà : aucun doublon, aucun prélèvement.
+        let mut behavior2 = Behavior {
+            task: Some(Task { kind: TaskKind::Build(StructureKind::Hut), target: home }),
+            ..Behavior::default()
+        };
+        let stock_intermediaire = clan_stock[&clan_id];
+        execute(
+            &mut sim.world,
+            &mut routes,
+            &mut budget,
+            AgentId(1),
+            &mut pos,
+            &mut phys,
+            &mut behavior2,
+            &[],
+            1.0,
+            &traits,
+            &mut skills,
+            Some(clan_id),
+            &mut clan_stock,
+            &mut carrying,
+            &mut prestige,
+            &mut structures,
+            0,
+        );
+        assert_eq!(structures.len(), 1, "une hutte existe déjà : pas de doublon");
+        assert_eq!(clan_stock[&clan_id], stock_intermediaire, "no-op : le stock ne bouge pas");
     }
 
     /// Le bug réellement signalé par l'utilisateur : le client permet de

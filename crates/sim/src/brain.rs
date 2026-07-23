@@ -273,6 +273,25 @@ pub fn decide(
         }
     }
 
+    // — Bâtir (BRIEF §5.1) : le clan a mesuré qu'il désire une structure
+    //   (`structures::plan`) et son stock peut la payer. On ne bâtit que
+    //   repu (comme on explore repu) et le chantier est au foyer — le coût
+    //   se prend dans le stock commun sur place, pas à distance. Un candidat
+    //   de plus dans le softmax ; rien n'oblige à bâtir, un besoin plus
+    //   pressant peut encore l'emporter.
+    if adult
+        && let Some(clan_id) = clan
+        && let Some(view) = clan_views.get(&clan_id)
+        && let Some(kind) = view.desired
+    {
+        let comfortable = phys.hunger < 0.6 && phys.thirst < 0.6 && phys.cold < 0.4;
+        if comfortable && view.stock >= kind.cost() {
+            let target = (view.home.0.floor() as i64, view.home.1.floor() as i64);
+            let score = 0.3 * travel_discount(pos.distance_tiles(target));
+            candidates.push((TaskKind::Build(kind), target, score));
+        }
+    }
+
     // — Explorer (adultes au confort) : le drive « comprendre ». La
     //   curiosité pousse vers une cellule **jamais visitée** — huit azimuts
     //   sondés, on tire parmi ceux qui mènent à l'inconnu (et à la terre).

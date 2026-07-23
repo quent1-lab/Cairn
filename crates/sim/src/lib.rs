@@ -32,6 +32,7 @@ pub mod scenario;
 pub mod sim;
 pub mod skills;
 pub mod social;
+pub mod structures;
 pub mod tile;
 pub mod world;
 
@@ -44,6 +45,7 @@ pub use memory::Memory;
 pub use sim::{BirthRecord, DeathRecord, Sim};
 pub use skills::Skills;
 pub use social::{Clan, ClanEvent, ClanEventKind, ClanId, ClanMembership, ClanRelations, SocialGraph};
+pub use structures::{Structure, StructureKind};
 pub use tile::{Tile, TileFlags};
 pub use world::World;
 
