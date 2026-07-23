@@ -150,6 +150,16 @@ pub struct Behavior {
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Carrying(pub f32);
 
+/// Prestige accumulé, à vie — jamais plafonné, jamais relâché (BRIEF §5.1,
+/// Phase 4 « le chef »). Un seul déclencheur pour l'instant : ce qu'un agent
+/// a effectivement rapporté à son clan (`TaskKind::BringSurplusHome`, même
+/// montant que le stock reçoit — voir `sim::execute`). Un compagnon qui a
+/// nourri le groupe pendant des années garde son ascendant même le jour où
+/// il chasse moins bien qu'un jeune loup : c'est voulu, pas un oubli de
+/// décroissance — voir `social::elect_chiefs`.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Prestige(pub f32);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeathCause {
     Starvation,

@@ -35,7 +35,7 @@ use cairn_worldgen::WorldGenConfig;
 
 use crate::agent::{
     Activity, AgentId, Behavior, Carrying, DeathCause, FOREST_BONUS_C, Physiology, Position,
-    SHELTER_BONUS_C, TaskKind, WALK_TILES_PER_TICK,
+    Prestige, SHELTER_BONUS_C, TaskKind, WALK_TILES_PER_TICK,
 };
 use crate::brain::{self, AgentCtx, DELIBERATION_PERIOD};
 use crate::climate::Climate;
@@ -214,6 +214,7 @@ impl Sim {
             Skills::founder(&traits),
             ClanMembership::default(),
             Carrying::default(),
+            Prestige::default(),
         ));
         id
     }
@@ -253,6 +254,7 @@ impl Sim {
             // simplement en vivant collé à sa mère (voir `social`).
             ClanMembership::default(),
             Carrying::default(),
+            Prestige::default(),
         ));
         id
     }
@@ -405,20 +407,22 @@ impl Sim {
         let mut path_budget = PATH_REQUESTS_PER_TICK;
         let mut clan_stock: BTreeMap<ClanId, f32> =
             self.clans.iter().map(|c| (c.id, c.stock)).collect();
-        for (_, (id, pos, phys, traits, demo, behavior, mem, agent_skills, membership, carrying)) in
-            self.agents.query_mut::<(
-                &AgentId,
-                &mut Position,
-                &mut Physiology,
-                &Traits,
-                &Demographics,
-                &mut Behavior,
-                &mut Memory,
-                &mut Skills,
-                &ClanMembership,
-                &mut Carrying,
-            )>()
-        {
+        for (
+            _,
+            (id, pos, phys, traits, demo, behavior, mem, agent_skills, membership, carrying, prestige),
+        ) in self.agents.query_mut::<(
+            &AgentId,
+            &mut Position,
+            &mut Physiology,
+            &Traits,
+            &Demographics,
+            &mut Behavior,
+            &mut Memory,
+            &mut Skills,
+            &ClanMembership,
+            &mut Carrying,
+            &mut Prestige,
+        )>() {
             if demo.is_infant(time.tick) {
                 continue;
             }
@@ -441,6 +445,7 @@ impl Sim {
                 membership.0,
                 &mut clan_stock,
                 carrying,
+                prestige,
             );
             // Où que la tâche l'ait mené, l'agent note où il a mis les pieds.
             mem.note_visit(pos.tile());
@@ -619,6 +624,7 @@ fn execute(
     clan: Option<ClanId>,
     clan_stock: &mut BTreeMap<ClanId, f32>,
     carrying: &mut Carrying,
+    prestige: &mut Prestige,
 ) -> Option<Kill> {
     let task = match behavior.task {
         Some(task) => task,
@@ -724,6 +730,10 @@ fn execute(
             if let Some(clan_id) = clan {
                 *clan_stock.entry(clan_id).or_insert(0.0) += carrying.0;
             }
+            // Prestige : ce qui a nourri le clan reste acquis à celui qui
+            // l'a rapporté, à vie (voir `agent::Prestige`) — pas seulement
+            // le montant déposé ce tick, tout ce qui a jamais été rapporté.
+            prestige.0 += carrying.0;
             carrying.0 = 0.0;
             behavior.task = None;
         }
@@ -1632,6 +1642,7 @@ mod tests {
         let clan_id = social::ClanId(3);
         let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::new();
         let mut carrying = Carrying::default();
+        let mut prestige = Prestige::default();
         // Le troupeau est juste sous la main : cette scène teste la
         // mécanique de mise à mort, pas l'approche.
         let herd = HerdView { entity: hecs::Entity::DANGLING, pos: (pos.x, pos.y), population: 20.0 };
@@ -1651,6 +1662,7 @@ mod tests {
             Some(clan_id),
             &mut clan_stock,
             &mut carrying,
+            &mut prestige,
         );
 
         assert!(kill.is_some(), "le troupeau est à portée : la chasse doit réussir");
@@ -1687,6 +1699,7 @@ mod tests {
         let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::new();
         let porte_avant = 0.4;
         let mut carrying = Carrying(porte_avant);
+        let mut prestige = Prestige::default();
 
         execute(
             &mut sim.world,
@@ -1703,6 +1716,7 @@ mod tests {
             Some(clan_id),
             &mut clan_stock,
             &mut carrying,
+            &mut prestige,
         );
 
         assert_eq!(carrying.0, 0.0, "le surplus rapporté doit être entièrement déposé, plus rien porté");
@@ -1710,6 +1724,10 @@ mod tests {
             clan_stock.get(&clan_id).copied().unwrap_or(0.0),
             porte_avant,
             "le stock doit gagner exactement ce que le chasseur portait"
+        );
+        assert_eq!(
+            prestige.0, porte_avant,
+            "le prestige de qui rapporte doit croître du même montant que le stock"
         );
     }
 
@@ -1732,6 +1750,7 @@ mod tests {
         let stock_avant = 0.5; // moins que la faim : le retrait doit être partiel
         let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::from([(clan_id, stock_avant)]);
         let mut carrying = Carrying::default();
+        let mut prestige = Prestige::default();
 
         execute(
             &mut sim.world,
@@ -1748,6 +1767,7 @@ mod tests {
             Some(clan_id),
             &mut clan_stock,
             &mut carrying,
+            &mut prestige,
         );
 
         let stock_apres = clan_stock[&clan_id];

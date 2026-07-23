@@ -16,8 +16,10 @@
 //! qu'une lignée de bons chasseurs peut émerger sans qu'aucune règle ne le
 //! décrète.
 //!
-//! Phase 3 : cueillette et chasse, les deux gestes qui existent. Taille de
-//! pierre, construction, oratoire… viendront avec leurs systèmes (Phase 4+).
+//! Phase 3 : cueillette et chasse. Phase 4 : oratoire (`social::encounter`
+//! la pratique — chaque conversation est une occasion de rhétorique, pas
+//! besoin d'une tâche dédiée). Taille de pierre, construction… viendront
+//! avec leurs systèmes.
 
 use crate::demography::Traits;
 
@@ -33,6 +35,9 @@ pub const KILL_PRACTICE_BOOST: f32 = 30.0;
 pub struct Skills {
     pub foraging: f32,
     pub hunting: f32,
+    /// Art de convaincre — l'un des deux facteurs du chef (BRIEF §5.1 :
+    /// « chef : max(oratoire × prestige) »), voir `social::elect_chiefs`.
+    pub oratory: f32,
 }
 
 impl Skills {
@@ -41,6 +46,7 @@ impl Skills {
         Self {
             foraging: 0.5 * forage_cap(traits),
             hunting: 0.5 * hunt_cap(traits),
+            oratory: 0.5 * oratory_cap(traits),
         }
     }
 }
@@ -53,6 +59,13 @@ pub fn forage_cap(traits: &Traits) -> f32 {
 /// Plafond de chasse : la force et l'endurance font le chasseur.
 pub fn hunt_cap(traits: &Traits) -> f32 {
     0.4 + 0.3 * (traits.strength + traits.endurance)
+}
+
+/// Plafond d'oratoire : la sociabilité fait l'orateur — même trait qui pousse
+/// déjà `TaskKind::Socialize` (Phase 3), réutilisé plutôt qu'un nouveau trait
+/// inventé pour l'occasion.
+pub fn oratory_cap(traits: &Traits) -> f32 {
+    0.4 + 0.6 * traits.sociability
 }
 
 /// Une heure de pratique (ou `hours` d'équivalent, pour les gestes rares).
@@ -94,6 +107,10 @@ mod tests {
         let costaud = Traits { strength: 1.0, endurance: 1.0, ..Traits::default() };
         assert!(hunt_cap(&costaud) > hunt_cap(&Traits::default()));
         assert!(hunt_cap(&costaud) <= 1.0);
+        let sociable = Traits { sociability: 1.0, ..Traits::default() };
+        let solitaire = Traits { sociability: 0.0, ..Traits::default() };
+        assert!(oratory_cap(&sociable) > oratory_cap(&solitaire));
+        assert!(oratory_cap(&sociable) <= 1.0);
     }
 
     #[test]
@@ -102,5 +119,6 @@ mod tests {
         let skills = Skills::founder(&traits);
         assert!((skills.foraging - 0.5 * forage_cap(&traits)).abs() < 1e-6);
         assert!(skills.hunting < hunt_cap(&traits));
+        assert!((skills.oratory - 0.5 * oratory_cap(&traits)).abs() < 1e-6);
     }
 }

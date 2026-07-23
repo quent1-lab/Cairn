@@ -205,14 +205,50 @@
 //! prêt à être consulté par un futur incrément (structures : où a-t-on le
 //! droit de bâtir ?) sans qu'aucun changement supplémentaire à ce module ne
 //! soit nécessaire.
+//!
+//! ## Le chef (incrément 8)
+//!
+//! BRIEF §5.1 : « chef : `max(oratoire × prestige)`, contestable ». Deux
+//! facteurs, mesurés séparément, jamais un rôle attribué directement :
+//!
+//! - **Oratoire** (`skills::Skills::oratory`) : une compétence de plus, avec
+//!   le même patron que cueillette/chasse (plafond conditionné par un trait
+//!   — ici `sociabilité`, déjà le trait qui pousse `TaskKind::Socialize`, pas
+//!   un nouveau trait inventé pour l'occasion — et courbe saturante par la
+//!   pratique). Sa pratique n'a pas besoin d'une tâche dédiée : chaque
+//!   conversation (`encounter`, la même passe qui renforce les liens
+//!   d'affinité) est déjà l'occasion de la pratiquer.
+//! - **Prestige** (`agent::Prestige`) : contrairement aux compétences, ne
+//!   sature ni ne décroît — une réserve d'estime accumulée à vie. Un seul
+//!   déclencheur pour cet incrément : ce qu'un agent a effectivement
+//!   rapporté à son clan (`TaskKind::BringSurplusHome`, voir le commentaire
+//!   de module sur le stock commun) grossit son prestige du même montant
+//!   que le stock. Un compagnon qui a nourri le groupe pendant des années
+//!   garde son ascendant même le jour où il chasse moins bien qu'un jeune
+//!   loup — voulu, pas un oubli de décroissance.
+//!
+//! `elect_chiefs` (appelée en dernier dans la passe quotidienne, après que
+//! les clans et leurs relations du jour sont connus) désigne, pour chaque
+//! clan, le membre qui maximise `oratoire × prestige` — ties départagées
+//! par le plus petit `AgentId`, même convention que `claim_at`. **La
+//! « contestation » n'est pas une mécanique à part** : puisque le calcul est
+//! refait en entier chaque jour à partir des scores du jour, la position
+//! change de mains dès qu'un autre membre dépasse le titulaire — exactement
+//! le même principe que la détection de clan elle-même (recalcul complet,
+//! pas d'état modifié incrémentalement). **Portée limitée** : comme la
+//! tension et le territoire, être chef ne déclenche encore aucun
+//! comportement particulier (pas de privilège, pas d'autorité) — le titre
+//! est mesurable et observable, prêt pour un futur système qui voudrait s'en
+//! servir.
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::agent::{AgentId, Position};
+use crate::agent::{AgentId, Position, Prestige};
 use crate::fauna::Herd;
-use crate::demography::{Kinship, find_human};
+use crate::demography::{Kinship, Traits, find_human};
 use crate::memory::TALK_RADIUS_TILES;
 use crate::sim::Sim;
+use crate::skills::{self, Skills};
 use cairn_core::km_to_tiles;
 
 // — Affinités —
@@ -344,6 +380,12 @@ pub struct Clan {
     /// abandonné — aucune règle de redistribution n'est nécessaire pour un
     /// cas déjà rare.
     pub stock: f32,
+    /// Le membre qui maximise `oratoire × prestige` (BRIEF §5.1, voir le
+    /// commentaire de module « Le chef »). Provisoire à la construction du
+    /// clan (le plus petit membre, un choix arbitraire mais déterministe) —
+    /// `elect_chiefs`, appelée juste après dans la même passe quotidienne,
+    /// le recalcule toujours avant que quiconque d'autre ne lise `sim.clans`.
+    pub chief: AgentId,
 }
 
 /// Instantané minimal d'un clan pour la délibération (`brain::decide`) : ce
@@ -500,6 +542,10 @@ pub(crate) fn encounter(sim: &mut Sim) {
         .collect();
     views.sort_unstable_by_key(|v| v.id.0);
 
+    // Qui a eu au moins une conversation cette passe : chacun pratique un
+    // peu d'oratoire (voir plus bas), qu'il ait parlé une fois ou dix — pas
+    // besoin d'un compte exact, juste « a-t-il eu l'occasion de parler ? ».
+    let mut spoke: BTreeSet<u64> = BTreeSet::new();
     for i in 0..views.len() {
         for j in (i + 1)..views.len() {
             let (a, b) = (&views[i], &views[j]);
@@ -509,6 +555,19 @@ pub(crate) fn encounter(sim: &mut Sim) {
             }
             let rate = if are_kin(a.id, &a.kin, b.id, &b.kin) { KIN_GAIN } else { ENCOUNTER_GAIN };
             sim.social.reinforce(a.id, b.id, rate);
+            spoke.insert(a.id.0);
+            spoke.insert(b.id.0);
+        }
+    }
+    if spoke.is_empty() {
+        return;
+    }
+    // Pas de nouvelle tâche de délibération pour ça : parler, c'est déjà
+    // pratiquer la rhétorique — même conversation, même passe, un candidat
+    // de moins à ajouter au softmax de `brain::decide`.
+    for (_, (id, traits, skills)) in sim.agents.query_mut::<(&AgentId, &Traits, &mut Skills)>() {
+        if spoke.contains(&id.0) {
+            skills::practice(&mut skills.oratory, skills::oratory_cap(traits), 1.0);
         }
     }
 }
@@ -648,6 +707,34 @@ pub(crate) fn daily(sim: &mut Sim) {
     sim.social.cap_bonds(MAX_BONDS_PER_AGENT);
     detect_clans(sim);
     update_relations(sim);
+    elect_chiefs(sim);
+}
+
+/// Désigne le chef de chaque clan (voir le commentaire de module « Le
+/// chef ») : le membre qui maximise `oratoire × prestige`, ex æquo
+/// départagés par le plus petit `AgentId` — même convention que `claim_at`.
+/// Recalculé en entier à partir des scores du jour, jamais modifié
+/// incrémentalement : c'est ce recalcul, et lui seul, qui rend la position
+/// « contestable » (BRIEF §5.1) sans mécanique de contestation dédiée.
+fn elect_chiefs(sim: &mut Sim) {
+    if sim.clans.is_empty() {
+        return;
+    }
+    let scores: BTreeMap<u64, f32> = sim
+        .agents
+        .query::<(&AgentId, &Skills, &Prestige)>()
+        .iter()
+        .map(|(_, (id, skills, prestige))| (id.0, skills.oratory * prestige.0))
+        .collect();
+    for clan in &mut sim.clans {
+        if let Some(&chief) = clan.members.iter().max_by(|a, b| {
+            let sa = scores.get(&a.0).copied().unwrap_or(0.0);
+            let sb = scores.get(&b.0).copied().unwrap_or(0.0);
+            sa.total_cmp(&sb).then(b.0.cmp(&a.0)) // égalité : plus petit AgentId l'emporte
+        }) {
+            clan.chief = chief;
+        }
+    }
 }
 
 /// Le gibier disponible (somme des effectifs de troupeaux, la même notion
@@ -807,6 +894,7 @@ fn detect_clans(sim: &mut Sim) {
                     members: cluster.clone(),
                     home: *home,
                     stock: clan.stock,
+                    chief: clan.chief, // provisoire : `elect_chiefs` le recalcule juste après
                 });
                 true
             } else {
@@ -834,7 +922,14 @@ fn detect_clans(sim: &mut Sim) {
             kind: ClanEventKind::Formed,
             members: cluster.len(),
         });
-        next.push(Clan { id, founded_tick: sim.time.tick, members: cluster, home, stock: 0.0 });
+        next.push(Clan {
+            id,
+            founded_tick: sim.time.tick,
+            chief: *cluster.iter().next().unwrap(), // provisoire, voir la doc du champ
+            members: cluster,
+            home,
+            stock: 0.0,
+        });
     }
     next.sort_by_key(|c| c.id.0);
 
@@ -1053,6 +1148,7 @@ mod tests {
             members: (0..10u64).map(AgentId).collect(),
             home: home_a,
             stock: 0.0,
+            chief: AgentId(0),
         });
         sim.clans.push(Clan {
             id: ClanId(2),
@@ -1060,6 +1156,7 @@ mod tests {
             members: (100..110u64).map(AgentId).collect(),
             home: home_b,
             stock: 0.0,
+            chief: AgentId(100),
         });
         let midpoint = ((home_a.0 + home_b.0) / 2.0, (home_a.1 + home_b.1) / 2.0);
         sim.spawn_herd(midpoint.0, midpoint.1, herd_population);
@@ -1134,6 +1231,7 @@ mod tests {
             members: (0..members as u64).map(|m| AgentId(id * 1000 + m)).collect(),
             home,
             stock: 0.0,
+            chief: AgentId(id * 1000),
         }
     }
 
@@ -1193,5 +1291,105 @@ mod tests {
         let midpoint = (500.0, 0.0);
         assert_eq!(claim_at(midpoint, &[a.clone(), b.clone()]), Some(ClanId(1)));
         assert_eq!(claim_at(midpoint, &[b, a]), Some(ClanId(1)), "le résultat ne doit pas dépendre de l'ordre du slice");
+    }
+
+    fn oratory_of(sim: &Sim, id: AgentId) -> f32 {
+        sim.agents
+            .query::<(&AgentId, &Skills)>()
+            .iter()
+            .find(|(_, (i, _))| i.0 == id.0)
+            .map(|(_, (_, s))| s.oratory)
+            .expect("agent introuvable")
+    }
+
+    /// Le cœur de l'incrément 8 côté compétence : parler (`encounter`, la
+    /// même passe qui renforce les liens d'affinité) pratique l'oratoire —
+    /// sans tâche dédiée, sans candidat de plus dans `brain::decide`.
+    #[test]
+    fn parler_pratique_l_oratoire() {
+        let mut sim = Sim::new(WorldSeed(1), 64);
+        let a = sim.spawn_agent(0.0, 0.0);
+        sim.spawn_agent(1.0, 0.0); // à portée de conversation de `a`
+        let before = oratory_of(&sim, a);
+        for _ in 0..30 {
+            encounter(&mut sim);
+        }
+        assert!(oratory_of(&sim, a) > before, "trente occasions de parler doivent faire progresser l'oratoire");
+    }
+
+    /// Contre-épreuve : un agent isolé, jamais à portée de qui que ce soit,
+    /// ne pratique jamais l'oratoire — la compétence se forge en parlant
+    /// pour de vrai, pas par simple écoulement du temps.
+    #[test]
+    fn un_agent_isole_ne_pratique_jamais_l_oratoire() {
+        let mut sim = Sim::new(WorldSeed(1), 64);
+        let lonely = sim.spawn_agent(0.0, 0.0);
+        sim.spawn_agent(50_000.0, 0.0); // bien au-delà de la portée de conversation
+        let before = oratory_of(&sim, lonely);
+        for _ in 0..30 {
+            encounter(&mut sim);
+        }
+        assert_eq!(oratory_of(&sim, lonely), before, "sans personne à portée, l'oratoire ne doit pas bouger");
+    }
+
+    fn set_scores(sim: &mut Sim, id: AgentId, oratory: f32, prestige: f32) {
+        for (_, (agent_id, skills, agent_prestige)) in
+            sim.agents.query_mut::<(&AgentId, &mut Skills, &mut Prestige)>()
+        {
+            if agent_id.0 == id.0 {
+                skills.oratory = oratory;
+                agent_prestige.0 = prestige;
+            }
+        }
+    }
+
+    /// Le cœur de l'incrément 8 : le chef est celui qui maximise
+    /// `oratoire × prestige`, jamais le seul plus prestigieux ou le seul
+    /// meilleur orateur pris isolément.
+    #[test]
+    fn le_chef_est_celui_qui_maximise_oratoire_fois_prestige() {
+        let mut sim = Sim::new(WorldSeed(1), 64);
+        let low = sim.spawn_agent(0.0, 0.0);
+        let high = sim.spawn_agent(0.0, 0.0);
+        let silent_but_prestigious = sim.spawn_agent(0.0, 0.0);
+        set_scores(&mut sim, low, 0.3, 1.0); // score 0,3
+        set_scores(&mut sim, high, 0.5, 2.0); // score 1,0 — doit gagner
+        set_scores(&mut sim, silent_but_prestigious, 0.0, 100.0); // score nul malgré un immense prestige : sans oratoire, on ne mène pas
+        sim.clans.push(Clan {
+            id: ClanId(1),
+            founded_tick: 0,
+            members: [low, high, silent_but_prestigious].into_iter().collect(),
+            home: (0.0, 0.0),
+            stock: 0.0,
+            chief: low, // valeur de départ arbitraire : doit changer
+        });
+
+        elect_chiefs(&mut sim);
+
+        assert_eq!(sim.clans[0].chief, high, "le membre au produit oratoire×prestige le plus élevé doit être élu");
+    }
+
+    /// Égalité stricte de score : départagée par le plus petit `AgentId`,
+    /// même convention que `claim_at` — le déterminisme du projet ne doit
+    /// jamais dépendre d'un tirage arbitraire.
+    #[test]
+    fn l_egalite_de_score_est_departagee_par_le_plus_petit_agent_id() {
+        let mut sim = Sim::new(WorldSeed(1), 64);
+        let a = sim.spawn_agent(0.0, 0.0);
+        let b = sim.spawn_agent(0.0, 0.0);
+        set_scores(&mut sim, a, 0.4, 1.0);
+        set_scores(&mut sim, b, 0.4, 1.0);
+        sim.clans.push(Clan {
+            id: ClanId(1),
+            founded_tick: 0,
+            members: [a, b].into_iter().collect(),
+            home: (0.0, 0.0),
+            stock: 0.0,
+            chief: b,
+        });
+
+        elect_chiefs(&mut sim);
+
+        assert_eq!(sim.clans[0].chief, a, "égalité stricte : le plus petit AgentId doit l'emporter");
     }
 }
