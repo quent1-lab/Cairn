@@ -297,10 +297,11 @@ const COHESION_THRESHOLD: f32 = 0.28;
 /// scène de calibrage, voir `sim::tests::un_clan_emerge_sans_regle_explicite`
 /// — une seule jambe d'errance ou d'exploration dépasse déjà les 120 m de
 /// portée de conversation, et rien ne ramène la population vers un point fixe).
-/// `pub(crate)` : c'est aussi le rayon au-delà duquel `brain::decide` tire un
-/// membre vers le foyer de son clan — même seuil des deux côtés, pour que
-/// l'attraction comportementale et le critère de détection se répondent.
-pub(crate) const RESIDENCE_RADIUS_TILES: f64 = km_to_tiles(4.5);
+/// C'est aussi le rayon au-delà duquel `brain::decide` tire un membre vers le
+/// foyer de son clan — même seuil des deux côtés, pour que l'attraction
+/// comportementale et le critère de détection se répondent. `pub` : le client
+/// s'en sert pour dessiner l'étendue du territoire diffusé (`claim_at`).
+pub const RESIDENCE_RADIUS_TILES: f64 = km_to_tiles(4.5);
 /// Fraction des membres qui doivent être dans ce rayon : pas tous — un
 /// chasseur ou un éclaireur temporairement loin reste du clan. En dessous de
 /// cette proportion, le groupe n'est plus « co-résident », il est dispersé.

@@ -103,14 +103,35 @@ fn main() {
         fill_square(&mut buf, sx, sy, s, activity_rgb(beh.activity));
     }
 
-    // Foyers de clan (Phase 4) : un contour carré (le buffer RGBA brut ne
-    // prête pas à un cercle sans plus d'outillage) à la position de
-    // `Clan::home` — vérifie que la géométrie et la présence sont bonnes ;
-    // la couleur par clan, elle, ne s'exerce que dans le vrai rendu canvas
-    // (`App::draw_entities`), vérifiée en navigateur.
+    // — La couche « clan » (Phase 4), même contenu que `App::draw_entities`
+    //   du vrai client, transposé sur le buffer RGBA brut pour vérifier la
+    //   géométrie hors navigateur (les couleurs HSL par clan, elles, ne
+    //   s'exercent qu'au canvas). Territoire, tension, foyer, structures.
+    let terr_r = cairn_sim::social::RESIDENCE_RADIUS_TILES * scale;
     for clan in &sim.clans {
         let (sx, sy) = project(clan.home.0, clan.home.1);
-        stroke_square(&mut buf, sx, sy, (scale * 12.0).clamp(12.0, 80.0), [255, 255, 255]);
+        stroke_circle(&mut buf, sx, sy, terr_r, [110, 140, 130]); // territoire
+        stroke_square(&mut buf, sx, sy, (scale * 12.0).clamp(12.0, 80.0), [255, 255, 255]); // foyer
+    }
+    for i in 0..sim.clans.len() {
+        for j in (i + 1)..sim.clans.len() {
+            let t = sim.clan_relations.tension_between(sim.clans[i].id, sim.clans[j].id);
+            if t < 0.05 {
+                continue;
+            }
+            let (ax, ay) = project(sim.clans[i].home.0, sim.clans[i].home.1);
+            let (bx, by) = project(sim.clans[j].home.0, sim.clans[j].home.1);
+            draw_line(&mut buf, ax, ay, bx, by, [224, 80, 58]); // tension
+        }
+    }
+    for st in &sim.structures {
+        let (bx, by) = project(st.pos.0, st.pos.1);
+        let (rgb, off) = match st.kind {
+            cairn_sim::StructureKind::Hut => ([169, 115, 62], (-8.0, -6.0)),
+            cairn_sim::StructureKind::Granary => ([216, 178, 74], (8.0, -6.0)),
+            cairn_sim::StructureKind::Palisade => ([154, 160, 166], (0.0, 9.0)),
+        };
+        fill_square(&mut buf, bx + off.0, by + off.1, (scale * 4.0).clamp(5.0, 12.0), rgb);
     }
     println!("clans : {} actif(s)", sim.clans.len());
     {
@@ -184,6 +205,40 @@ fn stroke_square(buf: &mut [u8], cx: f64, cy: f64, size: f64, rgb: [u8; 3]) {
         put(cxi + d, cyi + half);
         put(cxi - half, cyi + d);
         put(cxi + half, cyi + d);
+    }
+}
+
+/// Peint le contour d'un cercle centré sur (cx, cy) par pas angulaires — de
+/// quoi vérifier l'étendue d'un territoire dans le PNG (le buffer brut n'a
+/// pas de primitive `arc`, contrairement au canvas du vrai client).
+fn stroke_circle(buf: &mut [u8], cx: f64, cy: f64, r: f64, rgb: [u8; 3]) {
+    if r < 1.0 {
+        return;
+    }
+    let steps = (r * 6.5).clamp(64.0, 4096.0) as usize;
+    for k in 0..steps {
+        let a = k as f64 / steps as f64 * std::f64::consts::TAU;
+        let (x, y) = ((cx + a.cos() * r) as i64, (cy + a.sin() * r) as i64);
+        if x < 0 || y < 0 || x >= W as i64 || y >= H as i64 {
+            continue;
+        }
+        let o = (y as usize * W + x as usize) * 4;
+        buf[o..o + 4].copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+    }
+}
+
+/// Trace un segment (cx0,cy0)→(cx1,cy1) — Bresenham simplifié par pas.
+fn draw_line(buf: &mut [u8], x0: f64, y0: f64, x1: f64, y1: f64, rgb: [u8; 3]) {
+    let (dx, dy) = (x1 - x0, y1 - y0);
+    let steps = dx.hypot(dy).ceil().max(1.0) as usize;
+    for k in 0..=steps {
+        let t = k as f64 / steps as f64;
+        let (x, y) = ((x0 + dx * t) as i64, (y0 + dy * t) as i64);
+        if x < 0 || y < 0 || x >= W as i64 || y >= H as i64 {
+            continue;
+        }
+        let o = (y as usize * W + x as usize) * 4;
+        buf[o..o + 4].copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
     }
 }
 

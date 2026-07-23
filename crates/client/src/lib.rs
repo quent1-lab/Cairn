@@ -26,7 +26,7 @@ use cairn_core::WorldSeed;
 use cairn_core::scale::{km_to_tiles, tiles_to_km};
 use cairn_sim::{
     Activity, AgentId, Behavior, DeathCause, Demographics, FaunaId, Herd, Memory, Pack, Position,
-    Sex, Sim, Skills,
+    Sex, Sim, Skills, StructureKind,
 };
 use cairn_worldgen::{HumidityConfig, WorldGenConfig};
 use wasm_bindgen::prelude::*;
@@ -463,16 +463,54 @@ impl App {
             ((wx - cx) * scale + w / 2.0, (wy - cy) * scale + h / 2.0)
         };
 
-        // Foyers de clan (Phase 4) : le territoire au sens le plus simple,
-        // un point qui attire (voir `Clan::home`) — dessiné en premier,
-        // sous les agents, comme un repère de fond plutôt qu'une entité.
-        // Une couleur par `ClanId` : le nombre de clans n'est pas borné a
-        // priori, donc pas de palette figée — angle d'or pour répartir les
-        // teintes sur le cercle même si beaucoup de clans coexistent.
+        // — La couche « clan » (Phase 4), dessinée en premier, sous les
+        //   entités, comme un fond : territoire diffusé, tensions, foyers,
+        //   structures. Une couleur par `ClanId` (angle d'or, cf. `clan_color`).
+        let to_screen =
+            |wx: f64, wy: f64| ((wx - cx) * scale + w / 2.0, (wy - cy) * scale + h / 2.0);
+
+        // Territoire diffusé (incrément 7) : l'étendue du champ `claim_at`
+        // autour de chaque foyer — un disque de rayon `RESIDENCE_RADIUS_TILES`,
+        // tracé faiblement pour rester un fond. Là où deux disques se
+        // recouvrent, c'est la zone que les clans se disputent.
+        let terr_r = cairn_sim::social::RESIDENCE_RADIUS_TILES * scale;
+        self.ctx.set_line_width(1.0);
+        self.ctx.set_global_alpha(0.28);
+        for clan in &self.sim.clans {
+            let (sx, sy) = to_screen(clan.home.0, clan.home.1);
+            self.ctx.set_stroke_style_str(&clan_color(clan.id));
+            self.ctx.begin_path();
+            self.ctx.arc(sx, sy, terr_r, 0.0, std::f64::consts::TAU).expect("arc");
+            self.ctx.stroke();
+        }
+        self.ctx.set_global_alpha(1.0);
+
+        // Tensions inter-clans (incrément 6) : un trait rouge entre deux
+        // foyers, d'autant plus épais et opaque que la tension est vive.
+        self.ctx.set_stroke_style_str("#e0503a");
+        for i in 0..self.sim.clans.len() {
+            for j in (i + 1)..self.sim.clans.len() {
+                let (a, b) = (&self.sim.clans[i], &self.sim.clans[j]);
+                let t = self.sim.clan_relations.tension_between(a.id, b.id);
+                if t < 0.05 {
+                    continue;
+                }
+                let (ax, ay) = to_screen(a.home.0, a.home.1);
+                let (bx, by) = to_screen(b.home.0, b.home.1);
+                self.ctx.set_global_alpha(f64::from(t).clamp(0.2, 0.9));
+                self.ctx.set_line_width(1.0 + 3.0 * f64::from(t));
+                self.ctx.begin_path();
+                self.ctx.move_to(ax, ay);
+                self.ctx.line_to(bx, by);
+                self.ctx.stroke();
+            }
+        }
+        self.ctx.set_global_alpha(1.0);
+
+        // Foyers de clan : un cercle plein au centre du territoire.
         self.ctx.set_line_width(2.0);
         for clan in &self.sim.clans {
-            let (sx, sy) =
-                ((clan.home.0 - cx) * scale + w / 2.0, (clan.home.1 - cy) * scale + h / 2.0);
+            let (sx, sy) = to_screen(clan.home.0, clan.home.1);
             if !visible(sx, sy) {
                 continue;
             }
@@ -481,6 +519,22 @@ impl App {
             self.ctx.begin_path();
             self.ctx.arc(sx, sy, r, 0.0, std::f64::consts::TAU).expect("arc");
             self.ctx.stroke();
+        }
+
+        // Structures bâties (incrément 9) : un petit carré coloré par type au
+        // lieu où il a été élevé (hutte brune, grenier or, palissade grise).
+        // Elles partagent le foyer du clan : on les décale par type pour
+        // qu'un clan qui en possède plusieurs les montre toutes distinctes.
+        for st in &self.sim.structures {
+            let (bx, by) = to_screen(st.pos.0, st.pos.1);
+            let (ox, oy) = structure_offset(st.kind);
+            let (sx, sy) = (bx + ox, by + oy);
+            if !visible(sx, sy) {
+                continue;
+            }
+            let sz = (scale * 4.0).clamp(5.0, 12.0);
+            self.ctx.set_fill_style_str(structure_color(st.kind));
+            self.ctx.fill_rect(sx - sz / 2.0, sy - sz / 2.0, sz, sz);
         }
 
         // Gibier (fauve) : la taille suit l'effectif du troupeau.
@@ -679,7 +733,7 @@ impl App {
             return;
         }
         let tick = self.sim.time.tick;
-        let mut lines = Vec::with_capacity(self.sim.clans.len());
+        let mut lines = Vec::new();
         for clan in &self.sim.clans {
             let age_days = tick.saturating_sub(clan.founded_tick) / cairn_core::TICKS_PER_DAY;
             let cap = cairn_sim::sim::STOCK_CAP_PER_MEMBER * clan.members.len() as f32;
@@ -689,6 +743,37 @@ impl App {
                 clan.members.len(),
                 clan.stock,
             ));
+
+            // Chef (incrément 8) + tension maximale avec un voisin (incrément 6).
+            let max_tension = self
+                .sim
+                .clans
+                .iter()
+                .filter(|o| o.id != clan.id)
+                .map(|o| self.sim.clan_relations.tension_between(clan.id, o.id))
+                .fold(0.0_f32, f32::max);
+            let mut second = format!("     chef #{}", clan.chief.0);
+            if max_tension >= 0.05 {
+                second.push_str(&format!("   tension max {max_tension:.2}"));
+            }
+            // Ce que le clan cherche à bâtir (incrément 9), s'il désire qqch.
+            if let Some(kind) = clan.desired {
+                second.push_str(&format!("   veut {}", structure_name(kind)));
+            }
+            lines.push(second);
+
+            // Structures possédées (incrément 9), triées et comptées par type.
+            let mut owned: Vec<&str> = self
+                .sim
+                .structures
+                .iter()
+                .filter(|s| s.clan == clan.id)
+                .map(|s| structure_name(s.kind))
+                .collect();
+            owned.sort_unstable();
+            if !owned.is_empty() {
+                lines.push(format!("     structures : {}", owned.join(", ")));
+            }
         }
         el.set_text_content(Some(&lines.join("\n")));
     }
@@ -920,6 +1005,34 @@ fn sex_age_color(sex: Sex, adult: bool) -> &'static str {
 fn clan_color(id: cairn_sim::ClanId) -> String {
     let hue = (id.0.wrapping_mul(137) % 360) as f64;
     format!("hsl({hue}, 70%, 55%)")
+}
+
+/// Couleur du marqueur d'une structure sur la carte, par type.
+fn structure_color(kind: StructureKind) -> &'static str {
+    match kind {
+        StructureKind::Hut => "#a9733e",      // hutte : brun terre
+        StructureKind::Granary => "#d8b24a",  // grenier : or/paille
+        StructureKind::Palisade => "#9aa0a6", // palissade : bois grisé
+    }
+}
+
+/// Petit décalage écran (px) par type, pour ne pas empiler au foyer les
+/// structures d'un même clan — un triangle hutte/grenier/palissade.
+fn structure_offset(kind: StructureKind) -> (f64, f64) {
+    match kind {
+        StructureKind::Hut => (-8.0, -6.0),
+        StructureKind::Granary => (8.0, -6.0),
+        StructureKind::Palisade => (0.0, 9.0),
+    }
+}
+
+/// Nom lisible d'une structure, pour le panneau texte.
+fn structure_name(kind: StructureKind) -> &'static str {
+    match kind {
+        StructureKind::Hut => "hutte",
+        StructureKind::Granary => "grenier",
+        StructureKind::Palisade => "palissade",
+    }
 }
 
 /// Affiche ou masque un élément par id (`display: grid`/`none`) — sert aux
