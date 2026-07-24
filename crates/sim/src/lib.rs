@@ -76,4 +76,6 @@ pub(crate) mod salt {
     pub const EXPLORE: u64 = 1009;
     /// Immigration de gibier : tirage du site candidat quotidien.
     pub const IMMIGRATION: u64 = 1010;
+    /// Immigration de prédateurs : réensemencement des meutes près du gibier.
+    pub const PREDATOR_IMMIGRATION: u64 = 1011;
 }

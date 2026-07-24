@@ -635,6 +635,26 @@ impl Sim {
             {
                 self.spawn_herd(x, y, fauna::HERD_START);
             }
+            // Symétrique : sans réensemencement des meutes, une extinction de
+            // prédateurs (boom-bust de Lotka-Volterra) est définitive et le
+            // gibier explose sans frein (mesuré sur un run long — voir
+            // `fauna`). Les prédateurs suivent leur proie : ancrés sur un
+            // troupeau, pas sur un humain.
+            let pack_positions: Vec<(f64, f64)> = self
+                .fauna
+                .query::<(&Pack, &Position)>()
+                .iter()
+                .map(|(_, (_, pos))| (pos.x, pos.y))
+                .collect();
+            if let Some((x, y)) = fauna::daily_predator_immigration(
+                &herd_positions,
+                &pack_positions,
+                &mut self.world,
+                seed,
+                time,
+            ) {
+                self.spawn_pack(x, y, fauna::PACK_START);
+            }
         }
 
         // 5. Écologie quotidienne, à minuit.

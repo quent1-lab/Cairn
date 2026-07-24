@@ -530,6 +530,73 @@ pub fn daily_immigration(
     is_valid_immigration_site(candidate, &tile, herds).then_some(candidate)
 }
 
+// — Immigration de prédateurs —
+//
+// Le pendant, longtemps manquant, de l'immigration de gibier — sans lui, un
+// simple boom-bust de Lotka-Volterra qui éteint les meutes (normal, et
+// récurrent) était **définitif** : rien ne faisait revenir un prédateur
+// depuis zéro, alors que le gibier, lui, réapparaissait. Mesuré sur un run
+// long en tempéré (voir la Chronique) : prédateurs éteints au 6ᵉ mois, puis
+// gibier explosant de 495 à 66 800 têtes faute de tout frein. La symétrie
+// règle ça : les prédateurs suivent leur proie, donc ils réapparaissent
+// **près d'un troupeau** (leur garde-manger) plutôt que près d'un humain —
+// et loin des meutes déjà là, exactement comme le gibier apparaît loin des
+// troupeaux déjà là (auto-limitation : une zone déjà tenue par des meutes
+// n'a jamais de site valide, pas besoin d'écrire « seulement si rare »).
+
+/// Chance qu'un site de meute candidat soit tenté par jour. Plus basse que
+/// pour le gibier (0,15) : les prédateurs sont rares par nature, et on ne
+/// veut pas qu'ils sur-répriment la proie ; assez haute tout de même pour
+/// qu'une extinction se répare en quelques semaines, avant que le gibier
+/// n'ait le temps d'exploser.
+const PREDATOR_IMMIGRATION_CHANCE_PER_DAY: f32 = 0.06;
+/// Le site est tiré autour d'un troupeau (la proie) pris au hasard, entre ces
+/// deux rayons : près de son garde-manger, mais pas dessus.
+const PREDATOR_IMMIGRATION_MIN_RADIUS_TILES: f64 = km_to_tiles(0.5);
+const PREDATOR_IMMIGRATION_MAX_RADIUS_TILES: f64 = km_to_tiles(2.0);
+/// Aucune meute ne doit déjà se trouver à moins de cette distance du site —
+/// c'est ce qui rend le mécanisme auto-limitant (même rôle que la distance
+/// aux troupeaux pour le gibier).
+const PREDATOR_IMMIGRATION_MIN_PACK_DISTANCE_TILES: f64 = km_to_tiles(3.0);
+
+/// Le site `candidate` convient-il à une meute ? Fonction pure : praticable,
+/// et loin de toute meute existante. Pas de test de biomasse — un prédateur
+/// ne broute pas ; la présence de proie est garantie par l'ancrage sur un
+/// troupeau dans [`daily_predator_immigration`].
+fn is_valid_pack_site(candidate: (f64, f64), tile: &crate::Tile, packs: &[(f64, f64)]) -> bool {
+    if !tile.is_walkable() {
+        return false;
+    }
+    !packs.iter().any(|&(px, py)| {
+        let d2 = (px - candidate.0).powi(2) + (py - candidate.1).powi(2);
+        d2 < PREDATOR_IMMIGRATION_MIN_PACK_DISTANCE_TILES * PREDATOR_IMMIGRATION_MIN_PACK_DISTANCE_TILES
+    })
+}
+
+/// Passe quotidienne : tire un site près d'un troupeau au hasard, le valide,
+/// et renvoie sa position si une meute doit y apparaître (au crate appelant
+/// de la faire naître). Renvoie `None` s'il n'y a aucun gibier — sans proie,
+/// pas de prédateur, ce qui évite au passage de peupler un monde vide.
+pub fn daily_predator_immigration(
+    herds: &[(f64, f64)],
+    packs: &[(f64, f64)],
+    world: &mut World,
+    seed: WorldSeed,
+    time: SimTime,
+) -> Option<(f64, f64)> {
+    let mut rng = Pcg32::new(seed.derive(salt::PREDATOR_IMMIGRATION) ^ splitmix64(time.tick), 0);
+    if herds.is_empty() || rng.next_f32() >= PREDATOR_IMMIGRATION_CHANCE_PER_DAY {
+        return None;
+    }
+    let anchor = herds[(rng.next_u32() as usize) % herds.len()];
+    let angle = rng.next_f64() * std::f64::consts::TAU;
+    let r = PREDATOR_IMMIGRATION_MIN_RADIUS_TILES
+        + rng.next_f64() * (PREDATOR_IMMIGRATION_MAX_RADIUS_TILES - PREDATOR_IMMIGRATION_MIN_RADIUS_TILES);
+    let candidate = (anchor.0 + angle.cos() * r, anchor.1 + angle.sin() * r);
+    let tile = world.tile(candidate.0.floor() as i64, candidate.1.floor() as i64);
+    is_valid_pack_site(candidate, &tile, packs).then_some(candidate)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -717,6 +784,63 @@ mod tests {
         for day in 0..500u64 {
             let time = SimTime { tick: day * 24 };
             assert!(daily_immigration(&[], &[], &mut world, WorldSeed(42), time).is_none());
+        }
+    }
+
+    // — Immigration de prédateurs (symétrie avec le gibier) —
+
+    #[test]
+    fn un_site_de_meute_sans_meute_voisine_est_valide() {
+        let mut world = World::new(WorldSeed(42), 64);
+        let land = find_lush(&mut world, (0, 0));
+        let tile = world.tile(land.0, land.1);
+        let candidate = (land.0 as f64 + 0.5, land.1 as f64 + 0.5);
+        assert!(is_valid_pack_site(candidate, &tile, &[]), "terre sans meute voisine : site valide");
+    }
+
+    #[test]
+    fn une_meute_proche_invalide_le_site_pas_une_lointaine() {
+        let mut world = World::new(WorldSeed(42), 64);
+        let land = find_lush(&mut world, (0, 0));
+        let tile = world.tile(land.0, land.1);
+        let candidate = (land.0 as f64 + 0.5, land.1 as f64 + 0.5);
+        assert!(
+            !is_valid_pack_site(candidate, &tile, &[(candidate.0 + 10.0, candidate.1)]),
+            "une meute à 10 tuiles doit invalider le site"
+        );
+        assert!(
+            is_valid_pack_site(candidate, &tile, &[(candidate.0 + km_to_tiles(50.0), candidate.1)]),
+            "une meute à 50 km ne doit pas gêner"
+        );
+    }
+
+    /// LE critère du correctif : une zone giboyeuse mais **sans prédateur**
+    /// (extinction) finit par en recevoir un — c'est ce qui, longtemps
+    /// manquant, laissait le gibier exploser sans frein.
+    #[test]
+    fn une_zone_giboyeuse_sans_meute_finit_par_recevoir_un_predateur() {
+        let mut world = World::new(WorldSeed(42), 64);
+        let lush = find_lush(&mut world, (0, 0));
+        let herds = [(lush.0 as f64 + 0.5, lush.1 as f64 + 0.5)];
+        let mut found = false;
+        for day in 0..2000u64 {
+            let time = SimTime { tick: day * 24 };
+            if daily_predator_immigration(&herds, &[], &mut world, WorldSeed(42), time).is_some() {
+                found = true;
+                break;
+            }
+        }
+        assert!(found, "un prédateur doit finir par réapparaître près d'un troupeau isolé");
+    }
+
+    /// Le pendant : sans le moindre gibier, aucun prédateur n'immigre — un
+    /// prédateur suit sa proie, on ne peuple pas un monde vide de carnivores.
+    #[test]
+    fn sans_gibier_aucune_immigration_de_predateur() {
+        let mut world = World::new(WorldSeed(42), 16);
+        for day in 0..500u64 {
+            let time = SimTime { tick: day * 24 };
+            assert!(daily_predator_immigration(&[], &[], &mut world, WorldSeed(42), time).is_none());
         }
     }
 }
