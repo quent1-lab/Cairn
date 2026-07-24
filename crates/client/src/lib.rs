@@ -1013,16 +1013,18 @@ fn structure_color(kind: StructureKind) -> &'static str {
         StructureKind::Hut => "#a9733e",      // hutte : brun terre
         StructureKind::Granary => "#d8b24a",  // grenier : or/paille
         StructureKind::Palisade => "#9aa0a6", // palissade : bois grisé
+        StructureKind::ChiefHut => "#c25b3a", // hutte du chef : terre cuite, le siège
     }
 }
 
 /// Petit décalage écran (px) par type, pour ne pas empiler au foyer les
-/// structures d'un même clan — un triangle hutte/grenier/palissade.
+/// structures d'un même clan — hutte/grenier/palissade/hutte du chef.
 fn structure_offset(kind: StructureKind) -> (f64, f64) {
     match kind {
         StructureKind::Hut => (-8.0, -6.0),
         StructureKind::Granary => (8.0, -6.0),
         StructureKind::Palisade => (0.0, 9.0),
+        StructureKind::ChiefHut => (0.0, -10.0), // au sommet : le siège du clan
     }
 }
 
@@ -1032,6 +1034,7 @@ fn structure_name(kind: StructureKind) -> &'static str {
         StructureKind::Hut => "hutte",
         StructureKind::Granary => "grenier",
         StructureKind::Palisade => "palissade",
+        StructureKind::ChiefHut => "hutte du chef",
     }
 }
 

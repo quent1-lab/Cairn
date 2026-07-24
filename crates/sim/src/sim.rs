@@ -559,9 +559,12 @@ impl Sim {
             social::daily(self);
             // Après que les clans du jour sont connus : réattribuer les
             // structures à qui contrôle leur tuile (et ruiner les abandonnées),
-            // puis mesurer ce que chaque clan désire bâtir.
+            // mesurer ce que chaque clan désire bâtir, puis ancrer le foyer des
+            // clans sédentarisés à leur hutte du chef (en dernier : c'est cette
+            // valeur ancrée que la délibération du lendemain doit lire).
             structures::maintain(self, time.tick / TICKS_PER_DAY);
             structures::plan(self);
+            structures::anchor_homes(self);
         }
 
         // 3 ter. Échange de savoirs et renforcement des liens sociaux toutes

@@ -169,6 +169,8 @@ const HEADER: &[&str] = &[
     "centroid_x", "centroid_y",
     // monde / perf
     "chunks_generated", "chunks_loaded", "chunks_dirty", "tps",
+    // diagnostic dispersion / chef (ancrage aux structures)
+    "inter_clan_km", "chief_score_max", "chief_huts",
 ];
 
 fn sample_row(sim: &mut Sim, acc: &Cumulative, tps: f64) -> Vec<String> {
@@ -318,14 +320,40 @@ fn sample_row(sim: &mut Sim, acc: &Cumulative, tps: f64) -> Vec<String> {
     let tension_mean = tsum / n_pairs;
 
     // — Structures par type. —
-    let (mut huts, mut granaries, mut palisades) = (0u32, 0u32, 0u32);
+    let (mut huts, mut granaries, mut palisades, mut chief_huts) = (0u32, 0u32, 0u32, 0u32);
     for s in &sim.structures {
         match s.kind {
             StructureKind::Hut => huts += 1,
             StructureKind::Granary => granaries += 1,
             StructureKind::Palisade => palisades += 1,
+            StructureKind::ChiefHut => chief_huts += 1,
         }
     }
+
+    // — Diagnostic dispersion : distance maximale entre deux foyers de clan
+    //   (teste l'hypothèse « les clans s'écartent »). —
+    let mut inter_clan = 0.0f64;
+    for i in 0..sim.clans.len() {
+        for j in (i + 1)..sim.clans.len() {
+            let (a, b) = (&sim.clans[i], &sim.clans[j]);
+            inter_clan = inter_clan.max((a.home.0 - b.home.0).hypot(a.home.1 - b.home.1));
+        }
+    }
+    let inter_clan_km = km(inter_clan);
+
+    // — Score du chef le plus établi (oratoire × prestige) : pour calibrer le
+    //   seuil de la future hutte du chef. —
+    let mut score: std::collections::BTreeMap<u64, f32> = std::collections::BTreeMap::new();
+    for (_, (id, sk, pr)) in
+        sim.agents.query::<(&cairn_sim::AgentId, &Skills, &cairn_sim::agent::Prestige)>().iter()
+    {
+        score.insert(id.0, sk.oratory * pr.0);
+    }
+    let chief_score_max = sim
+        .clans
+        .iter()
+        .filter_map(|c| score.get(&c.chief.0).copied())
+        .fold(0.0f32, f32::max);
 
     let m = |sum: f64| sum / n; // moyenne par tête (garde-fou pop nulle)
     vec![
@@ -402,6 +430,9 @@ fn sample_row(sim: &mut Sim, acc: &Cumulative, tps: f64) -> Vec<String> {
         sim.world.loaded().to_string(),
         sim.world.dirty_count().to_string(),
         format!("{tps:.1}"),
+        format!("{inter_clan_km:.2}"),
+        format!("{chief_score_max:.3}"),
+        chief_huts.to_string(),
     ]
 }
 

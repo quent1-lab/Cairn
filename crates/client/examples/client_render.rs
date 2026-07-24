@@ -130,22 +130,24 @@ fn main() {
             cairn_sim::StructureKind::Hut => ([169, 115, 62], (-8.0, -6.0)),
             cairn_sim::StructureKind::Granary => ([216, 178, 74], (8.0, -6.0)),
             cairn_sim::StructureKind::Palisade => ([154, 160, 166], (0.0, 9.0)),
+            cairn_sim::StructureKind::ChiefHut => ([194, 91, 58], (0.0, -10.0)),
         };
         fill_square(&mut buf, bx + off.0, by + off.1, (scale * 4.0).clamp(5.0, 12.0), rgb);
     }
     println!("clans : {} actif(s)", sim.clans.len());
     {
         use cairn_sim::StructureKind::*;
-        let (mut huts, mut greniers, mut palissades) = (0, 0, 0);
+        let (mut huts, mut greniers, mut palissades, mut chef) = (0, 0, 0, 0);
         for s in &sim.structures {
             match s.kind {
                 Hut => huts += 1,
                 Granary => greniers += 1,
                 Palisade => palissades += 1,
+                ChiefHut => chef += 1,
             }
         }
         println!(
-            "structures : {} au total ({huts} huttes, {greniers} greniers, {palissades} palissades)",
+            "structures : {} au total ({huts} huttes, {greniers} greniers, {palissades} palissades, {chef} huttes du chef)",
             sim.structures.len(),
         );
     }

@@ -53,18 +53,27 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::agent::Physiology;
+use crate::agent::{Physiology, Prestige};
 use crate::sim::{STOCK_CAP_PER_MEMBER, Sim};
+use crate::skills::Skills;
 use crate::social::{ClanId, ClanMembership};
 use cairn_core::km_to_tiles;
 
-/// Les trois structures qu'un clan peut bâtir. `repr(u8)` implicite via
-/// l'ordre : `Ord` sert au tri déterministe du registre.
+/// Les structures qu'un clan peut bâtir. `repr(u8)` implicite via l'ordre :
+/// `Ord` sert au tri déterministe du registre.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum StructureKind {
     Hut,
     Granary,
     Palisade,
+    /// La hutte du chef : le siège du clan. Contrairement aux trois autres,
+    /// son « effet de jeu » n'est pas physiologique — elle **fixe le foyer**
+    /// (`Clan::home` cesse d'être le centroïde flottant du jour et devient sa
+    /// position, voir `anchor_homes`). Un clan qui la bâtit **se sédentarise**
+    /// et cesse de dériver ; avant, il reste semi-nomade. Son moteur émergent
+    /// est le **prestige du chef** (gagné en nourrissant le clan, incrément
+    /// 8) — un clan mené avec succès sur la durée finit par poser ses pierres.
+    ChiefHut,
 }
 
 impl StructureKind {
@@ -74,6 +83,7 @@ impl StructureKind {
             StructureKind::Hut => HUT_COST,
             StructureKind::Granary => GRANARY_COST,
             StructureKind::Palisade => PALISADE_COST,
+            StructureKind::ChiefHut => CHIEF_HUT_COST,
         }
     }
 }
@@ -82,6 +92,8 @@ impl StructureKind {
 pub const HUT_COST: f32 = 6.0;
 pub const GRANARY_COST: f32 = 9.0;
 pub const PALISADE_COST: f32 = 12.0;
+/// Plus cher : c'est un chantier de sédentarisation, pas un abri d'appoint.
+pub const CHIEF_HUT_COST: f32 = 15.0;
 
 // — Effets —
 /// Chaleur passive (°C ressentis) qu'une hutte de son clan apporte à un
@@ -106,6 +118,14 @@ const STORAGE_PRESSURE_THRESHOLD: f32 = 0.8;
 /// Tension maximale avec un voisin au-delà de laquelle une palissade devient
 /// désirable.
 const THREAT_PRESSURE_THRESHOLD: f32 = 0.3;
+/// Score du chef (`oratoire × prestige`) au-delà duquel le clan désire bâtir
+/// la hutte du chef et se sédentariser. Calibré sur un run réel (banc
+/// `chronicle`, colonne `chief_score_max`) : le score d'un chef établi
+/// dépasse largement cette valeur après un an ou deux de provisionnement,
+/// mais pas un chef fraîchement désigné d'un clan neuf — la sédentarisation
+/// arrive donc quand le clan a fait ses preuves, sans lire ni sa taille ni
+/// son âge.
+const CHIEF_PRESTIGE_THRESHOLD: f32 = 2.5;
 /// Une structure qu'aucun clan ne revendient depuis ce nombre de jours tombe
 /// en ruine (un mois : le temps qu'un campement vraiment abandonné
 /// disparaisse, mais assez pour survivre au simple va-et-vient des identités
@@ -186,6 +206,14 @@ pub(crate) fn plan(sim: &mut Sim) {
         let eb = threat.entry(b).or_insert(0.0);
         *eb = eb.max(t);
     }
+    // Score de chaque agent (`oratoire × prestige`) : sert à lire celui du
+    // chef de chaque clan — la pression qui fait bâtir la hutte du chef.
+    let mut score: BTreeMap<u64, f32> = BTreeMap::new();
+    for (_, (id, skills, prestige)) in
+        sim.agents.query::<(&crate::agent::AgentId, &Skills, &Prestige)>().iter()
+    {
+        score.insert(id.0, skills.oratory * prestige.0);
+    }
 
     for clan in &mut sim.clans {
         let present = existing.get(&clan.id.0);
@@ -194,6 +222,7 @@ pub(crate) fn plan(sim: &mut Sim) {
         let base_cap = STOCK_CAP_PER_MEMBER * clan.members.len() as f32;
         let storage = if base_cap > 0.0 { clan.stock / base_cap } else { 0.0 };
         let menace = threat.get(&clan.id.0).copied().unwrap_or(0.0);
+        let chief_score = score.get(&clan.chief.0).copied().unwrap_or(0.0);
 
         // Chaque candidat non encore bâti dont la pression dépasse son seuil,
         // départagé par la marge relative (pression / seuil) — comparaison à
@@ -203,6 +232,7 @@ pub(crate) fn plan(sim: &mut Sim) {
             (StructureKind::Hut, mean_cold, COLD_PRESSURE_THRESHOLD),
             (StructureKind::Granary, storage, STORAGE_PRESSURE_THRESHOLD),
             (StructureKind::Palisade, menace, THREAT_PRESSURE_THRESHOLD),
+            (StructureKind::ChiefHut, chief_score, CHIEF_PRESTIGE_THRESHOLD),
         ];
         let mut best: Option<(StructureKind, f32)> = None;
         for (kind, pressure, threshold) in candidates {
@@ -215,6 +245,32 @@ pub(crate) fn plan(sim: &mut Sim) {
             }
         }
         clan.desired = best.map(|(k, _)| k);
+    }
+}
+
+/// Ancre le foyer des clans sédentarisés à leur hutte du chef. Un clan qui en
+/// a bâti une voit `Clan::home` (le point qui *attire* ses membres via
+/// `TaskKind::ReturnToClan`) figé sur la position de la hutte, au lieu du
+/// centroïde flottant recalculé chaque jour par `detect_clans` — c'est ce qui
+/// empêche le clan de dériver sans fin (voir le run 5 ans : sans ancre, les
+/// clans s'écartaient jusqu'à des dizaines de km). Appelée **en dernier** dans
+/// la passe quotidienne, pour que la valeur ancrée soit celle lue par la
+/// délibération du lendemain. La **détection** de clan, elle, continue
+/// d'utiliser le centroïde vivant (calculé localement dans `detect_clans`),
+/// pas `home` — un clan momentanément parti chasser ne se dissout donc pas ;
+/// et comme le rappel ramène les membres vers la hutte, le centroïde reste de
+/// toute façon près d'elle.
+pub(crate) fn anchor_homes(sim: &mut Sim) {
+    let mut anchor: BTreeMap<u64, (f64, f64)> = BTreeMap::new();
+    for s in &sim.structures {
+        if s.kind == StructureKind::ChiefHut {
+            anchor.insert(s.clan.0, s.pos);
+        }
+    }
+    for clan in &mut sim.clans {
+        if let Some(&pos) = anchor.get(&clan.id.0) {
+            clan.home = pos;
+        }
     }
 }
 
@@ -334,6 +390,67 @@ mod tests {
         });
         plan(&mut sim);
         assert_eq!(sim.clans[0].desired, None, "une hutte déjà là ne se redésire pas");
+    }
+
+    /// « Quoi bâtir » — un chef au fort prestige appelle la hutte du chef
+    /// (sédentarisation). Rien d'autre ne presse (pas de froid, stock vide,
+    /// pas de voisin), et le score du chef (oratoire × prestige) dépasse son
+    /// seuil : le clan désire se poser.
+    #[test]
+    fn un_clan_au_chef_prestigieux_desire_une_hutte_de_chef() {
+        let mut sim = Sim::new(WorldSeed(1), 64);
+        for _ in 0..5 {
+            sim.spawn_agent(0.0, 0.0);
+        }
+        // Le chef (AgentId(0), cf. `clan_with`) a un score bien au-dessus du
+        // seuil ; les autres restent à zéro.
+        for (_, (id, skills, prestige)) in
+            sim.agents.query_mut::<(&AgentId, &mut Skills, &mut Prestige)>()
+        {
+            if id.0 == 0 {
+                skills.oratory = 0.8;
+                prestige.0 = 6.0; // score 4,8 > CHIEF_PRESTIGE_THRESHOLD
+            }
+        }
+        for (_, m) in sim.agents.query_mut::<&mut ClanMembership>() {
+            m.0 = Some(ClanId(1));
+        }
+        sim.clans.push(clan_with(1, 5, 0.0));
+        plan(&mut sim);
+        assert_eq!(sim.clans[0].desired, Some(StructureKind::ChiefHut));
+    }
+
+    /// Le cœur de l'ancrage : une fois la hutte du chef bâtie, `Clan::home`
+    /// est **figé** sur sa position au lieu de suivre le centroïde flottant —
+    /// c'est ce qui empêche le clan de dériver sans fin (run 5 ans : sans
+    /// ancre, les clans s'écartaient jusqu'à des dizaines de km).
+    #[test]
+    fn la_hutte_du_chef_ancre_le_foyer() {
+        let mut sim = Sim::new(WorldSeed(1), 64);
+        let mut clan = clan_with(1, 5, 0.0);
+        clan.home = (0.0, 0.0); // foyer « flottant » de départ
+        sim.clans.push(clan);
+        sim.structures.push(Structure {
+            kind: StructureKind::ChiefHut,
+            clan: ClanId(1),
+            pos: (5000.0, -3000.0),
+            built_tick: 0,
+            abandoned_since: None,
+        });
+        anchor_homes(&mut sim);
+        assert_eq!(sim.clans[0].home, (5000.0, -3000.0), "le foyer doit être figé sur la hutte du chef");
+    }
+
+    /// Contre-épreuve : sans hutte du chef, `anchor_homes` ne touche pas au
+    /// foyer (le clan reste semi-nomade, foyer = centroïde comme avant).
+    #[test]
+    fn sans_hutte_du_chef_le_foyer_n_est_pas_ancre() {
+        let mut sim = Sim::new(WorldSeed(1), 64);
+        let mut clan = clan_with(1, 5, 0.0);
+        clan.home = (123.0, 456.0);
+        sim.clans.push(clan);
+        anchor_homes(&mut sim);
+        assert_eq!(sim.clans[0].home, (123.0, 456.0), "sans hutte, le foyer flottant reste inchangé");
     }
 
     /// Le cœur du correctif de persistance : quand le clan bâtisseur s'efface
