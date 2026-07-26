@@ -28,7 +28,7 @@
 //! même type partagent leur jeu de composants (une seule archétype), l'ordre
 //! est l'ordre d'apparition, et les retraits sont eux-mêmes ordonnés.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use cairn_core::{SimTime, TICKS_PER_DAY, WorldSeed};
 use cairn_worldgen::WorldGenConfig;
@@ -39,14 +39,19 @@ use crate::agent::{
 };
 use crate::brain::{self, AgentCtx, DELIBERATION_PERIOD};
 use crate::climate::Climate;
+use crate::commerce::{self, Expedition};
 use crate::demography::{self, Demographics, HumanView, Kinship, Sex, Traits};
 use crate::ecology;
+use crate::exposure::Exposures;
+use crate::fire::{self, Fire};
 use crate::fauna::{self, FaunaId, Herd, HerdView, Kill, Pack};
 use crate::memory::{self, Memory};
 use crate::pathfind;
+use crate::pressure::{self, ClanPressure};
 use crate::skills::{self, Skills};
 use crate::social::{self, Clan, ClanEvent, ClanId, ClanMembership, ClanRelations, ClanView, SocialGraph};
 use crate::structures::{self, Structure, StructureKind};
+use crate::tech::{self, Knowledge, TechEvent, TechId, TechTree};
 use crate::world::World;
 
 /// Un agent est « arrivé » sous une tuile et demie de sa cible.
@@ -147,10 +152,40 @@ pub struct Sim {
     /// reconstruite en entier chaque jour, juste après `clans` : voir
     /// `social::update_relations`.
     pub clan_relations: ClanRelations,
+    /// La pression ressentie par chaque clan (Phase 5, incrément 2) —
+    /// famine, froid, menace, surpopulation. Reconstruite en entier chaque
+    /// jour par `pressure::measure`, juste après les clans et leurs relations.
+    /// Le futur moteur d'insight la lira ; rien ne la consulte encore.
+    pub clan_pressure: BTreeMap<ClanId, ClanPressure>,
     /// Les structures bâties par les clans (Phase 4, incrément 9) — un
     /// registre clairsemé côté `Sim`, jamais un champ de `Tile` (voir
     /// `crate::structures`). Chaque clan en a au plus une par type.
     pub structures: Vec<Structure>,
+    /// L'arbre technologique, chargé une fois (BRIEF §5.2, Phase 5) : les techs
+    /// et leurs prérequis, en données (`assets/techs.ron`). Immuable pendant la
+    /// simulation ; lu par la passe d'insight.
+    pub tech_tree: TechTree,
+    /// Les découvertes **et oublis** de technologies depuis le début du monde
+    /// — l'embryon de la Chronique (BRIEF §6.4).
+    pub tech_events: Vec<TechEvent>,
+    /// L'ensemble des techs qu'au moins un agent vivant maîtrise — « ce que
+    /// l'humanité sait encore faire ». Reconstruit chaque jour par
+    /// `tech::forget`, qui le compare à la veille pour détecter les oublis (une
+    /// tech dont le dernier porteur s'est éteint). Jamais écrit ailleurs.
+    pub known_techs: BTreeSet<TechId>,
+    /// Les feux de forêt actifs (Phase 5, incrément 5) — un registre clairsemé
+    /// côté `Sim`, jamais un champ de `Tile` (voir `crate::fire`). Rare et
+    /// localisé ; vide la plupart du temps.
+    pub fires: Vec<Fire>,
+    /// Les expéditions commerciales en cours (Phase 5, incrément 6b), par
+    /// identifiant d'agent — une table à côté de l'ECS, comme `routes`,
+    /// nettoyée à la mort de l'envoyé. Voir `crate::commerce`.
+    pub expeditions: BTreeMap<u64, Expedition>,
+    /// Les feux de forêt sont-ils actifs pour cette simulation ? Vrai par
+    /// défaut (le monde brûle parfois). Mis à faux par les scènes de test
+    /// contrôlées qui isolent une autre mécanique — même patron explicite que
+    /// `allow_fauna_immigration`.
+    pub allow_wildfires: bool,
     /// L'immigration de gibier (`fauna::daily_immigration`) est-elle active
     /// pour cette simulation ? Vrai par défaut (le monde est censé être
     /// habité) ; les scènes de test qui veulent isoler une mécanique de
@@ -193,7 +228,14 @@ impl Sim {
             clans: Vec::new(),
             clan_events: Vec::new(),
             clan_relations: ClanRelations::default(),
+            clan_pressure: BTreeMap::new(),
             structures: Vec::new(),
+            tech_tree: TechTree::embedded(),
+            tech_events: Vec::new(),
+            known_techs: BTreeSet::new(),
+            fires: Vec::new(),
+            expeditions: BTreeMap::new(),
+            allow_wildfires: true,
             allow_fauna_immigration: true,
             next_agent_id: 0,
             next_fauna_id: 0,
@@ -221,6 +263,12 @@ impl Sim {
             ClanMembership::default(),
             Carrying::default(),
             Prestige::default(),
+            // Un fondateur n'a encore rien vu de *ce* monde : il découvrira
+            // son voisinage en y vivant (comme sa mémoire spatiale part vide).
+            Exposures::default(),
+            // Et il ne sait faire aucune tech : tout reste à découvrir ou à
+            // apprendre — c'est le point de départ de « L'ÉTINCELLE ».
+            Knowledge::default(),
         ));
         id
     }
@@ -261,6 +309,12 @@ impl Sim {
             ClanMembership::default(),
             Carrying::default(),
             Prestige::default(),
+            // Un nouveau-né n'a rien vu : tout est à découvrir — c'est aussi
+            // ce qui rend l'oubli générationnel d'un savoir-faire possible.
+            Exposures::default(),
+            // Ni aucun savoir-faire : les techs de ses parents ne sont pas
+            // héritées, elles s'apprendront (diffusion, incrément 4) ou non.
+            Knowledge::default(),
         ));
         id
     }
@@ -307,6 +361,31 @@ impl Sim {
     /// `social::claim_at` pour le pourquoi (jamais matérialisé dans `Tile`).
     pub fn claim_at(&self, x: f64, y: f64) -> Option<ClanId> {
         social::claim_at((x, y), &self.clans)
+    }
+
+    /// Le corpus de savoirs d'un clan (BRIEF §5.1) : l'**union** des techs que
+    /// maîtrisent ses membres vivants. Calculé à la demande (pour l'affichage
+    /// et le futur calcul de l'Âge) — le corpus n'est pas un état stocké, c'est
+    /// une vue sur les `Knowledge` individuels, ce qui rend l'oubli automatique
+    /// (un savoir que plus aucun membre ne porte quitte le corpus de lui-même).
+    pub fn clan_corpus(&self, clan: ClanId) -> BTreeSet<TechId> {
+        let mut corpus = BTreeSet::new();
+        for (_, (membership, knowledge)) in
+            self.agents.query::<(&ClanMembership, &Knowledge)>().iter()
+        {
+            if membership.0 == Some(clan) {
+                corpus.extend(knowledge.iter());
+            }
+        }
+        corpus
+    }
+
+    /// L'âge d'un clan (BRIEF §5.5) : l'étiquette dérivée de son corpus de
+    /// savoirs — le plus avancé des marqueurs d'âge de ses techs. Recalculée à
+    /// la demande, jamais stockée, **jamais utilisée comme condition** : elle ne
+    /// sert qu'à l'affichage.
+    pub fn clan_age(&self, clan: ClanId) -> tech::Age {
+        tech::age_of(&self.clan_corpus(clan), &self.tech_tree)
     }
 
     /// Instantané des troupeaux, dans l'ordre d'itération de `hecs`.
@@ -379,27 +458,43 @@ impl Sim {
             let due = behavior.task.is_none()
                 || (time.tick.wrapping_add(id.0)) % DELIBERATION_PERIOD == 0;
             if due {
-                let current = behavior.task.map(|t| t.kind);
-                let ctx = AgentCtx {
-                    id: *id,
-                    pos,
-                    phys,
-                    traits,
-                    demo,
-                    kin,
-                    clan: membership.0,
-                    carrying: carrying.0,
-                };
-                behavior.task = brain::decide(
-                    &mut self.world,
-                    time,
-                    ctx,
-                    mem,
-                    current,
-                    &herds,
-                    &humans,
-                    &clan_views,
-                );
+                // Un envoyé en expédition file vers son étape (aller/retour),
+                // hors délibération normale — c'est ce qui le fait résister au
+                // rappel du clan. Sauf si un besoin vital presse : alors il
+                // délibère comme les autres pour survivre, puis reprend la route
+                // au prochain passage.
+                let expedition_wp = self.expeditions.get(&id.0).and_then(|exp| {
+                    let distress = phys.thirst > 0.7
+                        || phys.hunger > 0.7
+                        || phys.cold > 0.5
+                        || phys.fatigue > 0.8;
+                    (!distress).then(|| commerce::waypoint(exp))
+                });
+                if let Some(target) = expedition_wp {
+                    behavior.task = Some(crate::agent::Task { kind: TaskKind::Expedition, target });
+                } else {
+                    let current = behavior.task.map(|t| t.kind);
+                    let ctx = AgentCtx {
+                        id: *id,
+                        pos,
+                        phys,
+                        traits,
+                        demo,
+                        kin,
+                        clan: membership.0,
+                        carrying: carrying.0,
+                    };
+                    behavior.task = brain::decide(
+                        &mut self.world,
+                        time,
+                        ctx,
+                        mem,
+                        current,
+                        &herds,
+                        &humans,
+                        &clan_views,
+                    );
+                }
             }
         }
 
@@ -488,6 +583,11 @@ impl Sim {
             }
         }
 
+        // 2 ter. Expéditions : maintenant que les positions sont à jour, un
+        // envoyé arrivé près de l'étain y est exposé et fait demi-tour ; rentré
+        // au foyer, sa quête s'achève (voir `crate::commerce`).
+        commerce::advance(self);
+
         // 2 bis. Les nourrissons : portés par leur mère, allaités par elle.
         demography::nurse_infants(self);
 
@@ -504,7 +604,7 @@ impl Sim {
             .collect();
         let mut dead = Vec::new();
         let mut sheltered = 0u64;
-        for (entity, (id, pos, phys, traits, demo, behavior, membership)) in
+        for (entity, (id, pos, phys, traits, demo, behavior, membership, exposures)) in
             self.agents.query_mut::<(
                 &AgentId,
                 &Position,
@@ -513,10 +613,15 @@ impl Sim {
                 &Demographics,
                 &Behavior,
                 &ClanMembership,
+                &mut Exposures,
             )>()
         {
             let (x, y) = pos.tile();
             let tile = self.world.tile(x, y);
+            // L'agent voit ce qui l'entoure : on enregistre le gisement et la
+            // matière de la tuile qu'on vient de lire pour la physiologie —
+            // aucune lecture de tuile supplémentaire (voir `exposure`).
+            exposures.note_tile(&tile);
             let mut felt = self.climate.instant(&tile, y, time);
             if matches!(
                 tile.biome,
@@ -547,6 +652,7 @@ impl Sim {
             // rendu, l'ordre de retrait suit l'ordre de collecte.
             let _ = self.agents.despawn(entity);
             self.routes.remove(&agent.0); // pas de trajet fantôme d'un mort
+            self.expeditions.remove(&agent.0); // une expédition meurt avec son envoyé
             self.deaths.push(DeathRecord { tick: time.tick, agent, cause, pos });
         }
 
@@ -557,6 +663,21 @@ impl Sim {
         if time.tick.is_multiple_of(TICKS_PER_DAY) {
             demography::daily(self);
             social::daily(self);
+            // La pression du jour (Phase 5) : besoin des clans et de leur
+            // tension fraîche (posée par `social::daily`), lue plus tard par
+            // le moteur d'insight. Mesure pure, ne déclenche rien encore.
+            pressure::measure(self);
+            // L'insight (Phase 5) : chaque adulte oisif, au confort, dans un
+            // clan sous pression, peut découvrir une tech dont les prérequis
+            // sont réunis. Après la pression, qu'elle consomme.
+            tech::insight(self);
+            // L'oubli (Phase 5) : constate quelles techs n'ont plus aucun
+            // porteur vivant aujourd'hui (les morts du jour sont déjà passées,
+            // étape 3) et les journalise — « l'humanité peut régresser ».
+            tech::forget(self);
+            // Commerce (Phase 5) : un clan du cuivre sans étain dépêche un
+            // envoyé le chercher au loin — la route qui, seule, mène au bronze.
+            commerce::dispatch(self);
             // Après que les clans du jour sont connus : réattribuer les
             // structures à qui contrôle leur tuile (et ruiner les abandonnées),
             // mesurer ce que chaque clan désire bâtir, puis ancrer le foyer des
@@ -565,6 +686,11 @@ impl Sim {
             structures::maintain(self, time.tick / TICKS_PER_DAY);
             structures::plan(self);
             structures::anchor_homes(self);
+            // Les feux de forêt (Phase 5) : font vivre les foyers (brûlent le
+            // fourrage, exposent au feu les agents proches) et tentent un
+            // nouveau départ. Ambivalent : la biomasse détruite nourrit la
+            // pression de famine de demain.
+            fire::daily(self);
         }
 
         // 3 ter. Échange de savoirs et renforcement des liens sociaux toutes
@@ -575,6 +701,10 @@ impl Sim {
         if time.tick % 4 == 0 {
             memory::exchange_knowledge(self);
             social::encounter(self);
+            // Diffusion culturelle (Phase 5) : une tech passe d'un agent à un
+            // voisin à portée, quel que soit son clan — même passe de
+            // rencontre que les liens sociaux et l'échange de sources.
+            tech::diffuse(self);
         }
 
         // 4. Faune. Les meutes chassent d'abord (sur l'instantané), puis
@@ -845,7 +975,8 @@ fn execute(
         | TaskKind::Follow
         | TaskKind::Socialize
         | TaskKind::Explore
-        | TaskKind::ReturnToClan => {
+        | TaskKind::ReturnToClan
+        | TaskKind::Expedition => {
             behavior.activity = Activity::Idle;
             behavior.task = None; // arrivé — on re-délibérera aussitôt
         }
@@ -983,12 +1114,12 @@ mod tests {
     /// traits hérités, mémoire et compétences dans l'ordre des identifiants.
     /// Deux exécutions identiques ⇒ même empreinte.
     #[allow(clippy::type_complexity)]
-    fn fingerprint(sim: &Sim) -> Vec<(u64, u64, u64, u32, u32, u32, u64, u32)> {
+    fn fingerprint(sim: &Sim) -> Vec<(u64, u64, u64, u32, u32, u32, u64, u32, u16, u32)> {
         let mut all: Vec<_> = sim
             .agents
-            .query::<(&AgentId, &Position, &Physiology, &Traits, &Memory, &Skills)>()
+            .query::<(&AgentId, &Position, &Physiology, &Traits, &Memory, &Skills, &Exposures, &Knowledge)>()
             .iter()
-            .map(|(_, (id, pos, phys, traits, mem, sk))| {
+            .map(|(_, (id, pos, phys, traits, mem, sk, exp, kn))| {
                 (
                     id.0,
                     pos.x.to_bits(),
@@ -998,6 +1129,8 @@ mod tests {
                     traits.curiosity.to_bits(),
                     (mem.known.len() as u64) << 8 | mem.springs.len() as u64,
                     sk.foraging.to_bits(),
+                    exp.0,
+                    kn.len() as u32,
                 )
             })
             .collect();
@@ -1061,6 +1194,7 @@ mod tests {
         // stochastique) ne doit pas interférer avec la mécanique isolée par
         // le test qui appelle ce helper — voir `Sim::allow_fauna_immigration`.
         sim.allow_fauna_immigration = false;
+        sim.allow_wildfires = false; // idem : pas d'incendie stochastique parasite
         let home = find_land(&sim);
         let (mut placed, mut k) = (0, 0i64);
         while placed < agents && k < 10_000 {
@@ -1153,6 +1287,24 @@ mod tests {
         assert_eq!((ha.to_bits(), pa.to_bits()), (hb.to_bits(), pb.to_bits()));
         assert_eq!((nha, npa), (nhb, npb));
         assert_eq!(a.hunted_head.to_bits(), b.hunted_head.to_bits());
+        assert_eq!(a.tech_events.len(), b.tech_events.len());
+        assert_eq!(a.known_techs, b.known_techs);
+    }
+
+    /// Incrément 1 de la Phase 5 (« l'exposition ») : en vivant et en se
+    /// déplaçant, la population accumule des expositions au monde qu'elle
+    /// traverse (bois, graminées, gisements…). Prouve que la perception est
+    /// bien câblée dans la boucle — la mécanique pure est testée dans
+    /// `crate::exposure`.
+    #[test]
+    fn la_population_accumule_des_expositions_en_vivant() {
+        let sim = scenario(42, 30, 24 * 20);
+        let total: u32 =
+            sim.agents.query::<&Exposures>().iter().map(|(_, e)| e.count()).sum();
+        assert!(
+            total > 0,
+            "après 20 jours, la population doit avoir vu quelque chose ({total} expositions)"
+        );
     }
 
     /// LE critère d'acceptation de la faune : « la surchasse d'une zone
@@ -1588,6 +1740,7 @@ mod tests {
         // des kilomètres — jamais à portée de rencontre.
         let mut scattered = Sim::new(WorldSeed(42), 512);
         scattered.allow_fauna_immigration = false; // scène contrôlée, voir plus haut
+        scattered.allow_wildfires = false;
         let home = find_land(&scattered);
         for i in 0..10i64 {
             let far = (home.0 + i * 4000, home.1);
@@ -1978,6 +2131,9 @@ mod tests {
     #[test]
     fn une_scene_sans_gibier_initial_finit_par_en_recevoir() {
         let mut sim = Sim::new(WorldSeed(42), 1024);
+        // On isole l'immigration de gibier : pas d'incendie qui viendrait
+        // affamer les quelques agents-ancres (scène contrôlée).
+        sim.allow_wildfires = false;
         let home = find_land(&sim);
         for i in 0..6i64 {
             let (dx, dy) = (i * 6, 0);

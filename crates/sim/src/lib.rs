@@ -21,31 +21,44 @@
 pub mod agent;
 pub mod brain;
 pub mod chunk;
+pub mod commerce;
 pub mod climate;
 pub mod curves;
 pub mod demography;
 pub mod ecology;
+pub mod exposure;
 pub mod fauna;
+pub mod fire;
 pub mod memory;
 pub mod pathfind;
+pub mod pressure;
 pub mod scenario;
 pub mod sim;
 pub mod skills;
 pub mod social;
 pub mod structures;
+pub mod tech;
 pub mod tile;
 pub mod world;
 
 pub use agent::{Activity, AgentId, Behavior, DeathCause, Physiology, Position, Task, TaskKind};
 pub use chunk::{CHUNK_AREA, CHUNK_SIZE, Chunk, ChunkCoord};
+pub use commerce::Expedition;
 pub use climate::Climate;
 pub use demography::{Demographics, HumanView, Kinship, Pregnancy, Sex, Traits};
+pub use exposure::{Exposure, Exposures};
+pub use fire::Fire;
 pub use fauna::{FaunaId, Herd, HerdState, Pack};
 pub use memory::Memory;
+pub use pressure::ClanPressure;
 pub use sim::{BirthRecord, DeathRecord, Sim};
 pub use skills::Skills;
 pub use social::{Clan, ClanEvent, ClanEventKind, ClanId, ClanMembership, ClanRelations, SocialGraph};
 pub use structures::{Structure, StructureKind};
+pub use tech::{
+    Age, EnvCond, Knowledge, Tech, TechEvent, TechEventKind, TechId, TechPressure, TechSkill,
+    TechTree,
+};
 pub use tile::{Tile, TileFlags};
 pub use world::World;
 
@@ -78,4 +91,10 @@ pub(crate) mod salt {
     pub const IMMIGRATION: u64 = 1010;
     /// Immigration de prédateurs : réensemencement des meutes près du gibier.
     pub const PREDATOR_IMMIGRATION: u64 = 1011;
+    /// Insight : tirage quotidien de découverte technologique (Phase 5).
+    pub const INSIGHT: u64 = 1012;
+    /// Diffusion : tirage de transmission d'une tech entre agents proches.
+    pub const DIFFUSION: u64 = 1013;
+    /// Feux de forêt : tirage quotidien d'un départ de feu et de son site.
+    pub const FIRE: u64 = 1014;
 }

@@ -13,6 +13,12 @@ cairn-sim = { path = "crates/sim" }
 noise = "0.9"
 image = { version = "0.25", default-features = false, features = ["png"] }
 rayon = "1"
+# Arbre technologique en données (Phase 5, arbitrage acté avec l'utilisateur) :
+# `techs.ron` décrit les techs et leurs prérequis, éditable sans toucher au
+# moteur. serde pour le mapping typé, ron pour le format (lisible, commentable,
+# supporte enums et structs — mieux que JSON pour de la donnée écrite à la main).
+serde = { version = "1", features = ["derive"] }
+ron = "0.8"
 # ECS minimaliste (Phase 2, arbitrage BRIEF §10.2 acté avec l'utilisateur) :
 # stockage d'entités spawn/despawn/requêtes — bien au-delà des ~50 lignes
 # maison — sans scheduler imposé : l'ordre des systèmes reste écrit par nous,

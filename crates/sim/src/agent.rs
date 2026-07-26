@@ -137,6 +137,12 @@ pub enum TaskKind {
     /// s'engage sur *cette* construction précise. Payée par le stock commun,
     /// exige d'être sur place — un chantier ne se mène pas à distance.
     Build(crate::structures::StructureKind),
+    /// Marcher vers l'étape courante d'une expédition (`crate::commerce`) :
+    /// l'étain lointain à l'aller, le foyer au retour. Assignée directement par
+    /// `sim::step` à un envoyé, hors délibération normale (tant qu'aucun besoin
+    /// vital ne presse) — c'est ce qui la fait *résister au rappel du clan* le
+    /// temps d'aller au bout de la route.
+    Expedition,
 }
 
 /// Le composant « comportement » : la tâche en cours et l'activité de l'heure.

@@ -1,0 +1,93 @@
+#![enable(implicit_some)]
+// L'arbre technologique de Cairn — en DONNÉES, pas en code (BRIEF §5.2, §8.1).
+// (`implicit_some` ci-dessus autorise `skill: Foraging` au lieu de
+// `skill: Some(Foraging)` pour le champ optionnel — RON, en tête de fichier.)
+//
+// Chaque technologie n'est pas « débloquée en dépensant des points » : elle est
+// *découverte* par un individu oisif, curieux, exposé au bon contexte et sous
+// pression (voir `sim::tech` et le moteur d'insight). Ce fichier décrit
+// seulement les *conditions* de possibilité — jamais un ordre ni un palier.
+//
+// Champs d'une tech :
+//   id                 identifiant textuel stable (référencé par les prérequis,
+//                      la Chronique) — ne pas renommer à la légère.
+//   label              libellé lisible (affichage client).
+//   prereq_techs       savoirs préalables (par id) — l'agent doit déjà les tenir.
+//   prereq_exposure    a déjà VU (persistant) : matières/phénomènes rencontrés
+//                      (voir `exposure::Exposure`).
+//   prereq_environment a ACCÈS maintenant (courant, lu sur la tuile) : rivière,
+//                      forêt… (voir `tech::EnvCond`).
+//   pressure           ce qui motive la recherche (voir `pressure::ClanPressure`) :
+//                      Famine, Cold, Threat, Crowding. Sans pression, pas
+//                      d'insight — « un clan repu n'invente presque rien ».
+//   skill              compétence pertinente (proxy parmi les 3 existantes ;
+//                      les métiers dédiés affineront plus tard). Optionnel.
+//
+// Amorce Phase 5 (incrément 3) centrée sur le FEU par friction : les incendies
+// naturels, qui donneront une seconde voie d'exposition au feu, arrivent à
+// l'incrément 5 — d'ici là, le feu s'invente de silex + bois sous un froid qui
+// presse.
+[
+    (
+        id: "fire_mastery",
+        label: "Maîtrise du feu",
+        // Deux voies (« les deux », Phase 5) : il faut du bois (combustible),
+        // puis SOIT du silex pour l'étincelle, SOIT avoir vu un incendie.
+        prereq_exposure: [Wood],
+        prereq_exposure_any: [Flint, Fire],
+        pressure: [Cold],
+        skill: Foraging,
+        age: Paleolithic,
+    ),
+    (
+        id: "cooking",
+        label: "Cuisson",
+        prereq_techs: ["fire_mastery"],
+        pressure: [Famine],
+        skill: Foraging,
+        age: Paleolithic,
+    ),
+    (
+        id: "pottery",
+        label: "Poterie",
+        prereq_techs: ["fire_mastery"],
+        prereq_exposure: [Clay],
+        prereq_environment: [FreshWater],
+        pressure: [Famine, Cold],
+        skill: Foraging,
+        age: Neolithic,
+    ),
+
+    // — La chaîne du bronze (BRIEF §5.3, « le clou du système ») —
+    // Le four pousse le feu plus haut ; la métallurgie du cuivre suppose un
+    // four et d'avoir vu du cuivre ; le bronze suppose la métallurgie du cuivre
+    // ET d'avoir vu de l'ÉTAIN — que le worldgen place à des centaines de km du
+    // cuivre. C'est cette exposition-là qui *force* la route commerciale : sans
+    // elle, un clan assis sur le cuivre n'atteint jamais le bronze.
+    (
+        id: "kiln",
+        label: "Four à haute température",
+        prereq_techs: ["pottery"],
+        pressure: [Crowding],
+        skill: Foraging,
+        age: Neolithic,
+    ),
+    (
+        id: "copper_metallurgy",
+        label: "Métallurgie du cuivre",
+        prereq_techs: ["kiln"],
+        prereq_exposure: [Copper],
+        pressure: [Crowding, Threat],
+        skill: Foraging,
+        age: Neolithic,
+    ),
+    (
+        id: "bronze",
+        label: "Bronze",
+        prereq_techs: ["copper_metallurgy"],
+        prereq_exposure: [Tin],
+        pressure: [Threat, Crowding],
+        skill: Foraging,
+        age: BronzeAge,
+    ),
+]
