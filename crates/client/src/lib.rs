@@ -56,8 +56,8 @@ const START_AGENTS: usize = 40;
 const POP_HISTORY_CAP: usize = 400;
 /// Dimensions du petit graphique d'évolution du panneau Population — mêmes
 /// valeurs que les attributs `width`/`height` du `<canvas>` dans le HTML.
-const POP_CHART_W: f64 = 230.0;
-const POP_CHART_H: f64 = 56.0;
+const POP_CHART_W: f64 = 298.0;
+const POP_CHART_H: f64 = 52.0;
 
 /// Paliers de vitesse proposés, en **ticks de jeu par seconde réelle**. Un
 /// tick = une heure ; 24 ticks/s = un jour de jeu par seconde. Le plus lent
@@ -98,7 +98,7 @@ pub fn start() -> Result<(), JsValue> {
     // `requestAnimationFrame`.
     with_app(|a| {
         if a.selected.is_some() {
-            activate_tab("agent");
+            reveal_agent_panel();
         }
         a.follow_population();
         a.render();
@@ -171,6 +171,12 @@ struct App {
     tick_acc: f64,
     /// Horodatage de la frame précédente (ms), ou `None` à la première.
     last_ts: Option<f64>,
+    /// Horodatage (ms, horloge rAF depuis le chargement) du **début** de la
+    /// simulation courante — première frame, ou dernière régénération. Sert à
+    /// afficher « en cours depuis » en temps réel. `None` tant qu'aucune frame.
+    start_ts: Option<f64>,
+    /// Temps réel écoulé depuis `start_ts`, en ms — recalculé chaque frame.
+    elapsed_ms: f64,
 
     /// Seed courante (pour l'affichage et la régénération).
     seed: u64,
@@ -250,6 +256,8 @@ impl App {
             speed: SPEEDS[1],
             tick_acc: 0.0,
             last_ts: None,
+            start_ts: None,
+            elapsed_ms: 0.0,
             seed,
             placing: false,
             selected: None,
@@ -336,6 +344,8 @@ impl App {
         self.pop_history.clear();
         self.last_sampled_day = None;
         self.selected = None; // les identifiants de l'ancien monde ne valent plus rien
+        self.start_ts = None; // « en cours depuis » repart de la régénération
+        self.elapsed_ms = 0.0;
         self.invalidate_terrain();
     }
 
@@ -377,6 +387,10 @@ impl App {
             None => 0.0,
         };
         self.last_ts = Some(ts);
+        // Temps réel écoulé depuis le début de cette simulation (« en cours
+        // depuis »). La première frame fixe l'origine.
+        let start = *self.start_ts.get_or_insert(ts);
+        self.elapsed_ms = ts - start;
 
         if self.playing {
             self.tick_acc += dt_s * self.speed;
@@ -678,37 +692,25 @@ impl App {
     }
 
     fn update_readout(&self) {
-        if let Some(el) = document().get_element_by_id("readout") {
-            let km_per_screen = tiles_to_km(self.width as f64 / self.camera.scale);
-            el.set_text_content(Some(&format!(
+        let t = self.sim.time;
+        // Le dock de temps : la date de jeu compacte.
+        set_html("dock-date", &format!("An <b>{}</b> · jour <b>{}</b>", t.year(), t.day_of_year()));
+        // Readout de cadrage (panneau Carte).
+        set_text(
+            "readout",
+            &format!(
                 "{} · centre ({:.0}, {:.0}) km · largeur {:.0} km",
                 self.layer.label(),
                 tiles_to_km(self.camera.cx),
                 tiles_to_km(self.camera.cy),
-                km_per_screen,
-            )));
-        }
-        if let Some(el) = document().get_element_by_id("sim-readout") {
-            let (herbivores, predators, _, _) = self.sim.fauna_census();
-            let t = self.sim.time;
-            let children = self
-                .sim
-                .agents
-                .query::<&Demographics>()
-                .iter()
-                .filter(|(_, d)| !d.is_adult(t.tick))
-                .count();
-            el.set_text_content(Some(&format!(
-                "An {}, jour {} · {} humains (dont {} enfants, {} naissances) · {:.0} gibier · {:.0} prédateurs",
-                t.year(),
-                t.day_of_year(),
-                self.sim.population(),
-                children,
-                self.sim.births.len(),
-                herbivores,
-                predators,
-            )));
-        }
+                tiles_to_km(self.width as f64 / self.camera.scale),
+            ),
+        );
+        // La faune, sous les effectifs.
+        let (herbivores, predators, _, _) = self.sim.fauna_census();
+        set_text("sim-readout", &format!("{herbivores:.0} gibier · {predators:.0} prédateurs"));
+        // « En cours depuis » (temps réel) dans les Paramètres.
+        set_text("sim-elapsed", &format_elapsed(self.elapsed_ms));
         self.update_pyramid();
     }
 
@@ -716,9 +718,6 @@ impl App {
     /// L'observable démographique de la Phase 3 — une population qui persiste
     /// a une base d'enfants et un sommet d'anciens.
     fn update_pyramid(&self) {
-        let Some(el) = document().get_element_by_id("age-pyramid") else {
-            return;
-        };
         let tick = self.sim.time.tick;
         let mut buckets = [0usize; 8]; // 0-9, 10-19, …, 70+
         for (_, demo) in self.sim.agents.query::<&Demographics>().iter() {
@@ -727,20 +726,21 @@ impl App {
         }
         let total: usize = buckets.iter().sum();
         if total == 0 {
-            el.set_text_content(Some("population éteinte"));
+            set_html("age-pyramid", "<div class=\"empty\">population éteinte</div>");
             return;
         }
-        let mut text = String::new();
+        // Barres à l'échelle de la tranche la plus peuplée (la forme se lit
+        // mieux qu'à l'échelle du total).
+        let max = buckets.iter().copied().max().unwrap_or(1).max(1);
+        let mut html = String::new();
         for (i, &n) in buckets.iter().enumerate().rev() {
-            if n == 0 {
-                continue;
-            }
-            // Barres proportionnelles, 24 colonnes au plus.
-            let bar = "█".repeat(1 + n * 23 / total.max(1));
-            let label = if i == 7 { "70+".to_string() } else { format!("{:>2}-{}", i * 10, i * 10 + 9) };
-            text.push_str(&format!("{label:>5} {bar} {n}\n"));
+            let label = if i == 7 { "70+".to_string() } else { format!("{}-{}", i * 10, i * 10 + 9) };
+            let w = 100.0 * n as f64 / max as f64;
+            html.push_str(&format!(
+                "<div class=\"pyr\"><span class=\"p-l\">{label}</span><span class=\"bar\"><i style=\"width:{w:.0}%\"></i></span><span class=\"p-v\">{n}</span></div>"
+            ));
         }
-        el.set_text_content(Some(&text));
+        set_html("age-pyramid", &html);
     }
 
     /// Onglet Population : effectifs par sexe/âge, naissances, décès par
@@ -767,43 +767,56 @@ impl App {
             n += 1;
         }
 
-        if let Some(el) = document().get_element_by_id("pop-stats") {
-            let (mut starved, mut dehydrated, mut frozen, mut old_age) = (0u32, 0u32, 0u32, 0u32);
-            for d in &self.sim.deaths {
-                match d.cause {
-                    DeathCause::Starvation => starved += 1,
-                    DeathCause::Dehydration => dehydrated += 1,
-                    DeathCause::Hypothermia => frozen += 1,
-                    DeathCause::OldAge => old_age += 1,
-                }
+        // Effectifs (grand total + puces par sexe/âge) et décès par cause.
+        let (mut starved, mut dehydrated, mut frozen, mut old_age) = (0u32, 0u32, 0u32, 0u32);
+        for d in &self.sim.deaths {
+            match d.cause {
+                DeathCause::Starvation => starved += 1,
+                DeathCause::Dehydration => dehydrated += 1,
+                DeathCause::Hypothermia => frozen += 1,
+                DeathCause::OldAge => old_age += 1,
             }
-            el.set_text_content(Some(&format!(
-                "Population   {n:>4}   ({women} ♀ · {men} ♂ · {children} enfants)\n\
-                 Naissances   {:>4}\n\
-                 Décès        {:>4}   (faim {starved} · soif {dehydrated} · froid {frozen} · vieillesse {old_age})",
+        }
+        set_html(
+            "pop-stats",
+            &format!(
+                "<div class=\"tallies\">\
+                   <span class=\"tally-big\">{n}</span>\
+                   <span class=\"chip\"><span class=\"cd\" style=\"background:#e85ca0\"></span>{women} ♀</span>\
+                   <span class=\"chip\"><span class=\"cd\" style=\"background:#4a90e2\"></span>{men} ♂</span>\
+                   <span class=\"chip\"><span class=\"cd\" style=\"background:#f2c94c\"></span>{children} enfants</span>\
+                 </div>\
+                 <div class=\"deaths\">\
+                   <span><b>{}</b> naissances</span>\
+                   <span><b>{}</b> décès</span>\
+                   <span>faim {starved} · soif {dehydrated} · froid {frozen} · vieillesse {old_age}</span>\
+                 </div>",
                 self.sim.births.len(),
                 self.sim.deaths.len(),
-            )));
-        }
+            ),
+        );
 
-        if let Some(el) = document().get_element_by_id("pop-knowledge") {
-            if n == 0 {
-                el.set_text_content(Some("population éteinte"));
-                return;
-            }
-            let cell_km = tiles_to_km(cairn_sim::memory::MEMORY_CELL_TILES as f64);
-            let cells_mean = cells_sum as f64 / f64::from(n);
-            el.set_text_content(Some(&format!(
-                "Territoire connu   {:.0} km² en moyenne ({cells_mean:.0} cellules)\n\
-                 Sources connues    {:.1} par tête\n\
-                 Cueillette         {:.2}\n\
-                 Chasse             {:.2}",
+        // Savoirs moyens : compétences en jauges, territoire/sources en lignes.
+        if n == 0 {
+            set_html("pop-knowledge", "<div class=\"empty\">population éteinte</div>");
+            return;
+        }
+        let cell_km = tiles_to_km(cairn_sim::memory::MEMORY_CELL_TILES as f64);
+        let cells_mean = cells_sum as f64 / f64::from(n);
+        let forage = forage_sum / n as f32;
+        let hunt = hunt_sum / n as f32;
+        set_html(
+            "pop-knowledge",
+            &format!(
+                "{}{}\
+                 <div class=\"kv\"><span class=\"k\">Territoire connu</span><span class=\"v\">{:.0} km²</span></div>\
+                 <div class=\"kv\"><span class=\"k\">Sources / tête</span><span class=\"v\">{:.1}</span></div>",
+                gauge_html("Cueillette", forage, &format!("{forage:.2}"), "fill-accent"),
+                gauge_html("Chasse", hunt, &format!("{hunt:.2}"), "fill-accent"),
                 cells_mean * cell_km * cell_km,
                 springs_sum as f64 / f64::from(n),
-                forage_sum / n as f32,
-                hunt_sum / n as f32,
-            )));
-        }
+            ),
+        );
     }
 
     /// Panneau d'inspection des clans (onglet Population, Phase 4) :
@@ -812,59 +825,58 @@ impl App {
     /// est déjà trié par `ClanId` (`social::detect_clans`), donc l'ordre
     /// d'affichage est stable d'une frame à l'autre sans tri ici.
     fn update_clan_panel(&self) {
-        let Some(el) = document().get_element_by_id("clan-panel") else {
-            return;
-        };
         if self.sim.clans.is_empty() {
-            el.set_text_content(Some("aucun clan formé"));
+            set_html("clan-panel", "<div class=\"empty\">aucun clan formé</div>");
             return;
         }
-        let tick = self.sim.time.tick;
-        let mut lines = Vec::new();
+        let mut html = String::new();
         for clan in &self.sim.clans {
-            let age_days = tick.saturating_sub(clan.founded_tick) / cairn_core::TICKS_PER_DAY;
-            let cap = cairn_sim::sim::STOCK_CAP_PER_MEMBER * clan.members.len() as f32;
-            lines.push(format!(
-                "#{:<3} {:>3} membres   stock {:>4.1}/{cap:<4.1}   {age_days:>3} j",
-                clan.id.0,
-                clan.members.len(),
-                clan.stock,
-            ));
+            let n = clan.members.len();
+            let cap = cairn_sim::sim::STOCK_CAP_PER_MEMBER * n as f32;
+            let frac = if cap > 0.0 { clan.stock / cap } else { 0.0 };
+            let age = self.sim.clan_age(clan.id);
+            let age_class = if matches!(age, cairn_sim::Age::Paleolithic) {
+                "chip age paleo"
+            } else {
+                "chip age"
+            };
 
-            // Chef (incrément 8) + tension maximale avec un voisin (incrément 6).
-            let max_tension = self
-                .sim
-                .clans
-                .iter()
-                .filter(|o| o.id != clan.id)
-                .map(|o| self.sim.clan_relations.tension_between(clan.id, o.id))
-                .fold(0.0_f32, f32::max);
-            let mut second = format!("     chef #{}", clan.chief.0);
-            if max_tension >= 0.05 {
-                second.push_str(&format!("   tension max {max_tension:.2}"));
+            // Tension maximale avec un voisin (incrément 6) + son identité.
+            let (mut best_t, mut best_other) = (0.0f32, 0u64);
+            for o in &self.sim.clans {
+                if o.id == clan.id {
+                    continue;
+                }
+                let t = self.sim.clan_relations.tension_between(clan.id, o.id);
+                if t > best_t {
+                    best_t = t;
+                    best_other = o.id.0;
+                }
             }
-            // Ce que le clan cherche à bâtir (incrément 9), s'il désire qqch.
-            if let Some(kind) = clan.desired {
-                second.push_str(&format!("   veut {}", structure_name(kind)));
-            }
-            lines.push(second);
 
-            // Âge dérivé + corpus de savoirs (Phase 5) : l'union des techs des
-            // membres et l'étiquette d'âge qui en découle (jamais stockée, voir
-            // `clan_age`). C'est ici qu'on *voit* l'Histoire d'un clan avancer.
+            // Corpus de savoirs (Phase 5) : l'union des techs des membres.
             let corpus: Vec<&str> = self
                 .sim
                 .clan_corpus(clan.id)
                 .iter()
                 .map(|&t| self.sim.tech_tree.get(t).label.as_str())
                 .collect();
-            lines.push(format!(
-                "     {} · sait : {}",
-                self.sim.clan_age(clan.id).label(),
-                if corpus.is_empty() { "rien encore".to_string() } else { corpus.join(", ") },
-            ));
 
-            // Structures possédées (incrément 9), triées et comptées par type.
+            // Ligne « chef · sait · tension · veut ».
+            let mut line = format!("chef <b>#{}</b>", clan.chief.0);
+            if !corpus.is_empty() {
+                line.push_str(&format!(" · sait : <b>{}</b>", corpus.join(", ")));
+            }
+            if best_t >= 0.05 {
+                line.push_str(&format!(
+                    " · <span class=\"warn\">tension {best_t:.2} avec #{best_other}</span>"
+                ));
+            }
+            if let Some(kind) = clan.desired {
+                line.push_str(&format!(" · veut <b>{}</b>", structure_name(kind)));
+            }
+
+            // Structures possédées (incrément 9), triées par type.
             let mut owned: Vec<&str> = self
                 .sim
                 .structures
@@ -873,11 +885,31 @@ impl App {
                 .map(|s| structure_name(s.kind))
                 .collect();
             owned.sort_unstable();
-            if !owned.is_empty() {
-                lines.push(format!("     structures : {}", owned.join(", ")));
-            }
+            let structs_line = if owned.is_empty() {
+                String::new()
+            } else {
+                format!("<div class=\"c-line\">structures : <b>{}</b></div>", owned.join(", "))
+            };
+
+            html.push_str(&format!(
+                "<div class=\"clan\">\
+                   <div class=\"c-top\">\
+                     <span class=\"c-id\" style=\"background:{color}\"></span>\
+                     <span class=\"c-name\">Clan #{id}</span>\
+                     <span class=\"{age_class}\">{age_label}</span>\
+                     <span class=\"c-meta\">{n} membres</span>\
+                   </div>\
+                   <div class=\"stockline\"><span class=\"s-l\">stock</span>{bar}<span class=\"s-v\">{stock:.0}/{cap:.0}</span></div>\
+                   <div class=\"c-line\">{line}</div>{structs_line}\
+                 </div>",
+                color = clan_color(clan.id),
+                id = clan.id.0,
+                age_label = age.label(),
+                bar = bar_html(frac, health_fill(frac)),
+                stock = clan.stock,
+            ));
         }
-        el.set_text_content(Some(&lines.join("\n")));
+        set_html("clan-panel", &html);
     }
 
     /// Panneau d'inspection d'un agent (onglet Agent, Phase 5 incrément 8) :
@@ -889,31 +921,30 @@ impl App {
     fn update_agent_panel(&mut self) {
         let others = ["agent-needs", "agent-traits", "agent-action", "agent-why", "agent-lore"];
         let Some(sel) = self.selected else {
-            set_text("agent-ident", "Cliquez un humain sur la carte pour l'inspecter.");
+            set_html("agent-ident", "<div class=\"empty\">Cliquez un humain sur la carte pour l'inspecter.</div>");
             for id in others {
-                set_text(id, "");
+                set_html(id, "");
             }
             return;
         };
         // La pile de motivations : on rejoue la délibération de l'agent (sans
-        // effet de bord). `None` = agent disparu ou nourrisson (porté). On la
-        // calcule **avant** l'emprunt immuable qui suit (elle veut `&mut sim`).
-        let why = self.sim.inspect_agent(AgentId(sel)).map_or_else(
-            || "nourrisson — porté, ne délibère pas".to_string(),
-            |ms| {
-                ms.iter()
-                    .map(|m| {
-                        format!(
-                            "{:<22} {} {:>3.0}%",
-                            task_name(m.kind),
-                            gauge(m.probability),
-                            m.probability * 100.0,
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            },
-        );
+        // effet de bord), en lignes `motiv` (la plus probable surlignée). `None`
+        // = agent disparu ou nourrisson (porté). Calculée **avant** l'emprunt
+        // immuable qui suit (elle veut `&mut sim`).
+        let why = self.sim.inspect_agent(AgentId(sel)).map(|ms| {
+            ms.iter()
+                .enumerate()
+                .map(|(i, m)| {
+                    let cls = if i == 0 { "motiv top" } else { "motiv" };
+                    format!(
+                        "<div class=\"{cls}\"><span class=\"m-l\">{}</span>{}<span class=\"m-v\">{:.0}%</span></div>",
+                        task_name(m.kind),
+                        bar_html(m.probability, ""),
+                        m.probability * 100.0,
+                    )
+                })
+                .collect::<String>()
+        });
         let tick = self.sim.time.tick;
         let sections: Option<[String; 5]> = {
             let mut found = None;
@@ -943,9 +974,10 @@ impl App {
                 if id.0 != sel {
                     continue;
                 }
-                let sex = match demo.sex {
-                    Sex::Female => "♀",
-                    Sex::Male => "♂",
+                // — Identité : nom + puces (sexe/âge, stade, clan+âge tech) —
+                let (sex_sym, sex_col) = match demo.sex {
+                    Sex::Female => ("♀", "#e85ca0"),
+                    Sex::Male => ("♂", "#4a90e2"),
                 };
                 let stage = if demo.is_infant(tick) {
                     "nourrisson"
@@ -954,52 +986,91 @@ impl App {
                 } else {
                     "enfant"
                 };
-                let clan = match membership.0 {
-                    Some(cid) => format!("clan #{} · {}", cid.0, self.sim.clan_age(cid).label()),
-                    None => "sans clan".to_string(),
+                let clan_chip = match membership.0 {
+                    Some(cid) => {
+                        let age = self.sim.clan_age(cid);
+                        let cls = if matches!(age, cairn_sim::Age::Paleolithic) {
+                            "chip age paleo"
+                        } else {
+                            "chip age"
+                        };
+                        format!("<span class=\"{cls}\">clan #{} · {}</span>", cid.0, age.label())
+                    }
+                    None => "<span class=\"chip\">sans clan</span>".to_string(),
                 };
                 let ident = format!(
-                    "Humain #{}   {sex}   {:.0} ans ({stage})   {clan}",
+                    "<div class=\"name\">Humain #{}</div>\
+                     <div class=\"chips\">\
+                       <span class=\"chip\"><span class=\"cd\" style=\"background:{sex_col}\"></span>{sex_sym} {:.0} ans</span>\
+                       <span class=\"chip\">{stage}</span>{clan_chip}\
+                     </div>",
                     id.0,
                     demo.age_years(tick).max(0.0),
                 );
 
-                let need = |label: &str, v: f32| format!("{label:<8} {} {:>3.0}%", gauge(v), v * 100.0);
-                let needs = [
-                    need("Santé", phys.health),
-                    need("Faim", phys.hunger),
-                    need("Soif", phys.thirst),
-                    need("Fatigue", phys.fatigue),
-                    need("Froid", phys.cold),
-                ]
-                .join("\n");
+                // — Besoins : jauges couleur d'état (santé haute = vert ; un
+                //   besoin haut = alarme) —
+                let pc = |v: f32| format!("{:.0}%", v * 100.0);
+                let needs = format!(
+                    "{}{}{}{}{}",
+                    gauge_html("Santé", phys.health, &pc(phys.health), health_fill(phys.health)),
+                    gauge_html("Faim", phys.hunger, &pc(phys.hunger), need_fill(phys.hunger)),
+                    gauge_html("Soif", phys.thirst, &pc(phys.thirst), need_fill(phys.thirst)),
+                    gauge_html("Fatigue", phys.fatigue, &pc(phys.fatigue), need_fill(phys.fatigue)),
+                    gauge_html("Froid", phys.cold, &pc(phys.cold), need_fill(phys.cold)),
+                );
 
-                let trait_row = |label: &str, v: f32| format!("{label:<12} {}", gauge(v));
-                let traits_s = [
-                    trait_row("Force", traits.strength),
-                    trait_row("Endurance", traits.endurance),
-                    trait_row("Dextérité", traits.dexterity),
-                    trait_row("Curiosité", traits.curiosity),
-                    trait_row("Sociabilité", traits.sociability),
-                    trait_row("Agressivité", traits.aggression),
-                    String::new(),
-                    trait_row("Cueillette", skills.foraging),
-                    trait_row("Chasse", skills.hunting),
-                    trait_row("Oratoire", skills.oratory),
-                ]
-                .join("\n");
+                // — Traits & compétences (jauges accent) —
+                let g = |label: &str, v: f32| gauge_html(label, v, &format!("{v:.2}"), "fill-accent");
+                let traits_s = format!(
+                    "{}{}{}{}{}{}{}{}{}",
+                    g("Force", traits.strength),
+                    g("Endurance", traits.endurance),
+                    g("Dextérité", traits.dexterity),
+                    g("Curiosité", traits.curiosity),
+                    g("Sociabilité", traits.sociability),
+                    g("Agressivité", traits.aggression),
+                    g("Cueillette", skills.foraging),
+                    g("Chasse", skills.hunting),
+                    g("Oratoire", skills.oratory),
+                );
 
+                // — En ce moment : tâche, activité, prestige, portage —
                 let task = beh.task.map_or_else(|| "—".to_string(), |t| task_name(t.kind));
-                let mut action =
-                    format!("Tâche      {task}\nActivité   {}\nPrestige   {:.1}", activity_name(beh.activity), prestige.0);
+                let mut action = format!(
+                    "<div class=\"kv\"><span class=\"k\">Tâche</span><span class=\"v accent\">{task}</span></div>\
+                     <div class=\"kv\"><span class=\"k\">Activité</span><span class=\"v\">{}</span></div>\
+                     <div class=\"kv\"><span class=\"k\">Prestige</span><span class=\"v\">{:.1}</span></div>",
+                    activity_name(beh.activity),
+                    prestige.0,
+                );
                 if carrying.0 > 0.01 {
-                    action.push_str(&format!("\nPorte      {:.1} de gibier", carrying.0));
+                    action.push_str(&format!(
+                        "<div class=\"kv\"><span class=\"k\">Porte</span><span class=\"v\">{:.1} de gibier</span></div>",
+                        carrying.0
+                    ));
                 }
 
-                let seen: Vec<&str> =
-                    Exposure::ALL.iter().filter(|&&e| exp.has(e)).map(|&e| exposure_name(e)).collect();
-                let techs: Vec<&str> =
-                    know.iter().map(|t| self.sim.tech_tree.get(t).label.as_str()).collect();
+                // — A vu / Sait / Lignée : puces + lignes —
+                let seen: String = Exposure::ALL
+                    .iter()
+                    .filter(|&&e| exp.has(e))
+                    .map(|&e| format!("<span class=\"chip mat\">{}</span>", exposure_name(e)))
+                    .collect();
+                let techs: String = know
+                    .iter()
+                    .map(|t| format!("<span class=\"chip tech\">{}</span>", self.sim.tech_tree.get(t).label))
+                    .collect();
+                let seen_block = if seen.is_empty() {
+                    "<div class=\"lore-line\">A vu : rien encore</div>".to_string()
+                } else {
+                    format!("<div class=\"chipset\">{seen}</div>")
+                };
+                let tech_block = if techs.is_empty() {
+                    "<div class=\"lore-line\">Sait faire : rien encore</div>".to_string()
+                } else {
+                    format!("<div class=\"chipset\">{techs}</div>")
+                };
                 let lineage = match (kin.mother, kin.father) {
                     (None, None) => "fondateur (sans ascendance)".to_string(),
                     (m, f) => format!(
@@ -1009,9 +1080,9 @@ impl App {
                     ),
                 };
                 let lore = format!(
-                    "A vu       {}\nSait faire {}\nLignée     {lineage}\nTerritoire {} cellules · {} sources",
-                    if seen.is_empty() { "rien encore".to_string() } else { seen.join(", ") },
-                    if techs.is_empty() { "rien encore".to_string() } else { techs.join(", ") },
+                    "{seen_block}{tech_block}\
+                     <div class=\"lore-line\">Lignée : {lineage}</div>\
+                     <div class=\"lore-line\">Territoire : <b>{}</b> cellules · <b>{}</b> sources</div>",
                     mem.known.len(),
                     mem.springs.len(),
                 );
@@ -1025,18 +1096,27 @@ impl App {
         match sections {
             None => {
                 self.selected = None;
-                set_text("agent-ident", "Cet humain n'est plus (mort, ou hors de la scène).");
+                set_html(
+                    "agent-ident",
+                    "<div class=\"empty\">Cet humain n'est plus (mort, ou hors de la scène).</div>",
+                );
                 for id in others {
-                    set_text(id, "");
+                    set_html(id, "");
                 }
             }
             Some([ident, needs, traits_s, action, lore]) => {
-                set_text("agent-ident", &ident);
-                set_text("agent-needs", &needs);
-                set_text("agent-traits", &traits_s);
-                set_text("agent-action", &action);
-                set_text("agent-why", &why);
-                set_text("agent-lore", &lore);
+                set_html("agent-ident", &ident);
+                set_html("agent-needs", &needs);
+                set_html("agent-traits", &traits_s);
+                set_html("agent-action", &action);
+                // `why` est None pour un nourrisson (il ne délibère pas).
+                set_html(
+                    "agent-why",
+                    &why.unwrap_or_else(|| {
+                        "<div class=\"empty\">nourrisson — porté, ne délibère pas</div>".to_string()
+                    }),
+                );
+                set_html("agent-lore", &lore);
             }
         }
     }
@@ -1054,12 +1134,26 @@ impl App {
         });
         let span = f64::from(max_p - min_p).max(1.0);
         let n = self.pop_history.len();
+        let x_of = |i: usize| i as f64 / (n - 1) as f64 * POP_CHART_W;
+        let y_of = |p: u32| POP_CHART_H - 4.0 - (f64::from(p - min_p) / span) * (POP_CHART_H - 8.0);
+
+        // Aire sous la courbe (accent translucide).
+        ctx.begin_path();
+        ctx.move_to(0.0, POP_CHART_H);
+        for (i, &(_, p)) in self.pop_history.iter().enumerate() {
+            ctx.line_to(x_of(i), y_of(p));
+        }
+        ctx.line_to(POP_CHART_W, POP_CHART_H);
+        ctx.close_path();
+        ctx.set_fill_style_str("rgba(110, 168, 254, 0.16)");
+        ctx.fill();
+
+        // La ligne.
         ctx.begin_path();
         ctx.set_stroke_style_str("#6ea8fe");
-        ctx.set_line_width(1.5);
+        ctx.set_line_width(1.6);
         for (i, &(_, p)) in self.pop_history.iter().enumerate() {
-            let x = i as f64 / (n - 1) as f64 * POP_CHART_W;
-            let y = POP_CHART_H - 3.0 - (f64::from(p - min_p) / span) * (POP_CHART_H - 6.0);
+            let (x, y) = (x_of(i), y_of(p));
             if i == 0 {
                 ctx.move_to(x, y);
             } else {
@@ -1067,6 +1161,14 @@ impl App {
             }
         }
         ctx.stroke();
+
+        // Point de tête (dernière valeur), légèrement inséré du bord droit.
+        if let Some(&(_, p)) = self.pop_history.back() {
+            ctx.begin_path();
+            ctx.set_fill_style_str("#bcd4ff");
+            let _ = ctx.arc(POP_CHART_W - 2.0, y_of(p), 2.6, 0.0, std::f64::consts::TAU);
+            ctx.fill();
+        }
     }
 
     fn invalidate_terrain(&mut self) {
@@ -1106,7 +1208,7 @@ impl App {
                     // le vide). On bascule alors sur l'onglet Agent.
                     self.selected = self.pick_agent(px, py);
                     if self.selected.is_some() {
-                        activate_tab("agent");
+                        reveal_agent_panel();
                     }
                 }
             }
@@ -1339,15 +1441,78 @@ fn set_text(id: &str, text: &str) {
     }
 }
 
-/// Une jauge unicode de 10 cases pour une valeur dans [0, 1] : le vocabulaire
-/// visuel déjà employé par la pyramide des âges (`█`), sans nouvelle CSS.
-fn gauge(v: f32) -> String {
-    let filled = (v.clamp(0.0, 1.0) * 10.0).round() as usize;
-    let mut s = String::with_capacity(10 * 3);
-    for i in 0..10 {
-        s.push(if i < filled { '█' } else { '░' });
+/// Écrit l'**HTML interne** d'un élément par id (les panneaux modernisés
+/// composent des jauges/puces, pas du texte brut). Les valeurs injectées sont
+/// toutes contrôlées (nombres, étiquettes de l'arbre tech, noms de tâches) —
+/// aucune saisie libre ne transite ici, donc pas de risque d'injection.
+fn set_html(id: &str, html: &str) {
+    if let Some(el) = document().get_element_by_id(id) {
+        el.set_inner_html(html);
     }
-    s
+}
+
+/// Une barre de jauge : un rail sombre rempli à `frac` (0–1) par la classe de
+/// dégradé `fill` (`fill-good`/`warn`/`crit`/`accent`, ou vide pour le style
+/// par défaut des motivations).
+fn bar_html(frac: f32, fill: &str) -> String {
+    format!(
+        "<span class=\"bar\"><i class=\"{fill}\" style=\"width:{:.0}%\"></i></span>",
+        (frac.clamp(0.0, 1.0) * 100.0)
+    )
+}
+
+/// Une ligne de jauge complète : étiquette · barre · valeur.
+fn gauge_html(label: &str, frac: f32, value: &str, fill: &str) -> String {
+    format!(
+        "<div class=\"gauge\"><span class=\"g-l\">{label}</span>{}<span class=\"g-v\">{value}</span></div>",
+        bar_html(frac, fill)
+    )
+}
+
+/// Couleur d'un **besoin** (faim, soif, fatigue, froid) : plus c'est haut, plus
+/// c'est alarmant — vert calme, ambre à surveiller, rouge critique.
+fn need_fill(v: f32) -> &'static str {
+    if v < 0.4 {
+        "fill-good"
+    } else if v < 0.7 {
+        "fill-warn"
+    } else {
+        "fill-crit"
+    }
+}
+
+/// Couleur de la **santé** : l'inverse d'un besoin — haut = bon (vert).
+fn health_fill(v: f32) -> &'static str {
+    if v > 0.6 {
+        "fill-good"
+    } else if v > 0.3 {
+        "fill-warn"
+    } else {
+        "fill-crit"
+    }
+}
+
+/// Formate un temps réel écoulé (ms) en « mois · jours · heures · minutes »,
+/// en n'affichant les grandes unités que si elles sont non nulles (mais
+/// toujours au moins les minutes) — pour le « en cours depuis » des Paramètres.
+fn format_elapsed(ms: f64) -> String {
+    let total_min = (ms / 60_000.0).max(0.0) as u64;
+    let months = total_min / (30 * 24 * 60);
+    let days = (total_min / (24 * 60)) % 30;
+    let hours = (total_min / 60) % 24;
+    let mins = total_min % 60;
+    let mut parts = Vec::new();
+    if months > 0 {
+        parts.push(format!("{months} mois"));
+    }
+    if days > 0 || months > 0 {
+        parts.push(format!("{days} j"));
+    }
+    if hours > 0 || days > 0 || months > 0 {
+        parts.push(format!("{hours} h"));
+    }
+    parts.push(format!("{mins} min"));
+    parts.join(" · ")
 }
 
 /// Nom lisible de la tâche en cours, pour le panneau d'agent — le « pourquoi »
@@ -1400,26 +1565,11 @@ fn exposure_name(e: Exposure) -> &'static str {
     }
 }
 
-/// Amène un onglet au premier plan depuis Rust, en répliquant la bascule que
-/// fait le JS d'`index.html` (classe `active` sur le bouton, `hidden` sur les
-/// panes) — pour que sélectionner un agent ouvre aussitôt l'onglet Agent.
-fn activate_tab(name: &str) {
-    let doc = document();
-    if let Ok(tabs) = doc.query_selector_all(".tab-btn") {
-        for i in 0..tabs.length() {
-            if let Some(el) = tabs.item(i).and_then(|n| n.dyn_into::<web_sys::Element>().ok()) {
-                let on = el.get_attribute("data-tab").as_deref() == Some(name);
-                let _ = el.class_list().toggle_with_force("active", on);
-            }
-        }
-    }
-    if let Ok(panes) = doc.query_selector_all(".tab-pane") {
-        for i in 0..panes.length() {
-            if let Some(el) = panes.item(i).and_then(|n| n.dyn_into::<web_sys::Element>().ok()) {
-                let hide = el.get_attribute("data-pane").as_deref() != Some(name);
-                let _ = el.class_list().toggle_with_force("hidden", hide);
-            }
-        }
+/// Déplie le panneau Agent (panneau droit) — appelé quand on sélectionne un
+/// humain, pour que son inspection soit visible même si le panneau était replié.
+fn reveal_agent_panel() {
+    if let Some(el) = document().get_element_by_id("panel-right") {
+        let _ = el.class_list().remove_1("collapsed");
     }
 }
 

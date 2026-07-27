@@ -5,326 +5,429 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
   <title>Cairn</title>
   <style>
+    /* HUD sombre translucide (système existant honoré), modernisé : jauges CSS,
+       puces d'état, dock de temps fixe. Monde volontairement sombre — le HUD
+       est posé sur la carte de jeu. */
     :root {
-      --panel-bg: rgba(18, 22, 30, 0.86);
-      --panel-border: rgba(120, 140, 170, 0.25);
-      --text: #d6dbe4;
-      --text-dim: #8a93a3;
-      --accent: #6ea8fe;
+      --ground:      #0b0e14;
+      --panel:       rgba(17, 21, 29, 0.82);
+      --head:        rgba(255, 255, 255, 0.045);
+      --line:        rgba(120, 140, 170, 0.22);
+      --line-soft:   rgba(120, 140, 170, 0.12);
+      --text:        #dce1ea;
+      --dim:         #8790a1;
+      --faint:       #626b7d;
+      --accent:      #6ea8fe;
+      --accent-dim:  rgba(110, 168, 254, 0.16);
+      --good:  #5fd18b;
+      --warn:  #f2c94c;
+      --crit:  #ef7a5e;
+      --track: rgba(255, 255, 255, 0.07);
+      --shadow: 0 10px 34px rgba(0, 0, 0, 0.55);
+      --r: 12px;
+      --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace;
+      --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0e14; }
-    /* La carte occupe tout l'écran ; l'UI flotte par-dessus. */
+    html, body { width: 100%; height: 100%; overflow: hidden; background: var(--ground); }
+    body { font-family: var(--sans); color: var(--text); }
+
+    /* La carte occupe tout l'écran ; le HUD flotte par-dessus. */
     #view {
       position: fixed; inset: 0; display: block;
-      width: 100vw; height: 100vh;
-      cursor: grab; image-rendering: pixelated;
+      width: 100vw; height: 100vh; cursor: grab; image-rendering: pixelated;
     }
     #view:active { cursor: grabbing; }
 
-    /* Panneau flottant, déplaçable, repliable. */
-    #panel {
-      position: absolute; top: 16px; left: 16px;
-      min-width: 190px;
-      background: var(--panel-bg);
-      border: 1px solid var(--panel-border);
-      border-radius: 10px;
-      color: var(--text);
-      font: 13px/1.4 system-ui, sans-serif;
-      backdrop-filter: blur(6px);
-      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
-      user-select: none;
-      overflow: hidden;
+    /* ————— Panneau (carte flottante) ————— */
+    .panel {
+      position: fixed; width: 322px; max-height: calc(100vh - 96px);
+      display: flex; flex-direction: column;
+      background: var(--panel);
+      -webkit-backdrop-filter: blur(14px) saturate(1.2);
+      backdrop-filter: blur(14px) saturate(1.2);
+      border: 1px solid var(--line); border-radius: var(--r);
+      box-shadow: var(--shadow); overflow: hidden; z-index: 20;
     }
-    #panel-header {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 9px 12px; cursor: move;
-      background: rgba(255, 255, 255, 0.04);
-      border-bottom: 1px solid var(--panel-border);
-    }
-    #panel-header .title { font-weight: 600; letter-spacing: 0.03em; }
-    #panel-toggle {
-      cursor: pointer; color: var(--text-dim); background: none; border: none;
-      font-size: 15px; line-height: 1;
-    }
-    #panel-body { padding: 10px 12px; display: grid; gap: 6px; }
-    #panel.collapsed #panel-body { display: none; }
+    #panel-left  { top: 20px; left: 20px; }
+    #panel-right { top: 20px; right: 20px; }
+    #panel-params { top: 20px; right: 360px; width: 300px; z-index: 30; }
+    .panel.hidden { display: none; }
 
+    .panel-head {
+      flex: none; display: flex; align-items: center; gap: 8px;
+      padding: 10px 12px; background: var(--head);
+      border-bottom: 1px solid var(--line); cursor: move; user-select: none;
+    }
+    .panel-head .grip {
+      width: 13px; height: 13px; flex: none; opacity: 0.5; color: var(--faint);
+      background: radial-gradient(currentColor 1.1px, transparent 1.2px) 0 0 / 5px 5px;
+    }
+    .panel-head .title { font-weight: 650; font-size: 13px; letter-spacing: 0.02em; flex: 1; }
+    .panel-head .hbtn {
+      width: 24px; height: 24px; display: grid; place-items: center;
+      border: none; background: transparent; color: var(--dim);
+      border-radius: 7px; cursor: pointer; font-size: 14px; line-height: 1;
+    }
+    .panel-head .hbtn:hover { background: rgba(255,255,255,0.08); color: var(--text); }
+
+    .panel-body {
+      padding: 12px; overflow-y: auto; overscroll-behavior: contain;
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .panel.collapsed .panel-body { display: none; }
+    .panel-body::-webkit-scrollbar { width: 9px; }
+    .panel-body::-webkit-scrollbar-thumb {
+      background: rgba(255,255,255,0.12); border-radius: 9px;
+      border: 3px solid transparent; background-clip: content-box;
+    }
+
+    /* ————— Sections ————— */
+    .sect { display: flex; flex-direction: column; gap: 9px; }
+    .rows { display: flex; flex-direction: column; gap: 9px; }
+    .eyebrow {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 10.5px; font-weight: 650; letter-spacing: 0.13em;
+      text-transform: uppercase; color: var(--faint);
+    }
+    .eyebrow::after { content: ""; flex: 1; height: 1px; background: var(--line-soft); }
+    .divider { height: 1px; background: var(--line-soft); margin: 2px 0; }
+
+    /* ————— Boutons de couche (pilules) ————— */
+    .layers { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
     .layer-btn {
-      text-align: left; padding: 7px 10px; border-radius: 6px;
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid transparent;
-      color: var(--text); font: inherit; cursor: pointer;
-      transition: background 0.12s, border-color 0.12s;
+      padding: 7px 10px; border-radius: 8px; text-align: left;
+      background: rgba(255,255,255,0.04); border: 1px solid transparent;
+      color: var(--text); font: inherit; font-size: 12.5px; cursor: pointer;
+      transition: background .12s, border-color .12s;
     }
-    .layer-btn:hover { background: rgba(255, 255, 255, 0.09); }
-    .layer-btn.active {
-      border-color: var(--accent);
-      background: rgba(110, 168, 254, 0.16);
-      color: #fff;
-    }
+    .layer-btn:hover { background: rgba(255,255,255,0.08); }
+    .layer-btn.active { background: var(--accent-dim); border-color: rgba(110,168,254,0.5); color: #fff; }
+    .layers .layer-btn:last-child { grid-column: 1 / -1; }
 
-    /* Contrôles de simulation. */
-    .sim-section {
-      margin-top: 8px; padding-top: 8px;
-      border-top: 1px solid var(--panel-border);
-      display: grid; gap: 6px;
+    .toggle {
+      width: 100%; display: flex; align-items: center; gap: 8px;
+      padding: 7px 10px; border-radius: 8px; cursor: pointer; font: inherit; font-size: 12.5px;
+      background: rgba(255,255,255,0.04); border: 1px solid transparent; color: var(--text); text-align: left;
     }
-    .sim-label { color: var(--text-dim); font-size: 11px; letter-spacing: 0.04em; }
-    #play-toggle {
-      padding: 7px 10px; border-radius: 6px;
-      background: rgba(110, 168, 254, 0.16);
-      border: 1px solid var(--accent);
-      color: #fff; font: inherit; cursor: pointer;
+    .toggle:hover { background: rgba(255,255,255,0.08); }
+    .toggle .sw {
+      width: 26px; height: 15px; border-radius: 9px; flex: none; position: relative;
+      background: rgba(255,255,255,0.14); transition: background .15s;
     }
-    #play-toggle:hover { background: rgba(110, 168, 254, 0.28); }
-    .speed-row { display: flex; gap: 6px; }
-    .speed-btn {
-      flex: 1; text-align: center; padding: 6px 0; border-radius: 6px;
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid transparent;
-      color: var(--text); font: inherit; cursor: pointer;
+    .toggle .sw::after {
+      content: ""; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px;
+      border-radius: 50%; background: #cfd6e2; transition: transform .15s;
     }
-    .speed-btn:hover { background: rgba(255, 255, 255, 0.09); }
-    .speed-btn.active {
-      border-color: var(--accent);
-      background: rgba(110, 168, 254, 0.16);
-      color: #fff;
-    }
-    /* Légende des entités. */
-    #legend { display: grid; gap: 3px; font-size: 11px; color: var(--text-dim); }
-    #legend .row { display: flex; align-items: center; gap: 7px; }
-    #legend .dot { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+    .toggle.active { border-color: rgba(110,168,254,0.4); }
+    .toggle.active .sw { background: var(--accent); }
+    .toggle.active .sw::after { transform: translateX(11px); background: #fff; }
 
-    #sim-readout {
-      color: var(--text); font-size: 11px; font-variant-numeric: tabular-nums;
-    }
-    /* Blocs de texte préformaté (Phase 3) : pyramide, stats, savoirs. */
-    .mono-block {
-      color: var(--text-dim); font: 10px ui-monospace, monospace;
-      white-space: pre; line-height: 1.5;
-    }
-    #pop-chart {
-      display: block; background: rgba(255, 255, 255, 0.03);
-      border-radius: 4px; margin-top: 2px;
-    }
+    /* ————— Légende ————— */
+    .legend { display: grid; gap: 5px; font-size: 11.5px; color: var(--dim); }
+    .legend .row { display: flex; align-items: center; gap: 8px; }
+    .dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
 
-    /* Onglets. */
-    .tabs { display: flex; gap: 4px; margin-bottom: 2px; }
-    .tab-btn {
-      flex: 1; padding: 6px 0; border-radius: 6px 6px 0 0;
-      background: rgba(255, 255, 255, 0.04);
-      border: 1px solid transparent; border-bottom: none;
-      color: var(--text-dim); font: inherit; cursor: pointer;
-    }
-    .tab-btn.active { color: #fff; background: rgba(110, 168, 254, 0.16); border-color: var(--panel-border); }
-    .tab-pane { display: grid; gap: 6px; }
-    .tab-pane.hidden { display: none; }
+    /* ————— Jauge (label · barre · valeur) ————— */
+    .gauge { display: grid; grid-template-columns: 78px 1fr 40px; align-items: center; gap: 9px; }
+    .gauge .g-l { font-size: 12px; color: var(--dim); }
+    .gauge .g-v { font-size: 11.5px; text-align: right; color: var(--text);
+                  font-variant-numeric: tabular-nums; font-family: var(--mono); }
+    .bar { height: 6px; border-radius: 4px; background: var(--track); overflow: hidden; }
+    .bar > i { display: block; height: 100%; border-radius: 4px; }
+    .fill-accent { background: linear-gradient(90deg, #4f86e0, var(--accent)); }
+    .fill-good   { background: linear-gradient(90deg, #3fae72, var(--good)); }
+    .fill-warn   { background: linear-gradient(90deg, #d9a63a, var(--warn)); }
+    .fill-crit   { background: linear-gradient(90deg, #d95f45, var(--crit)); }
 
-    /* Formulaire de paramètres. */
-    .field { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-    .field label { color: var(--text-dim); font-size: 12px; }
+    /* ————— Effectifs ————— */
+    .tallies { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+    .tally-big { font-size: 26px; font-weight: 680; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px;
+      border-radius: 999px; font-size: 11px; background: rgba(255,255,255,0.06);
+      color: var(--dim); border: 1px solid var(--line-soft);
+    }
+    .chip .cd { width: 7px; height: 7px; border-radius: 50%; }
+    .chip.age { background: rgba(110,168,254,0.14); color: #bcd4ff; border-color: rgba(110,168,254,0.3); }
+    .chip.age.paleo { background: rgba(180,140,100,0.16); color: #e6c9a6; border-color: rgba(180,140,100,0.34); }
+    .chip.mat { background: rgba(200,162,74,0.14); color: #e7cf9a; border-color: rgba(200,162,74,0.3); }
+    .chip.tech { background: rgba(95,209,139,0.13); color: #a8e6c2; border-color: rgba(95,209,139,0.3); }
+    .deaths { display: flex; flex-wrap: wrap; gap: 5px 10px; font-size: 11px; color: var(--faint); }
+    .deaths b { color: var(--dim); font-weight: 600; }
+
+    /* ————— Pyramide des âges ————— */
+    .pyramid { display: grid; gap: 4px; }
+    .pyr { display: grid; grid-template-columns: 40px 1fr 22px; align-items: center; gap: 8px; }
+    .pyr .p-l { font-size: 10.5px; color: var(--faint); font-family: var(--mono); text-align: right; }
+    .pyr .p-v { font-size: 10.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+    .pyr .bar > i { background: linear-gradient(90deg, rgba(110,168,254,0.55), rgba(110,168,254,0.9)); }
+
+    /* ————— Sparkline population ————— */
+    #pop-chart { display: block; width: 100%; height: 52px;
+                 background: rgba(255,255,255,0.03); border-radius: 8px; }
+
+    /* ————— Clans ————— */
+    .clan { display: flex; flex-direction: column; gap: 7px; padding: 10px;
+            border-radius: 10px; background: rgba(255,255,255,0.035); border: 1px solid var(--line-soft); }
+    .clan .c-top { display: flex; align-items: center; gap: 8px; }
+    .clan .c-id  { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+    .clan .c-name { font-weight: 620; font-size: 12.5px; }
+    .clan .c-meta { margin-left: auto; font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
+    .clan .c-line { font-size: 11px; color: var(--dim); line-height: 1.45; }
+    .clan .c-line b { color: var(--text); font-weight: 600; }
+    .clan .c-line .warn { color: #f2b2a1; }
+    .stockline { display: grid; grid-template-columns: 46px 1fr 52px; align-items: center; gap: 8px; }
+    .stockline .s-l { font-size: 10.5px; color: var(--faint); }
+    .stockline .s-v { font-size: 10.5px; text-align: right; color: var(--dim); font-family: var(--mono); }
+
+    /* ————— Agent ————— */
+    .ident { display: flex; flex-direction: column; gap: 8px; }
+    .ident .name { font-size: 16px; font-weight: 680; letter-spacing: -0.01em; }
+    .ident .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+    .kv { display: flex; align-items: center; justify-content: space-between; font-size: 12px; }
+    .kv .k { color: var(--dim); }
+    .kv .v { color: var(--text); font-variant-numeric: tabular-nums; }
+    .kv .v.accent { color: #bcd4ff; }
+    .motiv { display: grid; grid-template-columns: 1fr 92px 34px; align-items: center; gap: 9px; }
+    .motiv .m-l { font-size: 12px; color: var(--dim); }
+    .motiv .m-v { font-size: 11px; text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; font-family: var(--mono); }
+    .motiv .bar > i { background: rgba(140,160,190,0.5); }
+    .motiv.top .m-l { color: #fff; font-weight: 600; }
+    .motiv.top .m-v { color: #cfe0ff; }
+    .motiv.top .bar > i { background: linear-gradient(90deg, #5f96f0, #9cc2ff); }
+    .chipset { display: flex; flex-wrap: wrap; gap: 5px; }
+    .lore-line { font-size: 11.5px; color: var(--dim); }
+    .lore-line b { color: var(--text); font-weight: 600; }
+    .empty { font-size: 12px; color: var(--faint); line-height: 1.5; }
+
+    /* ————— Paramètres ————— */
+    .field { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12.5px; }
+    .field label { color: var(--dim); }
     .field input {
-      width: 84px; padding: 5px 7px; border-radius: 5px;
-      background: rgba(0, 0, 0, 0.3); border: 1px solid var(--panel-border);
-      color: var(--text); font: inherit; text-align: right;
+      width: 92px; padding: 6px 9px; border-radius: 7px; text-align: right;
+      background: rgba(0,0,0,0.28); border: 1px solid var(--line); color: var(--text);
+      font: inherit; font-variant-numeric: tabular-nums;
     }
     .action-btn {
-      padding: 7px 10px; border-radius: 6px;
-      background: rgba(110, 168, 254, 0.16); border: 1px solid var(--accent);
-      color: #fff; font: inherit; cursor: pointer;
+      padding: 8px 10px; border-radius: 8px; font: inherit; font-size: 12.5px; cursor: pointer;
+      background: var(--accent-dim); border: 1px solid rgba(110,168,254,0.5); color: #eaf1ff;
     }
-    .action-btn:hover { background: rgba(110, 168, 254, 0.28); }
-    .action-btn.armed { background: rgba(120, 220, 140, 0.22); border-color: #6fdc8c; }
-    .sep { height: 1px; background: var(--panel-border); margin: 4px 0; }
-    .hint-text { color: var(--text-dim); font-size: 11px; line-height: 1.35; }
-    #readout {
-      margin-top: 4px; padding-top: 8px;
-      border-top: 1px solid var(--panel-border);
-      color: var(--text-dim); font-size: 11px;
+    .action-btn:hover { background: rgba(110,168,254,0.26); }
+    .action-btn.armed { background: rgba(120,220,140,0.22); border-color: #6fdc8c; color: #eafff0; }
+    .hint { font-size: 11px; color: var(--faint); line-height: 1.4; }
+    .info-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
+    .info-row .k { color: var(--dim); }
+    .info-row .v { color: var(--text); font-variant-numeric: tabular-nums; font-family: var(--mono); }
+    .readout-line { font-size: 10.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+
+    /* ————— Dock de temps (fixe, bas-centre) ————— */
+    .dock {
+      position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-radius: 999px;
+      background: var(--panel); border: 1px solid var(--line);
+      -webkit-backdrop-filter: blur(14px) saturate(1.2); backdrop-filter: blur(14px) saturate(1.2);
+      box-shadow: var(--shadow); z-index: 50;
     }
-    #hint {
-      position: absolute; bottom: 14px; left: 16px;
-      color: var(--text-dim); font: 11px system-ui, sans-serif;
-      background: var(--panel-bg); padding: 6px 10px; border-radius: 6px;
-      border: 1px solid var(--panel-border);
+    .dock .play {
+      width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center;
+      background: var(--accent); color: #0b0e14; border: none; cursor: pointer; font-size: 14px;
+    }
+    .dock .play:hover { filter: brightness(1.08); }
+    .seg { display: flex; padding: 3px; gap: 2px; border-radius: 999px; background: rgba(0,0,0,0.28); }
+    .seg .speed-btn {
+      padding: 5px 11px; border-radius: 999px; border: none; cursor: pointer;
+      background: transparent; color: var(--dim); font: inherit; font-size: 12px; font-variant-numeric: tabular-nums;
+    }
+    .seg .speed-btn:hover { color: var(--text); }
+    .seg .speed-btn.active { background: var(--accent-dim); color: #eaf1ff; box-shadow: inset 0 0 0 1px rgba(110,168,254,0.4); }
+    .dock .date { font-size: 12.5px; color: var(--text); font-variant-numeric: tabular-nums; padding: 0 4px; white-space: nowrap; }
+    .dock .date b { color: var(--accent); font-weight: 650; }
+    .dock .sep { width: 1px; height: 22px; background: var(--line); }
+
+    @media (max-width: 760px) {
+      .panel { width: calc(100vw - 32px); }
+      #panel-left { left: 16px; } #panel-right { right: 16px; }
+      #panel-params { right: 16px; width: calc(100vw - 32px); }
     }
   </style>
 </head>
 <body>
   <canvas id="view"></canvas>
 
-  <div id="panel">
-    <div id="panel-header">
-      <span class="title">Cairn</span>
-      <button id="panel-toggle" title="Replier">▾</button>
+  <!-- ————— PANNEAU GAUCHE : Carte & Population ————— -->
+  <section class="panel" id="panel-left">
+    <header class="panel-head">
+      <span class="grip"></span>
+      <span class="title">Carte &amp; Population</span>
+      <button class="hbtn" data-act="collapse" title="Replier">▾</button>
+    </header>
+    <div class="panel-body">
+      <div class="sect">
+        <div class="eyebrow">Couches</div>
+        <div class="layers">
+          <button class="layer-btn" data-layer="biome">Biomes</button>
+          <button class="layer-btn" data-layer="elevation">Altitude</button>
+          <button class="layer-btn" data-layer="temperature">Température</button>
+          <button class="layer-btn" data-layer="humidity">Humidité</button>
+          <button class="layer-btn" data-layer="geology">Géologie</button>
+        </div>
+        <button id="follow-toggle" class="toggle active"><span class="sw"></span>Suivre la population</button>
+        <button id="color-toggle" class="toggle">Couleur : activité</button>
+        <div class="legend">
+          <div id="legend-activity" style="display:grid; gap:5px;">
+            <div class="row"><span class="dot" style="background:#e8503a"></span>en chemin</div>
+            <div class="row"><span class="dot" style="background:#ff9a3c"></span>se nourrit / chasse</div>
+            <div class="row"><span class="dot" style="background:#46b4ff"></span>boit</div>
+            <div class="row"><span class="dot" style="background:#6a6ad0"></span>dort</div>
+          </div>
+          <div id="legend-sexage" style="display:none; gap:5px;">
+            <div class="row"><span class="dot" style="background:#e85ca0"></span>femme</div>
+            <div class="row"><span class="dot" style="background:#4a90e2"></span>homme</div>
+            <div class="row"><span class="dot" style="background:#f2c94c"></span>enfant</div>
+          </div>
+          <div class="row"><span class="dot" style="background:#c8a24a"></span>troupeau &nbsp;·&nbsp; <span class="dot" style="background:#8b3fb0"></span>prédateurs</div>
+          <div class="row"><span class="dot" style="background:#ff6a2a"></span>feu &nbsp;·&nbsp; <span class="dot" style="background:#38d6c0"></span>expédition</div>
+        </div>
+        <div id="readout" class="readout-line">chargement…</div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="sect">
+        <div class="eyebrow">Effectifs</div>
+        <div id="pop-stats" class="rows">…</div>
+        <div id="sim-readout" class="readout-line"></div>
+      </div>
+
+      <div class="sect">
+        <div class="eyebrow">Pyramide des âges</div>
+        <div id="age-pyramid" class="pyramid"></div>
+      </div>
+
+      <div class="sect">
+        <div class="eyebrow">Savoirs moyens</div>
+        <div id="pop-knowledge" class="rows">…</div>
+      </div>
+
+      <div class="sect">
+        <div class="eyebrow">Évolution de la population</div>
+        <canvas id="pop-chart" width="298" height="52"></canvas>
+      </div>
+
+      <div class="sect">
+        <div class="eyebrow">Clans</div>
+        <div id="clan-panel" class="rows">…</div>
+      </div>
     </div>
-    <div id="panel-body">
-      <div class="tabs">
-        <button class="tab-btn active" data-tab="map">Carte</button>
-        <button class="tab-btn" data-tab="population">Population</button>
-        <button class="tab-btn" data-tab="agent">Agent</button>
-        <button class="tab-btn" data-tab="settings">Paramètres</button>
+  </section>
+
+  <!-- ————— PANNEAU DROIT : Agent ————— -->
+  <section class="panel" id="panel-right">
+    <header class="panel-head">
+      <span class="grip"></span>
+      <span class="title">Agent</span>
+      <button class="hbtn" id="params-gear" title="Paramètres du monde">⚙</button>
+      <button class="hbtn" data-act="collapse" title="Replier">▾</button>
+    </header>
+    <div class="panel-body">
+      <div id="agent-ident" class="ident"><div class="empty">Cliquez un humain sur la carte pour l'inspecter.</div></div>
+      <div class="sect"><div class="eyebrow">Besoins</div><div id="agent-needs" class="rows"></div></div>
+      <div class="sect"><div class="eyebrow">Traits &amp; compétences</div><div id="agent-traits" class="rows"></div></div>
+      <div class="sect"><div class="eyebrow">En ce moment</div><div id="agent-action" class="rows"></div></div>
+      <div class="sect"><div class="eyebrow">Pourquoi — pile de motivations</div><div id="agent-why" class="rows"></div></div>
+      <div class="sect"><div class="eyebrow">A vu · Sait · Lignée</div><div id="agent-lore" class="rows"></div></div>
+    </div>
+  </section>
+
+  <!-- ————— Paramètres (ouvert par l'engrenage ⚙) ————— -->
+  <section class="panel hidden" id="panel-params">
+    <header class="panel-head">
+      <span class="grip"></span>
+      <span class="title">Paramètres du monde</span>
+      <button class="hbtn" id="params-close" title="Fermer">✕</button>
+    </header>
+    <div class="panel-body">
+      <div class="sect">
+        <div class="eyebrow">Simulation</div>
+        <div class="info-row"><span class="k">En cours depuis</span><span class="v" id="sim-elapsed">—</span></div>
       </div>
-
-      <!-- Onglet Carte : couches + contrôles de simulation. -->
-      <div class="tab-pane" data-pane="map">
-        <button class="layer-btn" data-layer="biome">Biomes</button>
-        <button class="layer-btn" data-layer="elevation">Altitude</button>
-        <button class="layer-btn" data-layer="temperature">Température</button>
-        <button class="layer-btn" data-layer="humidity">Humidité</button>
-        <button class="layer-btn" data-layer="geology">Géologie</button>
-
-        <div class="sim-section">
-          <span class="sim-label">SIMULATION</span>
-          <button id="play-toggle">⏸ Pause</button>
-          <div class="speed-row">
-            <button class="speed-btn" data-speed="1.5">¼×</button>
-            <button class="speed-btn" data-speed="6">1×</button>
-            <button class="speed-btn" data-speed="24">4×</button>
-            <button class="speed-btn" data-speed="96">16×</button>
-          </div>
-          <button id="follow-toggle" class="layer-btn active">⊙ Suivre la population</button>
-          <button id="color-toggle" class="layer-btn">Couleur : activité</button>
-          <div id="sim-readout">…</div>
-          <div id="legend">
-            <div id="legend-activity" style="display:grid; gap:3px;">
-              <div class="row"><span class="dot" style="background:#e8503a"></span>humain (en chemin)</div>
-              <div class="row"><span class="dot" style="background:#ff9a3c"></span>se nourrit / chasse</div>
-              <div class="row"><span class="dot" style="background:#46b4ff"></span>boit</div>
-              <div class="row"><span class="dot" style="background:#6a6ad0"></span>dort</div>
-            </div>
-            <div id="legend-sexage" style="display:none; gap:3px;">
-              <div class="row"><span class="dot" style="background:#e85ca0"></span>femme</div>
-              <div class="row"><span class="dot" style="background:#4a90e2"></span>homme</div>
-              <div class="row"><span class="dot" style="background:#f2c94c"></span>enfant</div>
-            </div>
-            <div class="row"><span class="dot" style="background:#c8a24a"></span>troupeau</div>
-            <div class="row"><span class="dot" style="background:#8b3fb0"></span>prédateurs</div>
-            <div class="row"><span class="dot" style="width:6px;height:6px;background:#e8503a"></span>petit carré = enfant</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Onglet Population : suivi démographique (Phase 3). -->
-      <div class="tab-pane hidden" data-pane="population">
-        <span class="sim-label">EFFECTIFS</span>
-        <div id="pop-stats" class="mono-block">…</div>
-
-        <div class="sep"></div>
-        <span class="sim-label">PYRAMIDE DES ÂGES</span>
-        <div id="age-pyramid" class="mono-block"></div>
-
-        <div class="sep"></div>
-        <span class="sim-label">SAVOIRS</span>
-        <div id="pop-knowledge" class="mono-block">…</div>
-
-        <div class="sep"></div>
-        <span class="sim-label">ÉVOLUTION DE LA POPULATION</span>
-        <canvas id="pop-chart" width="230" height="56"></canvas>
-
-        <!-- Panneau d'inspection du clan (Phase 4). -->
-        <div class="sep"></div>
-        <span class="sim-label">CLANS</span>
-        <div id="clan-panel" class="mono-block">…</div>
-        <div id="legend" style="margin-top:6px;">
-          <div class="row"><span class="dot" style="background:#a9733e;"></span>hutte (chaleur)</div>
-          <div class="row"><span class="dot" style="background:#d8b24a;"></span>grenier (stock)</div>
-          <div class="row"><span class="dot" style="background:#9aa0a6;"></span>palissade (défense)</div>
-          <div class="row"><span class="dot" style="background:#c25b3a;"></span>hutte du chef (foyer fixe)</div>
-          <div class="row"><span class="dot" style="background:#e0503a;"></span>tension entre clans</div>
-          <div class="row"><span class="dot" style="border:1px solid #7a8; background:transparent;"></span>territoire (cercle du foyer)</div>
-          <div class="row"><span class="dot" style="background:#ff6a2a;"></span>feu de forêt (incendie)</div>
-          <div class="row"><span class="dot" style="background:#38d6c0;"></span>route d'expédition (étain)</div>
-        </div>
-      </div>
-
-      <!-- Onglet Agent : inspection d'un individu sélectionné au clic (Phase 5,
-           incrément 8). Tout est écrit depuis Rust dans ces blocs. -->
-      <div class="tab-pane hidden" data-pane="agent">
-        <div id="agent-ident" class="mono-block">Cliquez un humain sur la carte pour l'inspecter.</div>
-        <div class="sep"></div>
-        <span class="sim-label">BESOINS</span>
-        <div id="agent-needs" class="mono-block"></div>
-        <div class="sep"></div>
-        <span class="sim-label">TRAITS &amp; COMPÉTENCES</span>
-        <div id="agent-traits" class="mono-block"></div>
-        <div class="sep"></div>
-        <span class="sim-label">EN CE MOMENT</span>
-        <div id="agent-action" class="mono-block"></div>
-        <div class="sep"></div>
-        <span class="sim-label">POURQUOI — PILE DE MOTIVATIONS</span>
-        <div id="agent-why" class="mono-block"></div>
-        <div class="sep"></div>
-        <span class="sim-label">A VU · SAIT · LIGNÉE</span>
-        <div id="agent-lore" class="mono-block"></div>
-      </div>
-
-      <!-- Onglet Paramètres : régénération du monde et placement manuel. -->
-      <div class="tab-pane hidden" data-pane="settings">
-        <span class="sim-label">MONDE</span>
+      <div class="divider"></div>
+      <div class="sect">
+        <div class="eyebrow">Monde</div>
         <div class="field"><label for="cfg-seed">Seed</label><input id="cfg-seed" type="number" min="0" value="42"></div>
         <div class="field"><label for="cfg-humans">Humains initiaux</label><input id="cfg-humans" type="number" min="0" value="40"></div>
         <div class="field"><label for="cfg-herds">Densité de gibier</label><input id="cfg-herds" type="number" min="0" max="6" value="2"></div>
         <button id="cfg-apply" class="action-btn">Régénérer le monde</button>
-
-        <div class="sep"></div>
-
-        <span class="sim-label">PLACEMENT</span>
+      </div>
+      <div class="divider"></div>
+      <div class="sect">
+        <div class="eyebrow">Placement</div>
         <div class="field"><label for="cfg-band">Humains par bande</label><input id="cfg-band" type="number" min="1" value="20"></div>
         <button id="place-toggle" class="action-btn">Poser des humains</button>
-        <p class="hint-text">Armez le bouton, puis cliquez sur la carte : une bande d'humains y est déposée, avec du gibier généré automatiquement autour.</p>
+        <p class="hint">Armez, puis cliquez la carte : une bande d'humains y est déposée, gibier généré autour.</p>
       </div>
-
-      <div id="readout">chargement…</div>
     </div>
+  </section>
+
+  <!-- ————— Dock de temps (fixe, bas-centre) ————— -->
+  <div class="dock">
+    <button id="play-toggle" class="play" title="Pause">⏸</button>
+    <div class="seg">
+      <button class="speed-btn" data-speed="1.5">¼×</button>
+      <button class="speed-btn" data-speed="6">1×</button>
+      <button class="speed-btn" data-speed="24">4×</button>
+      <button class="speed-btn" data-speed="96">16×</button>
+    </div>
+    <div class="sep"></div>
+    <div class="date" id="dock-date">…</div>
   </div>
 
-  <div id="hint">Glisser pour déplacer · molette pour zoomer · pause et vitesse dans le panneau</div>
-
   <script>
-    // Chrome purement DOM (déplacement du panneau, repli) — la logique de
-    // rendu est en Rust/WASM.
+    // Chrome purement DOM : glisser/replier des panneaux, engrenage Paramètres.
+    // La logique de rendu est en Rust/WASM.
     (function () {
-      const panel = document.getElementById('panel');
-      const header = document.getElementById('panel-header');
-      let drag = null;
-      header.addEventListener('mousedown', (e) => {
-        if (e.target.id === 'panel-toggle') return;
-        drag = { x: e.clientX - panel.offsetLeft, y: e.clientY - panel.offsetTop };
-        e.preventDefault();
+      const clamp = (p) => {
+        const r = p.getBoundingClientRect();
+        const x = Math.min(Math.max(0, r.left), Math.max(0, window.innerWidth - r.width));
+        const y = Math.min(Math.max(0, r.top), Math.max(0, window.innerHeight - r.height));
+        p.style.left = x + 'px'; p.style.top = y + 'px'; p.style.right = 'auto';
+      };
+      let active = null, off = { x: 0, y: 0 };
+      document.querySelectorAll('.panel').forEach((panel) => {
+        const head = panel.querySelector('.panel-head');
+        head.addEventListener('mousedown', (e) => {
+          if (e.target.closest('.hbtn')) return; // les boutons de l'en-tête ne glissent pas
+          const r = panel.getBoundingClientRect();
+          panel.style.left = r.left + 'px'; panel.style.top = r.top + 'px'; panel.style.right = 'auto';
+          active = panel; off.x = e.clientX - r.left; off.y = e.clientY - r.top;
+          panel.style.zIndex = 60; e.preventDefault();
+        });
+        const col = head.querySelector('[data-act="collapse"]');
+        if (col) col.addEventListener('click', () => panel.classList.toggle('collapsed'));
       });
       window.addEventListener('mousemove', (e) => {
-        if (!drag) return;
-        panel.style.left = (e.clientX - drag.x) + 'px';
-        panel.style.top = (e.clientY - drag.y) + 'px';
+        if (!active) return;
+        active.style.left = (e.clientX - off.x) + 'px';
+        active.style.top = (e.clientY - off.y) + 'px';
       });
-      window.addEventListener('mouseup', () => { drag = null; });
-      document.getElementById('panel-toggle').addEventListener('click', () => {
-        panel.classList.toggle('collapsed');
-      });
+      window.addEventListener('mouseup', () => { if (active) { clamp(active); active = null; } });
+      window.addEventListener('resize', () => document.querySelectorAll('.panel:not(.hidden)').forEach(clamp));
 
-      // Bascule d'onglets (pur DOM : la logique de simulation n'est pas
-      // concernée).
-      const tabs = document.querySelectorAll('.tab-btn');
-      tabs.forEach((tab) => {
-        tab.addEventListener('click', () => {
-          const name = tab.getAttribute('data-tab');
-          tabs.forEach((t) => t.classList.toggle('active', t === tab));
-          document.querySelectorAll('.tab-pane').forEach((pane) => {
-            pane.classList.toggle('hidden', pane.getAttribute('data-pane') !== name);
-          });
-        });
+      const params = document.getElementById('panel-params');
+      document.getElementById('params-gear').addEventListener('click', () => {
+        params.classList.toggle('hidden');
+        if (!params.classList.contains('hidden')) clamp(params);
       });
+      document.getElementById('params-close').addEventListener('click', () => params.classList.add('hidden'));
     })();
   </script>
 
-  <!-- Charge le module WASM (généré par wasm-bindgen). init() exécute
-       automatiquement le point d'entrée #[wasm_bindgen(start)]. -->
   <script type="module">
     import init from './cairn.js';
     init().catch((e) => {
-      document.getElementById('readout').textContent = 'Erreur de chargement : ' + e;
+      const el = document.getElementById('readout');
+      if (el) el.textContent = 'Erreur de chargement : ' + e;
     });
   </script>
 </body>
