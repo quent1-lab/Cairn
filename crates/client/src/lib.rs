@@ -555,6 +555,54 @@ impl App {
             self.ctx.fill_rect(sx - sz / 2.0, sy - sz / 2.0, sz, sz);
         }
 
+        // Feux de forêt (Phase 5, incrément 5) : un disque orange au foyer du
+        // feu, de son rayon de combustion — la 2ᵉ voie d'exposition au feu.
+        // Sur fond sombre, un remplissage translucide se lit comme une lueur.
+        for fire in &self.sim.fires {
+            let (fx, fy) = to_screen(fire.pos.0, fire.pos.1);
+            let r = (fire.radius * scale).max(2.0);
+            self.ctx.set_global_alpha(0.4);
+            self.ctx.set_fill_style_str("#ff6a2a");
+            self.ctx.begin_path();
+            self.ctx.arc(fx, fy, r, 0.0, std::f64::consts::TAU).expect("arc");
+            self.ctx.fill();
+        }
+        self.ctx.set_global_alpha(1.0);
+
+        // Routes d'expédition (Phase 5, incrément 6) : « le bronze force la
+        // route ». Un trait relie l'envoyé à son étape — l'étain lointain à
+        // l'aller, le foyer au retour —, avec un repère à l'étape. Rare (il
+        // faut la métallurgie du cuivre) mais spectaculaire quand il apparaît.
+        if !self.sim.expeditions.is_empty() {
+            self.ctx.set_stroke_style_str("#38d6c0");
+            self.ctx.set_line_width(1.5);
+            for (&aid, exp) in &self.sim.expeditions {
+                let envoy = self
+                    .sim
+                    .agents
+                    .query::<(&AgentId, &Position)>()
+                    .iter()
+                    .find(|(_, (id, _))| id.0 == aid)
+                    .map(|(_, (_, pos))| (pos.x, pos.y));
+                let Some((ex, ey)) = envoy else { continue };
+                let wp = if exp.returning {
+                    exp.home
+                } else {
+                    (exp.tin.0 as f64, exp.tin.1 as f64)
+                };
+                let (sx, sy) = to_screen(ex, ey);
+                let (tx, ty) = to_screen(wp.0, wp.1);
+                self.ctx.set_global_alpha(0.75);
+                self.ctx.begin_path();
+                self.ctx.move_to(sx, sy);
+                self.ctx.line_to(tx, ty);
+                self.ctx.stroke();
+                self.ctx.set_fill_style_str("#38d6c0");
+                self.ctx.fill_rect(tx - 3.0, ty - 3.0, 6.0, 6.0);
+            }
+            self.ctx.set_global_alpha(1.0);
+        }
+
         // Gibier (fauve) : la taille suit l'effectif du troupeau.
         self.ctx.set_fill_style_str("#c8a24a");
         for (_, (id, herd, pos)) in self.sim.fauna.query::<(&FaunaId, &Herd, &Position)>().iter() {
@@ -800,6 +848,21 @@ impl App {
                 second.push_str(&format!("   veut {}", structure_name(kind)));
             }
             lines.push(second);
+
+            // Âge dérivé + corpus de savoirs (Phase 5) : l'union des techs des
+            // membres et l'étiquette d'âge qui en découle (jamais stockée, voir
+            // `clan_age`). C'est ici qu'on *voit* l'Histoire d'un clan avancer.
+            let corpus: Vec<&str> = self
+                .sim
+                .clan_corpus(clan.id)
+                .iter()
+                .map(|&t| self.sim.tech_tree.get(t).label.as_str())
+                .collect();
+            lines.push(format!(
+                "     {} · sait : {}",
+                self.sim.clan_age(clan.id).label(),
+                if corpus.is_empty() { "rien encore".to_string() } else { corpus.join(", ") },
+            ));
 
             // Structures possédées (incrément 9), triées et comptées par type.
             let mut owned: Vec<&str> = self

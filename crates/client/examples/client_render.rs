@@ -17,7 +17,7 @@
 use cairn_client::palette::Layer;
 use cairn_client::render;
 use cairn_core::{WorldSeed, km_to_tiles};
-use cairn_sim::{Activity, Behavior, Demographics, Herd, Pack, Position, Sim};
+use cairn_sim::{Activity, AgentId, Behavior, Demographics, Expedition, Fire, Herd, Pack, Position, Sim};
 use cairn_worldgen::{HumidityConfig, WorldGenConfig};
 
 const W: usize = 1100;
@@ -30,6 +30,10 @@ fn main() {
     // Échelle en px/tuile : ~0,6 cadre les ~3 km où vivent agents et gibier.
     let scale: f64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(0.6);
     let log_every_days: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    // 5ᵉ arg `overlays` : injecte un feu et une expédition **synthétiques** pour
+    // vérifier la géométrie des overlays Phase 5 dans le PNG — ces événements
+    // sont rares, voire absents, de la scène tempérée par défaut.
+    let overlays_demo = args.next().is_some_and(|s| s == "overlays");
 
     // — Même construction que le client (humidité rapide). —
     let cfg = WorldGenConfig {
@@ -60,6 +64,26 @@ fn main() {
                     sim.structures.len(),
                 );
             }
+        }
+    }
+
+    // Overlays de démonstration : un feu et une expédition synthétiques, pour
+    // que le PNG en montre la géométrie (voir `overlays_demo`).
+    if overlays_demo {
+        sim.fires.push(Fire {
+            pos: (home.0 as f64 + 80.0, home.1 as f64 - 40.0),
+            radius: km_to_tiles(0.1),
+            age_days: 2,
+        });
+        if let Some(first) = sim.agents.query::<&AgentId>().iter().next().map(|(_, id)| id.0) {
+            sim.expeditions.insert(
+                first,
+                Expedition {
+                    tin: (home.0 + km_to_tiles(2.0) as i64, home.1 + km_to_tiles(1.2) as i64),
+                    home: (home.0 as f64, home.1 as f64),
+                    returning: false,
+                },
+            );
         }
     }
 
@@ -134,6 +158,30 @@ fn main() {
         };
         fill_square(&mut buf, bx + off.0, by + off.1, (scale * 4.0).clamp(5.0, 12.0), rgb);
     }
+    // Feux (Phase 5, incrément 5) : disque orange au foyer du feu — miroir de
+    // `App::draw_entities`.
+    for fire in &sim.fires {
+        let (fx, fy) = project(fire.pos.0, fire.pos.1);
+        fill_circle(&mut buf, fx, fy, (fire.radius * scale).max(2.0), [255, 106, 42]);
+    }
+    // Routes d'expédition (Phase 5, incrément 6) : trait envoyé→étape (l'étain à
+    // l'aller, le foyer au retour) + repère à l'étape.
+    for (&aid, exp) in &sim.expeditions {
+        let envoy = sim
+            .agents
+            .query::<(&AgentId, &Position)>()
+            .iter()
+            .find(|(_, (id, _))| id.0 == aid)
+            .map(|(_, (_, p))| (p.x, p.y));
+        if let Some((ex, ey)) = envoy {
+            let wp = if exp.returning { exp.home } else { (exp.tin.0 as f64, exp.tin.1 as f64) };
+            let (sx, sy) = project(ex, ey);
+            let (tx, ty) = project(wp.0, wp.1);
+            draw_line(&mut buf, sx, sy, tx, ty, [56, 214, 192]);
+            fill_square(&mut buf, tx, ty, 6.0, [56, 214, 192]);
+        }
+    }
+
     println!("clans : {} actif(s)", sim.clans.len());
     {
         use cairn_sim::StructureKind::*;
@@ -226,6 +274,26 @@ fn stroke_circle(buf: &mut [u8], cx: f64, cy: f64, r: f64, rgb: [u8; 3]) {
         }
         let o = (y as usize * W + x as usize) * 4;
         buf[o..o + 4].copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+    }
+}
+
+/// Peint un disque plein centré sur (cx, cy) — pour le foyer d'un feu (le
+/// canvas du vrai client le fait par `arc`+`fill`).
+fn fill_circle(buf: &mut [u8], cx: f64, cy: f64, r: f64, rgb: [u8; 3]) {
+    let ri = r.max(1.0) as i64;
+    let (cxi, cyi) = (cx as i64, cy as i64);
+    for dy in -ri..=ri {
+        for dx in -ri..=ri {
+            if dx * dx + dy * dy > ri * ri {
+                continue;
+            }
+            let (x, y) = (cxi + dx, cyi + dy);
+            if x < 0 || y < 0 || x >= W as i64 || y >= H as i64 {
+                continue;
+            }
+            let o = (y as usize * W + x as usize) * 4;
+            buf[o..o + 4].copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+        }
     }
 }
 
