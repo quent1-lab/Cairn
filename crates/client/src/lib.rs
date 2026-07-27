@@ -824,7 +824,7 @@ impl App {
     /// l'unique emprunt de la sim, puis on écrit le DOM ; si l'agent a disparu
     /// (mort, ou évincé du monde résident), on oublie la sélection.
     fn update_agent_panel(&mut self) {
-        let others = ["agent-needs", "agent-traits", "agent-action", "agent-lore"];
+        let others = ["agent-needs", "agent-traits", "agent-action", "agent-why", "agent-lore"];
         let Some(sel) = self.selected else {
             set_text("agent-ident", "Cliquez un humain sur la carte pour l'inspecter.");
             for id in others {
@@ -832,6 +832,25 @@ impl App {
             }
             return;
         };
+        // La pile de motivations : on rejoue la délibération de l'agent (sans
+        // effet de bord). `None` = agent disparu ou nourrisson (porté). On la
+        // calcule **avant** l'emprunt immuable qui suit (elle veut `&mut sim`).
+        let why = self.sim.inspect_agent(AgentId(sel)).map_or_else(
+            || "nourrisson — porté, ne délibère pas".to_string(),
+            |ms| {
+                ms.iter()
+                    .map(|m| {
+                        format!(
+                            "{:<22} {} {:>3.0}%",
+                            task_name(m.kind),
+                            gauge(m.probability),
+                            m.probability * 100.0,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            },
+        );
         let tick = self.sim.time.tick;
         let sections: Option<[String; 5]> = {
             let mut found = None;
@@ -953,6 +972,7 @@ impl App {
                 set_text("agent-needs", &needs);
                 set_text("agent-traits", &traits_s);
                 set_text("agent-action", &action);
+                set_text("agent-why", &why);
                 set_text("agent-lore", &lore);
             }
         }
