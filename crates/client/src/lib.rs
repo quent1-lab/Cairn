@@ -25,8 +25,9 @@ use std::collections::{HashMap, VecDeque};
 use cairn_core::WorldSeed;
 use cairn_core::scale::{km_to_tiles, tiles_to_km};
 use cairn_sim::{
-    Activity, AgentId, Behavior, DeathCause, Demographics, FaunaId, Herd, Memory, Pack, Position,
-    Sex, Sim, Skills, StructureKind,
+    Activity, AgentId, Behavior, DeathCause, Demographics, Exposure, Exposures, FaunaId, Herd,
+    Kinship, Knowledge, Memory, Pack, Physiology, Position, Sex, Sim, Skills, StructureKind,
+    TaskKind, Traits,
 };
 use cairn_worldgen::{HumidityConfig, WorldGenConfig};
 use wasm_bindgen::prelude::*;
@@ -41,6 +42,8 @@ const MAX_SCALE: f64 = 32.0;
 /// Zoom maximal du mode « Suivre » : quand la population est très groupée, on
 /// ne zoome pas au-delà (sinon on collerait à un seul agent).
 const FOLLOW_MAX_SCALE: f64 = 3.0;
+/// Rayon (pixels) autour d'un clic dans lequel on capte un humain à inspecter.
+const PICK_RADIUS_PX: f64 = 16.0;
 
 /// Capacité du store de chunks résidents (l'éviction bornée protège la
 /// mémoire au-delà). Modeste : la scène du client est locale.
@@ -82,12 +85,21 @@ pub fn start() -> Result<(), JsValue> {
             app.sample_population();
         }
     }
+    // Hook `?select=<id>` : pré-sélectionne un agent — pratique à l'usage, et
+    // surtout ce qui rend le panneau d'agent **vérifiable en headless** (un
+    // `--dump-dom` montre alors le panneau rempli, sans simuler de clic).
+    if let Some(sel) = query_param_u64("select") {
+        app.selected = Some(sel);
+    }
     APP.with(|slot| *slot.borrow_mut() = Some(app));
     install_event_handlers()?;
     // Première frame **synchrone** (cadrée sur la population) : le monde
     // s'affiche dès le chargement, sans flash noir en attendant le premier
     // `requestAnimationFrame`.
     with_app(|a| {
+        if a.selected.is_some() {
+            activate_tab("agent");
+        }
         a.follow_population();
         a.render();
     });
@@ -164,6 +176,9 @@ struct App {
     seed: u64,
     /// Mode « poser des humains au clic » armé.
     placing: bool,
+    /// Agent inspecté (son `AgentId`), sélectionné au clic. `None` = aucun.
+    /// Purement d'affichage — la simulation l'ignore.
+    selected: Option<u64>,
     /// La caméra suit le barycentre de la population (recadrage à seuil).
     follow: bool,
     /// Comment les humains sont colorés (activité, sexe/âge, ou fixe).
@@ -237,6 +252,7 @@ impl App {
             last_ts: None,
             seed,
             placing: false,
+            selected: None,
             follow: true,
             color_mode: ColorMode::Activity,
             pop_history: VecDeque::new(),
@@ -319,6 +335,7 @@ impl App {
         self.has_prev = false;
         self.pop_history.clear();
         self.last_sampled_day = None;
+        self.selected = None; // les identifiants de l'ancien monde ne valent plus rien
         self.invalidate_terrain();
     }
 
@@ -441,6 +458,7 @@ impl App {
         self.update_readout();
         self.update_population_stats();
         self.update_clan_panel();
+        self.update_agent_panel();
         self.draw_population_chart();
     }
 
@@ -587,6 +605,27 @@ impl App {
             }
             let s = if adult { s } else { (s * 0.55).max(2.0) };
             self.ctx.fill_rect(sx - s / 2.0, sy - s / 2.0, s, s);
+        }
+
+        // Anneau autour de l'agent inspecté (Phase 5, incrément 8) : on le
+        // retrouve par son identifiant et on cercle sa position interpolée.
+        if let Some(sel) = self.selected {
+            for (_, (id, pos)) in self.sim.agents.query::<(&AgentId, &Position)>().iter() {
+                if id.0 != sel {
+                    continue;
+                }
+                let (sx, sy) = place(self.prev_pos.get(&id.0), pos.x, pos.y);
+                if visible(sx, sy) {
+                    self.ctx.set_stroke_style_str("#ffffff");
+                    self.ctx.set_line_width(2.0);
+                    self.ctx.begin_path();
+                    self.ctx
+                        .arc(sx, sy, (s * 1.6).max(7.0), 0.0, std::f64::consts::TAU)
+                        .expect("arc");
+                    self.ctx.stroke();
+                }
+                break;
+            }
         }
     }
 
@@ -778,6 +817,147 @@ impl App {
         el.set_text_content(Some(&lines.join("\n")));
     }
 
+    /// Panneau d'inspection d'un agent (onglet Agent, Phase 5 incrément 8) :
+    /// l'individu sélectionné au clic, avec tout ce que la simulation sait de
+    /// lui — besoins, traits, compétences, tâche en cours, expositions,
+    /// savoir-faire, lignée. On construit toutes les sections en texte pendant
+    /// l'unique emprunt de la sim, puis on écrit le DOM ; si l'agent a disparu
+    /// (mort, ou évincé du monde résident), on oublie la sélection.
+    fn update_agent_panel(&mut self) {
+        let others = ["agent-needs", "agent-traits", "agent-action", "agent-lore"];
+        let Some(sel) = self.selected else {
+            set_text("agent-ident", "Cliquez un humain sur la carte pour l'inspecter.");
+            for id in others {
+                set_text(id, "");
+            }
+            return;
+        };
+        let tick = self.sim.time.tick;
+        let sections: Option<[String; 5]> = {
+            let mut found = None;
+            for (
+                _,
+                (id, phys, demo, traits, skills, beh, exp, know, mem, kin, membership, prestige, carrying),
+            ) in self
+                .sim
+                .agents
+                .query::<(
+                    &AgentId,
+                    &Physiology,
+                    &Demographics,
+                    &Traits,
+                    &Skills,
+                    &Behavior,
+                    &Exposures,
+                    &Knowledge,
+                    &Memory,
+                    &Kinship,
+                    &cairn_sim::ClanMembership,
+                    &cairn_sim::agent::Prestige,
+                    &cairn_sim::agent::Carrying,
+                )>()
+                .iter()
+            {
+                if id.0 != sel {
+                    continue;
+                }
+                let sex = match demo.sex {
+                    Sex::Female => "♀",
+                    Sex::Male => "♂",
+                };
+                let stage = if demo.is_infant(tick) {
+                    "nourrisson"
+                } else if demo.is_adult(tick) {
+                    "adulte"
+                } else {
+                    "enfant"
+                };
+                let clan = match membership.0 {
+                    Some(cid) => format!("clan #{} · {}", cid.0, self.sim.clan_age(cid).label()),
+                    None => "sans clan".to_string(),
+                };
+                let ident = format!(
+                    "Humain #{}   {sex}   {:.0} ans ({stage})   {clan}",
+                    id.0,
+                    demo.age_years(tick).max(0.0),
+                );
+
+                let need = |label: &str, v: f32| format!("{label:<8} {} {:>3.0}%", gauge(v), v * 100.0);
+                let needs = [
+                    need("Santé", phys.health),
+                    need("Faim", phys.hunger),
+                    need("Soif", phys.thirst),
+                    need("Fatigue", phys.fatigue),
+                    need("Froid", phys.cold),
+                ]
+                .join("\n");
+
+                let trait_row = |label: &str, v: f32| format!("{label:<12} {}", gauge(v));
+                let traits_s = [
+                    trait_row("Force", traits.strength),
+                    trait_row("Endurance", traits.endurance),
+                    trait_row("Dextérité", traits.dexterity),
+                    trait_row("Curiosité", traits.curiosity),
+                    trait_row("Sociabilité", traits.sociability),
+                    trait_row("Agressivité", traits.aggression),
+                    String::new(),
+                    trait_row("Cueillette", skills.foraging),
+                    trait_row("Chasse", skills.hunting),
+                    trait_row("Oratoire", skills.oratory),
+                ]
+                .join("\n");
+
+                let task = beh.task.map_or_else(|| "—".to_string(), |t| task_name(t.kind));
+                let mut action =
+                    format!("Tâche      {task}\nActivité   {}\nPrestige   {:.1}", activity_name(beh.activity), prestige.0);
+                if carrying.0 > 0.01 {
+                    action.push_str(&format!("\nPorte      {:.1} de gibier", carrying.0));
+                }
+
+                let seen: Vec<&str> =
+                    Exposure::ALL.iter().filter(|&&e| exp.has(e)).map(|&e| exposure_name(e)).collect();
+                let techs: Vec<&str> =
+                    know.iter().map(|t| self.sim.tech_tree.get(t).label.as_str()).collect();
+                let lineage = match (kin.mother, kin.father) {
+                    (None, None) => "fondateur (sans ascendance)".to_string(),
+                    (m, f) => format!(
+                        "mère {} · père {}",
+                        m.map_or("?".to_string(), |a| format!("#{}", a.0)),
+                        f.map_or("?".to_string(), |a| format!("#{}", a.0)),
+                    ),
+                };
+                let lore = format!(
+                    "A vu       {}\nSait faire {}\nLignée     {lineage}\nTerritoire {} cellules · {} sources",
+                    if seen.is_empty() { "rien encore".to_string() } else { seen.join(", ") },
+                    if techs.is_empty() { "rien encore".to_string() } else { techs.join(", ") },
+                    mem.known.len(),
+                    mem.springs.len(),
+                );
+
+                found = Some([ident, needs, traits_s, action, lore]);
+                break;
+            }
+            found
+        };
+
+        match sections {
+            None => {
+                self.selected = None;
+                set_text("agent-ident", "Cet humain n'est plus (mort, ou hors de la scène).");
+                for id in others {
+                    set_text(id, "");
+                }
+            }
+            Some([ident, needs, traits_s, action, lore]) => {
+                set_text("agent-ident", &ident);
+                set_text("agent-needs", &needs);
+                set_text("agent-traits", &traits_s);
+                set_text("agent-action", &action);
+                set_text("agent-lore", &lore);
+            }
+        }
+    }
+
     /// Le petit graphique d'évolution de la population (onglet Population) :
     /// une simple ligne reliant les échantillons journaliers.
     fn draw_population_chart(&self) {
@@ -831,14 +1011,44 @@ impl App {
     fn on_pointer_up(&mut self, px: f64, py: f64) {
         self.drag = None;
         // Un relâchement proche du point d'appui est un **clic** (pas un pan).
-        // En mode placement, il pose une bande d'humains à cet endroit.
         if let Some((dx, dy)) = self.press {
             let moved = (px - dx).hypot(py - dy);
-            if self.placing && moved < 5.0 {
-                self.place_at(px, py);
+            if moved < 5.0 {
+                if self.placing {
+                    // Mode placement : le clic pose une bande d'humains.
+                    self.place_at(px, py);
+                } else {
+                    // Sinon, le clic **sélectionne** l'humain le plus proche
+                    // pour l'inspecter (ou désélectionne si le clic tombe dans
+                    // le vide). On bascule alors sur l'onglet Agent.
+                    self.selected = self.pick_agent(px, py);
+                    if self.selected.is_some() {
+                        activate_tab("agent");
+                    }
+                }
             }
         }
         self.press = None;
+    }
+
+    /// L'humain dont le carré à l'écran est le plus proche du pixel `(px, py)`,
+    /// s'il est à moins de `PICK_RADIUS_PX`. Renvoie son `AgentId`. Utilise les
+    /// positions **courantes** (l'écart avec la position interpolée affichée est
+    /// sous le seuil de sélection). Balayage linéaire : la scène du client est
+    /// petite, et c'est un événement de clic, pas une boucle chaude.
+    fn pick_agent(&self, px: f64, py: f64) -> Option<u64> {
+        let (w, h) = (self.width as f64, self.height as f64);
+        let (cx, cy, scale) = (self.camera.cx, self.camera.cy, self.camera.scale);
+        let mut best: Option<(u64, f64)> = None;
+        for (_, (id, pos)) in self.sim.agents.query::<(&AgentId, &Position)>().iter() {
+            let sx = (pos.x - cx) * scale + w / 2.0;
+            let sy = (pos.y - cy) * scale + h / 2.0;
+            let d = (sx - px).hypot(sy - py);
+            if d <= PICK_RADIUS_PX && best.is_none_or(|(_, bd)| d < bd) {
+                best = Some((id.0, d));
+            }
+        }
+        best.map(|(id, _)| id)
     }
 
     fn toggle_color_mode(&mut self) {
@@ -1035,6 +1245,98 @@ fn structure_name(kind: StructureKind) -> &'static str {
         StructureKind::Granary => "grenier",
         StructureKind::Palisade => "palissade",
         StructureKind::ChiefHut => "hutte du chef",
+    }
+}
+
+/// Écrit le texte d'un élément par id, s'il existe (aucun effet sinon) —
+/// raccourci pour remplir les blocs du panneau d'agent depuis Rust.
+fn set_text(id: &str, text: &str) {
+    if let Some(el) = document().get_element_by_id(id) {
+        el.set_text_content(Some(text));
+    }
+}
+
+/// Une jauge unicode de 10 cases pour une valeur dans [0, 1] : le vocabulaire
+/// visuel déjà employé par la pyramide des âges (`█`), sans nouvelle CSS.
+fn gauge(v: f32) -> String {
+    let filled = (v.clamp(0.0, 1.0) * 10.0).round() as usize;
+    let mut s = String::with_capacity(10 * 3);
+    for i in 0..10 {
+        s.push(if i < filled { '█' } else { '░' });
+    }
+    s
+}
+
+/// Nom lisible de la tâche en cours, pour le panneau d'agent — le « pourquoi »
+/// du brief rendu en clair.
+fn task_name(kind: TaskKind) -> String {
+    match kind {
+        TaskKind::Drink => "boire".to_string(),
+        TaskKind::Forage => "cueillir".to_string(),
+        TaskKind::Hunt => "chasser".to_string(),
+        TaskKind::Sleep => "dormir".to_string(),
+        TaskKind::Shelter => "s'abriter".to_string(),
+        TaskKind::Wander => "errer".to_string(),
+        TaskKind::Follow => "suivre un parent".to_string(),
+        TaskKind::Socialize => "rejoindre les siens".to_string(),
+        TaskKind::Explore => "explorer l'inconnu".to_string(),
+        TaskKind::ReturnToClan => "rentrer au clan".to_string(),
+        TaskKind::EatFromStock => "puiser dans le stock".to_string(),
+        TaskKind::BringSurplusHome => "rapporter du gibier".to_string(),
+        TaskKind::Build(k) => format!("bâtir : {}", structure_name(k)),
+        TaskKind::Expedition => "expédition (chercher l'étain)".to_string(),
+    }
+}
+
+/// Nom lisible de l'activité de l'heure (le pendant textuel d'`activity_color`).
+fn activity_name(a: Activity) -> &'static str {
+    match a {
+        Activity::Idle => "au repos",
+        Activity::Walking => "en chemin",
+        Activity::Eating => "se nourrit",
+        Activity::Drinking => "boit",
+        Activity::Sleeping => "dort",
+        Activity::Sheltering => "s'abrite",
+        Activity::Hunting => "chasse",
+    }
+}
+
+/// Nom lisible d'une exposition (ce qu'un agent a déjà croisé).
+fn exposure_name(e: Exposure) -> &'static str {
+    match e {
+        Exposure::Flint => "silex",
+        Exposure::Clay => "argile",
+        Exposure::Obsidian => "obsidienne",
+        Exposure::Copper => "cuivre",
+        Exposure::Tin => "étain",
+        Exposure::Gold => "or",
+        Exposure::Iron => "fer",
+        Exposure::Wood => "bois",
+        Exposure::WildGrasses => "graminées",
+        Exposure::Fire => "feu",
+    }
+}
+
+/// Amène un onglet au premier plan depuis Rust, en répliquant la bascule que
+/// fait le JS d'`index.html` (classe `active` sur le bouton, `hidden` sur les
+/// panes) — pour que sélectionner un agent ouvre aussitôt l'onglet Agent.
+fn activate_tab(name: &str) {
+    let doc = document();
+    if let Ok(tabs) = doc.query_selector_all(".tab-btn") {
+        for i in 0..tabs.length() {
+            if let Some(el) = tabs.item(i).and_then(|n| n.dyn_into::<web_sys::Element>().ok()) {
+                let on = el.get_attribute("data-tab").as_deref() == Some(name);
+                let _ = el.class_list().toggle_with_force("active", on);
+            }
+        }
+    }
+    if let Ok(panes) = doc.query_selector_all(".tab-pane") {
+        for i in 0..panes.length() {
+            if let Some(el) = panes.item(i).and_then(|n| n.dyn_into::<web_sys::Element>().ok()) {
+                let hide = el.get_attribute("data-pane").as_deref() != Some(name);
+                let _ = el.class_list().toggle_with_force("hidden", hide);
+            }
+        }
     }
 }
 

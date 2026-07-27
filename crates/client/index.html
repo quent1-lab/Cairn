@@ -163,6 +163,7 @@
       <div class="tabs">
         <button class="tab-btn active" data-tab="map">Carte</button>
         <button class="tab-btn" data-tab="population">Population</button>
+        <button class="tab-btn" data-tab="agent">Agent</button>
         <button class="tab-btn" data-tab="settings">Paramètres</button>
       </div>
 
@@ -234,6 +235,24 @@
           <div class="row"><span class="dot" style="background:#e0503a;"></span>tension entre clans</div>
           <div class="row"><span class="dot" style="border:1px solid #7a8; background:transparent;"></span>territoire (cercle du foyer)</div>
         </div>
+      </div>
+
+      <!-- Onglet Agent : inspection d'un individu sélectionné au clic (Phase 5,
+           incrément 8). Tout est écrit depuis Rust dans ces blocs. -->
+      <div class="tab-pane hidden" data-pane="agent">
+        <div id="agent-ident" class="mono-block">Cliquez un humain sur la carte pour l'inspecter.</div>
+        <div class="sep"></div>
+        <span class="sim-label">BESOINS</span>
+        <div id="agent-needs" class="mono-block"></div>
+        <div class="sep"></div>
+        <span class="sim-label">TRAITS &amp; COMPÉTENCES</span>
+        <div id="agent-traits" class="mono-block"></div>
+        <div class="sep"></div>
+        <span class="sim-label">EN CE MOMENT</span>
+        <div id="agent-action" class="mono-block"></div>
+        <div class="sep"></div>
+        <span class="sim-label">A VU · SAIT · LIGNÉE</span>
+        <div id="agent-lore" class="mono-block"></div>
       </div>
 
       <!-- Onglet Paramètres : régénération du monde et placement manuel. -->
