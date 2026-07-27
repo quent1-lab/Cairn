@@ -21,7 +21,7 @@ use cairn_core::{Pcg32, SimTime, km_to_tiles, splitmix64};
 use cairn_worldgen::Biome;
 
 use crate::agent::{AgentId, Physiology, Position, Task, TaskKind, WALK_TILES_PER_TICK};
-use crate::curves::{Curve, softmax_pick};
+use crate::curves::{Curve, softmax_pick, softmax_weights};
 use crate::demography::{Demographics, HumanView, Kinship, Traits, find_human};
 use crate::fauna::HerdView;
 use crate::memory::{Memory, cell_of};
@@ -112,19 +112,55 @@ pub fn decide(
     humans: &[HumanView],
     clan_views: &BTreeMap<ClanId, ClanView>,
 ) -> Option<Task> {
-    let AgentCtx { id, pos, phys, traits, demo, kin, clan, carrying } = agent;
+    // La perception de l'eau est **mémorisée** — délibérer, c'est déjà
+    // mémoriser. C'est le seul effet de bord de la délibération : il reste ici,
+    // hors de `build_candidates`, pour que cette dernière reste pure et puisse
+    // servir aussi l'inspection sans faire « apprendre » l'agent qu'on regarde.
+    let here = agent.pos.tile();
+    let spring = world.nearest_spring(here, SPRING_RADIUS_CHUNKS);
+    if let Some(seen) = spring {
+        mem.remember_spring(seen, (agent.pos.x, agent.pos.y));
+    }
+    let candidates =
+        build_candidates(world, time, &agent, mem, spring, current, herds, humans, clan_views);
+
+    let scores: Vec<f32> = candidates.iter().map(|c| c.2).collect();
+    let mut rng =
+        Pcg32::new(world.seed().derive(salt::DECISIONS) ^ splitmix64(time.tick), agent.id.0);
+    let (kind, target, _) = candidates[softmax_pick(&scores, SOFTMAX_TAU, &mut rng)];
+    Some(Task { kind, target })
+}
+
+/// Construit et score toutes les tâches candidates de l'agent — le cœur de la
+/// délibération, **sans tirage ni effet de bord** : elle lit `mem` mais ne
+/// l'écrit pas (la source déjà perçue lui est passée en `spring`). Partagée par
+/// [`decide`] (qui tire ensuite au softmax) et [`inspect`] (qui en montre les
+/// scores). `world` reste `&mut` pour lire les tuiles (fourrage, couvert),
+/// comme le fait déjà le rendu — aucune mutation de l'état simulé.
+#[allow(clippy::too_many_arguments)]
+fn build_candidates(
+    world: &mut World,
+    time: SimTime,
+    agent: &AgentCtx<'_>,
+    mem: &Memory,
+    spring: Option<(i64, i64)>,
+    current: Option<TaskKind>,
+    herds: &[HerdView],
+    humans: &[HumanView],
+    clan_views: &BTreeMap<ClanId, ClanView>,
+) -> Vec<(TaskKind, (i64, i64), f32)> {
+    let (id, pos, phys, traits, demo, kin, clan, carrying) = (
+        agent.id, agent.pos, agent.phys, agent.traits, agent.demo, agent.kin, agent.clan,
+        agent.carrying,
+    );
     let adult = demo.is_adult(time.tick);
     let here = pos.tile();
     let mut candidates: Vec<(TaskKind, (i64, i64), f32)> = Vec::new();
 
     // — Boire : seuil flou et raide, la soif devient vite impérieuse. La
-    //   perception locale d'abord (et on la mémorise) ; sinon la **mémoire**
-    //   prend le relais — c'est elle qui sauve l'agent parti trop loin de
-    //   l'eau, et c'est ce qui rend l'exploration moins suicidaire.
-    let spring = world.nearest_spring(here, SPRING_RADIUS_CHUNKS);
-    if let Some(seen) = spring {
-        mem.remember_spring(seen, (pos.x, pos.y));
-    }
+    //   perception locale d'abord (passée en `spring`, mémorisée par `decide`) ;
+    //   sinon la **mémoire** prend le relais — c'est elle qui sauve l'agent
+    //   parti trop loin de l'eau, et rend l'exploration moins suicidaire.
     if let Some(target) = spring.or_else(|| mem.nearest_known_spring((pos.x, pos.y))) {
         let urgency = Curve::Logistic { steepness: 9.0, midpoint: 0.45 }.eval(phys.thirst);
         let score = urgency * travel_discount(pos.distance_tiles(target));
@@ -392,11 +428,51 @@ pub fn decide(
         }
     }
 
+    candidates
+}
+
+/// Une motivation candidate, exposée pour l'inspection : la tâche, sa cible,
+/// son score brut et sa probabilité softmax. La « pile de motivations avec
+/// scores » du BRIEF §7.2 — *voir* pourquoi l'agent choisit ce qu'il choisit.
+#[derive(Debug, Clone, Copy)]
+pub struct Motivation {
+    pub kind: TaskKind,
+    pub target: (i64, i64),
+    pub score: f32,
+    pub probability: f32,
+}
+
+/// Rejoue la délibération d'un agent **sans effet de bord** (en particulier
+/// sans mémoriser la source aperçue — un agent inspecté ne doit pas apprendre
+/// plus vite qu'un autre, ce qui briserait le déterminisme) et renvoie ses
+/// motivations, de la plus probable à la moins probable. Purement pour
+/// l'affichage : `decide` reste seul juge des tâches réelles.
+#[allow(clippy::too_many_arguments)]
+pub fn inspect(
+    world: &mut World,
+    time: SimTime,
+    agent: &AgentCtx<'_>,
+    mem: &Memory,
+    current: Option<TaskKind>,
+    herds: &[HerdView],
+    humans: &[HumanView],
+    clan_views: &BTreeMap<ClanId, ClanView>,
+) -> Vec<Motivation> {
+    let here = agent.pos.tile();
+    let spring = world.nearest_spring(here, SPRING_RADIUS_CHUNKS); // lue, jamais mémorisée
+    let candidates =
+        build_candidates(world, time, agent, mem, spring, current, herds, humans, clan_views);
     let scores: Vec<f32> = candidates.iter().map(|c| c.2).collect();
-    let mut rng =
-        Pcg32::new(world.seed().derive(salt::DECISIONS) ^ splitmix64(time.tick), id.0);
-    let (kind, target, _) = candidates[softmax_pick(&scores, SOFTMAX_TAU, &mut rng)];
-    Some(Task { kind, target })
+    let probs = softmax_weights(&scores, SOFTMAX_TAU);
+    let mut out: Vec<Motivation> = candidates
+        .iter()
+        .zip(probs)
+        .map(|(&(kind, target, score), probability)| Motivation { kind, target, score, probability })
+        .collect();
+    // La pile, du plus fort au plus faible (total_cmp : ordre total sur f32,
+    // pas de surprise NaN).
+    out.sort_by(|a, b| b.probability.total_cmp(&a.probability));
+    out
 }
 
 /// Décote de trajet : 1 à distance nulle, ½ à une heure de marche.

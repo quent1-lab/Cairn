@@ -401,6 +401,69 @@ impl Sim {
             .collect()
     }
 
+    /// Rejoue la délibération d'un agent (désigné par identifiant) pour
+    /// l'inspection : la **pile de motivations avec scores** du panneau d'agent
+    /// (BRIEF §7.2). Reconstruit les mêmes instantanés que `step` (faune,
+    /// humains, clans) puis délègue à `brain::inspect`, **sans aucun effet de
+    /// bord** sur la simulation. `None` si l'agent n'existe pas, ou s'il est
+    /// nourrisson (il ne délibère pas : il est porté).
+    pub fn inspect_agent(&mut self, id: AgentId) -> Option<Vec<brain::Motivation>> {
+        let time = self.time;
+        let herds = self.herd_views();
+        let humans = self.human_views();
+        let clan_views: BTreeMap<ClanId, ClanView> = self
+            .clans
+            .iter()
+            .map(|c| (c.id, ClanView { home: c.home, stock: c.stock, desired: c.desired }))
+            .collect();
+        // On extrait les composants de l'agent (copies, plus un clone de la
+        // mémoire) pour relâcher l'emprunt de `self.agents` avant d'appeler
+        // `brain::inspect`, qui veut `&mut self.world`.
+        let (pos, phys, traits, demo, kin, clan, carrying, current, mem) = self
+            .agents
+            .query::<(
+                &AgentId,
+                &Position,
+                &Physiology,
+                &Traits,
+                &Demographics,
+                &Kinship,
+                &ClanMembership,
+                &Carrying,
+                &Behavior,
+                &Memory,
+            )>()
+            .iter()
+            .find(|(_, (aid, ..))| aid.0 == id.0)
+            .map(|(_, (_, pos, phys, traits, demo, kin, membership, carrying, behavior, mem))| {
+                (
+                    *pos,
+                    *phys,
+                    *traits,
+                    *demo,
+                    *kin,
+                    membership.0,
+                    carrying.0,
+                    behavior.task.map(|t| t.kind),
+                    mem.clone(),
+                )
+            })?;
+        if demo.is_infant(time.tick) {
+            return None;
+        }
+        let ctx = AgentCtx {
+            id,
+            pos: &pos,
+            phys: &phys,
+            traits: &traits,
+            demo: &demo,
+            kin: &kin,
+            clan,
+            carrying,
+        };
+        Some(brain::inspect(&mut self.world, time, &ctx, &mem, current, &herds, &humans, &clan_views))
+    }
+
     /// Effectifs totaux (herbivores, prédateurs) et nombre de groupes.
     pub fn fauna_census(&self) -> (f32, f32, usize, usize) {
         let mut herbivores = 0.0;

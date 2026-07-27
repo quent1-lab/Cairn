@@ -64,6 +64,26 @@ pub fn softmax_pick(scores: &[f32], tau: f32, rng: &mut Pcg32) -> usize {
     weights.len() - 1 // filet numérique : draw a survécu aux arrondis
 }
 
+/// Les **probabilités** du softmax pour `scores` à température `tau` — le
+/// pendant *lisible* de [`softmax_pick`], pour **montrer** une délibération
+/// (panneau d'agent, BRIEF §7.2 « pile de motivations avec scores ») sans rien
+/// tirer. Même normalisation numérique que `softmax_pick` (le max soustrait
+/// avant l'exponentielle). Purement d'affichage : `softmax_pick` reste seul
+/// juge des choix réels, intact pour ne pas risquer le déterminisme.
+pub fn softmax_weights(scores: &[f32], tau: f32) -> Vec<f32> {
+    if scores.is_empty() {
+        return Vec::new();
+    }
+    let max = scores.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+    let weights: Vec<f32> = scores.iter().map(|s| ((s - max) / tau).exp()).collect();
+    let total: f32 = weights.iter().sum();
+    if total > 0.0 {
+        weights.into_iter().map(|w| w / total).collect()
+    } else {
+        weights
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

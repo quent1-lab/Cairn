@@ -42,6 +42,7 @@ pub mod tile;
 pub mod world;
 
 pub use agent::{Activity, AgentId, Behavior, DeathCause, Physiology, Position, Task, TaskKind};
+pub use brain::Motivation;
 pub use chunk::{CHUNK_AREA, CHUNK_SIZE, Chunk, ChunkCoord};
 pub use commerce::Expedition;
 pub use climate::Climate;
