@@ -1304,8 +1304,11 @@ impl App {
 
     fn toggle_play(&mut self) {
         self.playing = !self.playing;
+        // Bouton rond du dock : l'icône seule (le libellé déborderait). Le titre
+        // (infobulle) porte l'action.
         if let Some(el) = document().get_element_by_id("play-toggle") {
-            el.set_text_content(Some(if self.playing { "⏸ Pause" } else { "▶ Lecture" }));
+            el.set_text_content(Some(if self.playing { "⏸" } else { "▶" }));
+            let _ = el.set_attribute("title", if self.playing { "Pause" } else { "Lecture" });
         }
     }
 
