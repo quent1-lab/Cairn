@@ -7,6 +7,7 @@ use cairn_worldgen::Biome;
 
 use crate::fauna;
 use crate::sim::Sim;
+use crate::tech::Knowledge;
 
 /// Cherche un foyer tempéré (prairie ou forêt tempérée, climat doux, une
 /// source à portée) en spirale depuis `around`.
@@ -108,6 +109,37 @@ pub fn populate(sim: &mut Sim, home: (i64, i64), agents: usize, herd_grid: i64) 
         }
     }
     placed
+}
+
+/// **Réservé aux bancs** : accorde à tous les agents vivants (les fondateurs)
+/// un corpus de savoirs de départ, désignés par nom et résolus via l'arbre
+/// technologique. Sert à mettre en scène un peuple qui **arrive déjà** à un
+/// certain âge — typiquement un groupe néolithique migrant vers une terre de
+/// **cuivre**, là où le feu ne pouvait pas naître (le silex, sédimentaire, et
+/// le cuivre, igné, sont géologiquement disjoints : voir le banc `scout`).
+///
+/// Ce n'est pas une entorse à l'émergence stricte : c'est une **condition
+/// initiale** de scène (au même titre que `find_home_where` choisit où lâcher
+/// la population), pas une règle du cœur de simulation. Ce qui suit dans
+/// l'arbre — métallurgie du cuivre, puis bronze — doit toujours être **découvert
+/// par l'insight** (avec exposition et pression réelles) et n'est jamais offert
+/// ici. Les noms inconnus sont ignorés avec un avertissement.
+pub fn grant_techs(sim: &mut Sim, names: &[&str]) {
+    let ids: Vec<_> = names
+        .iter()
+        .filter_map(|&n| {
+            let id = sim.tech_tree.id_of(n);
+            if id.is_none() {
+                eprintln!("grant_techs : technologie inconnue « {n} » — ignorée");
+            }
+            id
+        })
+        .collect();
+    for (_, know) in sim.agents.query_mut::<&mut Knowledge>() {
+        for &id in &ids {
+            know.insert(id);
+        }
+    }
 }
 
 /// Lâche une **bande** de `humans` humains autour du point `at` (spirale de

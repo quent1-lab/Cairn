@@ -32,20 +32,39 @@ fn main() {
     let report_days: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(360).max(1);
     let capacity: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(16384);
     let n_agents: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(60);
+    // Foyer explicite optionnel (fx fy) : cibler un lieu précis — p. ex. un
+    // district de cuivre froid repéré par l'example `scout` — au lieu de la
+    // sélection par climat. C'est ce qui permet un run où le bronze est possible
+    // (cuivre sur place + étain à portée d'expédition).
+    let foyer: Option<(i64, i64)> = match (args.next(), args.next()) {
+        (Some(x), Some(y)) => x.parse::<i64>().ok().zip(y.parse::<i64>().ok()),
+        _ => None,
+    };
+    // Pré-amorçage (banc bronze) : 8ᵉ argument à 1 → les fondateurs arrivent
+    // déjà néolithiques (feu + poterie + four), comme un peuple migrant vers
+    // une terre de cuivre. La suite de la chaîne (métallurgie, bronze) reste
+    // strictement émergente — rien n'est offert au-delà de ces trois savoirs.
+    let seeded = args.next().is_some_and(|s| s == "1" || s == "true");
 
     // — Scène fraîche : forêt/taïga/prairie à 2–8 °C de moyenne (hivers sous 0),
     //   assez rude pour presser (froid → feu) mais pas la taïga glaciale qui
     //   éteint tout (voir le calibrage Phase 2). Repli tempéré si introuvable. —
     let mut sim = Sim::new(WorldSeed(seed), capacity);
     let seed_point = (km_to_tiles(1500.0) as i64, km_to_tiles(2100.0) as i64);
-    let home = scenario::find_home_where(
-        &mut sim,
-        seed_point,
-        1.0..=5.0,
-        &[Biome::TemperateForest, Biome::Taiga, Biome::Grassland],
-    )
-    .unwrap_or_else(|| scenario::find_home(&mut sim, seed_point));
+    let home = foyer.unwrap_or_else(|| {
+        scenario::find_home_where(
+            &mut sim,
+            seed_point,
+            1.0..=5.0,
+            &[Biome::TemperateForest, Biome::Taiga, Biome::Grassland],
+        )
+        .unwrap_or_else(|| scenario::find_home(&mut sim, seed_point))
+    });
     let placed = scenario::populate(&mut sim, home, n_agents, 2);
+    if seeded {
+        scenario::grant_techs(&mut sim, &["fire_mastery", "pottery", "kiln"]);
+        eprintln!("Pré-amorçage : fondateurs néolithiques (feu, poterie, four) — banc bronze.");
+    }
     for i in 0..4i64 {
         let angle = i as f64 * 1.57;
         let (x, y) = (
@@ -63,8 +82,9 @@ fn main() {
         home.0, home.1, tile.biome, tile.temperature,
     );
     println!(
-        "{:>4} {:>4} {:>4}  {:>8}  {:>3}  {:>5} {:>5}  {:>4} {:>4} {:>4} {:>4}  {}",
-        "an", "pop", "clan", "P/N/B", "sav", "froid", "faim", "bois", "silx", "argl", "feu", "savoirs"
+        "{:>4} {:>4} {:>4}  {:>8}  {:>3}  {:>5} {:>5}  {:>4} {:>4} {:>4} {:>4} {:>4} {:>4}  {:>3}  {}",
+        "an", "pop", "clan", "P/N/B", "sav", "froid", "faim",
+        "bois", "silx", "argl", "cuiv", "étn", "feu", "exp", "savoirs"
     );
 
     let total_ticks = years * TICKS_PER_YEAR;
@@ -96,7 +116,8 @@ fn report(sim: &Sim, day: u64) {
             Age::BronzeAge => b += 1,
         }
     }
-    let (mut adults, mut wood, mut flint, mut clay, mut fire_e) = (0u32, 0u32, 0u32, 0u32, 0u32);
+    let (mut adults, mut wood, mut flint, mut clay, mut copper, mut tin, mut fire_e) =
+        (0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32);
     for (_, (demo, exp)) in sim.agents.query::<(&Demographics, &Exposures)>().iter() {
         if demo.is_adult(sim.time.tick) {
             adults += 1;
@@ -108,6 +129,12 @@ fn report(sim: &Sim, day: u64) {
             }
             if exp.has(Exposure::Clay) {
                 clay += 1;
+            }
+            if exp.has(Exposure::Copper) {
+                copper += 1;
+            }
+            if exp.has(Exposure::Tin) {
+                tin += 1;
             }
             if exp.has(Exposure::Fire) {
                 fire_e += 1;
@@ -121,7 +148,7 @@ fn report(sim: &Sim, day: u64) {
     let known: Vec<&str> =
         sim.known_techs.iter().map(|&t| sim.tech_tree.get(t).label.as_str()).collect();
     println!(
-        "{:>4} {:>4} {:>4}  {:>8}  {:>3}  {:>5.2} {:>5.2}  {:>3}% {:>3}% {:>3}% {:>3}%  {}",
+        "{:>4} {:>4} {:>4}  {:>8}  {:>3}  {:>5.2} {:>5.2}  {:>3}% {:>3}% {:>3}% {:>3}% {:>3}% {:>3}%  {:>3}  {}",
         day / 360,
         sim.population(),
         sim.clans.len(),
@@ -132,7 +159,10 @@ fn report(sim: &Sim, day: u64) {
         pct(wood),
         pct(flint),
         pct(clay),
+        pct(copper),
+        pct(tin),
         pct(fire_e),
+        sim.expeditions.len(),
         if known.is_empty() { "—".to_string() } else { known.join(", ") },
     );
     // Flush explicite : stdout est bufferisé par blocs quand il est redirigé
