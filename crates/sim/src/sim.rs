@@ -9,11 +9,11 @@
 //! 1. **Délibération** (bucketée) : les agents « dus » choisissent une tâche.
 //! 2. **Exécution** : chacun avance sa tâche — marche, mange, boit, chasse —
 //!    et note au passage où il a mis les pieds (mémoire spatiale).
-//! 2 bis. **Nourrissons** : portés par leur mère, allaités par elle.
+//!    2 bis. **Nourrissons** : portés par leur mère, allaités par elle.
 //! 3. **Physiologie** : les besoins dérivent, le climat mord, on meurt.
-//! 3 bis. **Démographie** (une fois par jour) : naissances, conceptions,
+//!    3 bis. **Démographie** (une fois par jour) : naissances, conceptions,
 //!    sénescence.
-//! 3 ter. **Savoirs** (toutes les 4 h) : échange des sources connues entre
+//!    3 ter. **Savoirs** (toutes les 4 h) : échange des sources connues entre
 //!    agents à portée de conversation.
 //! 4. **Faune** : les meutes chassent, les troupeaux paissent, fuient, migrent.
 //! 5. **Écologie** (une fois par jour) : la biomasse consommée repousse.
@@ -761,7 +761,7 @@ impl Sim {
         // journée (on se parle en se rencontrant, pas à minuit pile). Les
         // enfants héritent ainsi des sources — et du clan — de leurs
         // parents simplement en vivant à leurs côtés.
-        if time.tick % 4 == 0 {
+        if time.tick.is_multiple_of(4) {
             memory::exchange_knowledge(self);
             social::encounter(self);
             // Diffusion culturelle (Phase 5) : une tech passe d'un agent à un

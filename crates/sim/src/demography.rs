@@ -284,13 +284,12 @@ pub(crate) fn nurse_infants(sim: &mut Sim) {
                 phys.thirst = (phys.thirst - NURSE_RELIEF).max(0.0);
             }
         }
-        if has_milk {
-            if let Some(entity) = mother_entity {
-                if let Ok(phys) = sim.agents.query_one_mut::<&mut Physiology>(entity) {
-                    phys.hunger = (phys.hunger + NURSING_HUNGER_PER_TICK).min(1.0);
-                    phys.thirst = (phys.thirst + NURSING_THIRST_PER_TICK).min(1.0);
-                }
-            }
+        if has_milk
+            && let Some(entity) = mother_entity
+            && let Ok(phys) = sim.agents.query_one_mut::<&mut Physiology>(entity)
+        {
+            phys.hunger = (phys.hunger + NURSING_HUNGER_PER_TICK).min(1.0);
+            phys.thirst = (phys.thirst + NURSING_THIRST_PER_TICK).min(1.0);
         }
     }
 }
@@ -310,11 +309,11 @@ pub(crate) fn daily(sim: &mut Sim) {
         .agents
         .query_mut::<(&AgentId, &Position, &Traits, &mut Demographics)>()
     {
-        if let Some(pregnancy) = demo.pregnancy {
-            if pregnancy.due_tick <= tick {
-                demo.pregnancy = None;
-                due.push((*id, (pos.x, pos.y), *traits, pregnancy));
-            }
+        if let Some(pregnancy) = demo.pregnancy
+            && pregnancy.due_tick <= tick
+        {
+            demo.pregnancy = None;
+            due.push((*id, (pos.x, pos.y), *traits, pregnancy));
         }
     }
     for (mother, pos, mother_traits, pregnancy) in due {
@@ -334,10 +333,10 @@ pub(crate) fn daily(sim: &mut Sim) {
     // 2. Aménorrhée de lactation : les mères d'un nourrisson vivant.
     let mut nursing: BTreeSet<u64> = BTreeSet::new();
     for (_, (demo, kin)) in sim.agents.query::<(&Demographics, &Kinship)>().iter() {
-        if demo.is_infant(tick) {
-            if let Some(mother) = kin.mother {
-                nursing.insert(mother.0);
-            }
+        if demo.is_infant(tick)
+            && let Some(mother) = kin.mother
+        {
+            nursing.insert(mother.0);
         }
     }
 
