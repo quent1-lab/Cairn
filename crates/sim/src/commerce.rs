@@ -79,18 +79,18 @@ pub fn waypoint(exp: &Expedition) -> (i64, i64) {
     }
 }
 
-/// Cherche le gisement d'étain le plus proche de `from`, par anneaux carrés
+/// Cherche le gisement `target` le plus proche de `from`, par anneaux carrés
 /// croissants au pas `PROSPECT_STRIDE`. Requête géologique **pure**
 /// (`WorldGen::deposit`, aucune matérialisation de chunk). `None` si aucun dans
-/// la portée. Coûteux mais rare : seuls les clans déjà à la métallurgie du
-/// cuivre prospectent, et une fois l'envoyé parti, on ne cherche plus.
-pub fn find_nearest_tin(world: &World, from: (i64, i64)) -> Option<(i64, i64)> {
+/// la portée. Base de la prospection d'étain (via `find_nearest_tin`) et de la
+/// reconnaissance géologique (banc `scout`).
+pub fn find_nearest_deposit(world: &World, from: (i64, i64), target: Deposit) -> Option<(i64, i64)> {
     let wg = world.worldgen();
-    let is_tin = |x: i64, y: i64| {
+    let is_target = |x: i64, y: i64| {
         let e = wg.elevation(x, y);
-        e > 0.0 && wg.deposit(x, y, e) == Deposit::Tin
+        e > 0.0 && wg.deposit(x, y, e) == target
     };
-    if is_tin(from.0, from.1) {
+    if is_target(from.0, from.1) {
         return Some(from);
     }
     let max_ring = (PROSPECT_MAX_TILES as i64) / PROSPECT_STRIDE;
@@ -100,7 +100,7 @@ pub fn find_nearest_tin(world: &World, from: (i64, i64)) -> Option<(i64, i64)> {
         let mut x = -d;
         while x <= d {
             for &y in &[-d, d] {
-                if is_tin(from.0 + x, from.1 + y) {
+                if is_target(from.0 + x, from.1 + y) {
                     return Some((from.0 + x, from.1 + y));
                 }
             }
@@ -110,7 +110,7 @@ pub fn find_nearest_tin(world: &World, from: (i64, i64)) -> Option<(i64, i64)> {
         let mut y = -d + PROSPECT_STRIDE;
         while y < d {
             for &x in &[-d, d] {
-                if is_tin(from.0 + x, from.1 + y) {
+                if is_target(from.0 + x, from.1 + y) {
                     return Some((from.0 + x, from.1 + y));
                 }
             }
@@ -118,6 +118,11 @@ pub fn find_nearest_tin(world: &World, from: (i64, i64)) -> Option<(i64, i64)> {
         }
     }
     None
+}
+
+/// L'étain le plus proche — le cas d'usage de la prospection commerciale.
+pub fn find_nearest_tin(world: &World, from: (i64, i64)) -> Option<(i64, i64)> {
+    find_nearest_deposit(world, from, Deposit::Tin)
 }
 
 /// État agrégé d'un clan pour décider d'une expédition.
