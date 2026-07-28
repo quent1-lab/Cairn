@@ -49,7 +49,7 @@ pub use climate::Climate;
 pub use demography::{Demographics, HumanView, Kinship, Pregnancy, Sex, Traits};
 pub use exposure::{Exposure, Exposures};
 pub use fire::Fire;
-pub use fauna::{FaunaId, Herd, HerdState, Pack};
+pub use fauna::{FaunaId, Herd, HerdState, Pack, Species};
 pub use memory::Memory;
 pub use pressure::ClanPressure;
 pub use sim::{BirthRecord, DeathRecord, Sim};

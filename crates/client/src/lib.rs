@@ -26,8 +26,8 @@ use cairn_core::WorldSeed;
 use cairn_core::scale::{km_to_tiles, tiles_to_km};
 use cairn_sim::{
     Activity, AgentId, Behavior, DeathCause, Demographics, Exposure, Exposures, FaunaId, Herd,
-    Kinship, Knowledge, Memory, Pack, Physiology, Position, Sex, Sim, Skills, StructureKind,
-    TaskKind, Traits,
+    Kinship, Knowledge, Memory, Pack, Physiology, Position, Sex, Sim, Skills, Species,
+    StructureKind, TaskKind, Traits,
 };
 use cairn_worldgen::{HumidityConfig, WorldGenConfig};
 use wasm_bindgen::prelude::*;
@@ -617,25 +617,26 @@ impl App {
             self.ctx.set_global_alpha(1.0);
         }
 
-        // Gibier (fauve) : la taille suit l'effectif du troupeau.
-        self.ctx.set_fill_style_str("#c8a24a");
+        // Gibier : la couleur dit l'espèce (cerf, aurochs, renne…), la taille
+        // suit l'effectif du troupeau.
         for (_, (id, herd, pos)) in self.sim.fauna.query::<(&FaunaId, &Herd, &Position)>().iter() {
             let (sx, sy) = place(self.prev_fauna.get(&id.0), pos.x, pos.y);
             if !visible(sx, sy) {
                 continue;
             }
             let s = ((scale * 1.5) * (1.0 + f64::from(herd.population) / 60.0)).clamp(3.0, 16.0);
+            self.ctx.set_fill_style_str(species_color(herd.species));
             self.ctx.fill_rect(sx - s / 2.0, sy - s / 2.0, s, s);
         }
 
-        // Prédateurs (violet).
-        self.ctx.set_fill_style_str("#8b3fb0");
+        // Prédateurs : couleur par espèce (loup, lion des cavernes).
         for (_, (id, pack, pos)) in self.sim.fauna.query::<(&FaunaId, &Pack, &Position)>().iter() {
             let (sx, sy) = place(self.prev_fauna.get(&id.0), pos.x, pos.y);
             if !visible(sx, sy) {
                 continue;
             }
             let s = ((scale * 1.5) * (1.0 + f64::from(pack.population) / 8.0)).clamp(3.0, 12.0);
+            self.ctx.set_fill_style_str(species_color(pack.species));
             self.ctx.fill_rect(sx - s / 2.0, sy - s / 2.0, s, s);
         }
 
@@ -1404,6 +1405,20 @@ fn sex_age_color(sex: Sex, adult: bool) -> &'static str {
 fn clan_color(id: cairn_sim::ClanId) -> String {
     let hue = (id.0.wrapping_mul(137) % 360) as f64;
     format!("hsl({hue}, 70%, 55%)")
+}
+
+/// Couleur d'une espèce de faune sur la carte : teintes terreuses pour les
+/// herbivores, froides/vives pour les prédateurs — chacune distincte, pour lire
+/// « le bon animal au bon endroit ».
+fn species_color(s: Species) -> &'static str {
+    match s {
+        Species::Deer => "#b5794a",     // cerf : brun roux
+        Species::Aurochs => "#8a6a44",  // aurochs : brun sombre
+        Species::Gazelle => "#d8b26a",  // gazelle : fauve clair
+        Species::Reindeer => "#c3c0aa", // renne : gris-beige
+        Species::Wolf => "#8b3fb0",     // loup : violet
+        Species::CaveLion => "#c0562e", // lion des cavernes : rouille
+    }
 }
 
 /// Couleur du marqueur d'une structure sur la carte, par type.

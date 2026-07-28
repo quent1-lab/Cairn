@@ -30,7 +30,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use cairn_core::{SimTime, TICKS_PER_DAY, WorldSeed};
+use cairn_core::{Pcg32, SimTime, TICKS_PER_DAY, WorldSeed};
 use cairn_worldgen::WorldGenConfig;
 
 use crate::agent::{
@@ -47,6 +47,7 @@ use crate::fire::{self, Fire};
 use crate::fauna::{self, FaunaId, Herd, HerdView, Kill, Pack};
 use crate::memory::{self, Memory};
 use crate::pathfind;
+use crate::salt;
 use crate::pressure::{self, ClanPressure};
 use crate::skills::{self, Skills};
 use crate::social::{self, Clan, ClanEvent, ClanId, ClanMembership, ClanRelations, ClanView, SocialGraph};
@@ -338,17 +339,42 @@ impl Sim {
         id
     }
 
+    /// Fait naître un troupeau dont l'**espèce est choisie selon le biome** du
+    /// lieu (le bon animal au bon endroit — aurochs en prairie, renne en
+    /// toundra). Tirage déterministe dérivé de l'identifiant (assigné dans un
+    /// ordre déterministe).
     pub fn spawn_herd(&mut self, x: f64, y: f64, population: f32) -> FaunaId {
+        let biome = self.world.tile(x.floor() as i64, y.floor() as i64).biome;
+        let mut rng = Pcg32::new(self.world.seed().derive(salt::FAUNA), self.next_fauna_id);
+        let species = fauna::Species::herbivore_for_biome(biome, &mut rng);
+        self.spawn_herd_species(x, y, population, species)
+    }
+
+    /// Fait naître un troupeau d'une **espèce imposée** — utilisé par la fission,
+    /// qui préserve l'espèce de la mère. `spawn_herd` en est le wrapper qui
+    /// choisit l'espèce selon le biome.
+    pub fn spawn_herd_species(
+        &mut self,
+        x: f64,
+        y: f64,
+        population: f32,
+        species: fauna::Species,
+    ) -> FaunaId {
         let id = FaunaId(self.next_fauna_id);
         self.next_fauna_id += 1;
-        self.fauna.spawn((id, Position { x, y }, Herd::new(population)));
+        self.fauna.spawn((id, Position { x, y }, Herd::new(population, species)));
         id
     }
 
+    /// Fait naître une meute dont l'espèce de prédateur est choisie selon le
+    /// biome (le loup partout, le lion des cavernes en terrain ouvert).
     pub fn spawn_pack(&mut self, x: f64, y: f64, population: f32) -> FaunaId {
+        let biome = self.world.tile(x.floor() as i64, y.floor() as i64).biome;
+        let mut rng = Pcg32::new(self.world.seed().derive(salt::FAUNA), self.next_fauna_id);
+        let species = fauna::Species::predator_for_biome(biome, &mut rng);
         let id = FaunaId(self.next_fauna_id);
         self.next_fauna_id += 1;
-        self.fauna.spawn((id, Position { x, y }, Pack::new(population)));
+        self.fauna.spawn((id, Position { x, y }, Pack::new(population, species)));
         id
     }
 
@@ -837,8 +863,8 @@ impl Sim {
         for entity in dead_herds {
             let _ = self.fauna.despawn(entity);
         }
-        for (x, y, population) in fissions {
-            self.spawn_herd(x, y, population);
+        for (x, y, population, species) in fissions {
+            self.spawn_herd_species(x, y, population, species);
         }
 
         // 4 bis. Immigration de gibier, quotidienne : sans elle, une zone

@@ -17,7 +17,9 @@
 use cairn_client::palette::Layer;
 use cairn_client::render;
 use cairn_core::{WorldSeed, km_to_tiles};
-use cairn_sim::{Activity, AgentId, Behavior, Demographics, Expedition, Fire, Herd, Pack, Position, Sim};
+use cairn_sim::{
+    Activity, AgentId, Behavior, Demographics, Expedition, Fire, Herd, Pack, Position, Sim, Species,
+};
 use cairn_worldgen::{HumidityConfig, WorldGenConfig};
 
 const W: usize = 1100;
@@ -112,12 +114,12 @@ fn main() {
     for (_, (herd, pos)) in sim.fauna.query::<(&Herd, &Position)>().iter() {
         let (sx, sy) = project(pos.x, pos.y);
         let s = ((scale * 1.5) * (1.0 + f64::from(herd.population) / 60.0)).clamp(3.0, 16.0);
-        fill_square(&mut buf, sx, sy, s, [200, 162, 74]);
+        fill_square(&mut buf, sx, sy, s, species_rgb(herd.species));
     }
     for (_, (pack, pos)) in sim.fauna.query::<(&Pack, &Position)>().iter() {
         let (sx, sy) = project(pos.x, pos.y);
         let s = ((scale * 1.5) * (1.0 + f64::from(pack.population) / 8.0)).clamp(3.0, 12.0);
-        fill_square(&mut buf, sx, sy, s, [139, 63, 176]);
+        fill_square(&mut buf, sx, sy, s, species_rgb(pack.species));
     }
     let tick = sim.time.tick;
     let s = scale.clamp(2.5, 8.0);
@@ -309,6 +311,18 @@ fn draw_line(buf: &mut [u8], x0: f64, y0: f64, x1: f64, y1: f64, rgb: [u8; 3]) {
         }
         let o = (y as usize * W + x as usize) * 4;
         buf[o..o + 4].copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+    }
+}
+
+/// Couleur RGB d'une espèce (miroir de `species_color` du client web).
+fn species_rgb(s: Species) -> [u8; 3] {
+    match s {
+        Species::Deer => [181, 121, 74],
+        Species::Aurochs => [138, 106, 68],
+        Species::Gazelle => [216, 178, 106],
+        Species::Reindeer => [195, 192, 170],
+        Species::Wolf => [139, 63, 176],
+        Species::CaveLion => [192, 86, 46],
     }
 }
 

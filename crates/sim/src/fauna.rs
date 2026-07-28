@@ -21,6 +21,7 @@
 //! - un troupeau trop nombreux **fissionne**, un troupeau décimé disparaît.
 
 use cairn_core::{Pcg32, SimTime, WorldSeed, km_to_tiles, splitmix64};
+use cairn_worldgen::Biome;
 
 use crate::agent::Position;
 use crate::climate::Climate;
@@ -102,6 +103,142 @@ const PACK_STEP_TILES: f64 = km_to_tiles(1.5);
 /// Portée à laquelle une meute chasse un troupeau (~500 m).
 pub const PACK_HUNT_RADIUS_TILES: f64 = km_to_tiles(0.5);
 
+/// Une **espèce** de faune. Le comportement — machine à états, steering,
+/// Lotka-Volterra — reste **commun** à toutes (la faune reste légère, §3.2) ;
+/// l'espèce ne fait que le *paramétrer* : son habitat de prédilection (donc sa
+/// place sur la carte), sa vigilance, et — pour les prédateurs — sa
+/// **dangerosité** (le risque qu'il y aura à le chasser, quand les humains s'y
+/// mettront pour protéger leur gibier : incrément « éleveur » à venir).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Species {
+    // — Herbivores (proies) —
+    /// Cerf — forêts, vif et farouche.
+    Deer,
+    /// Aurochs — prairies et steppes, massif et peu farouche (le futur bétail).
+    Aurochs,
+    /// Gazelle — savanes et steppes, la plus vive et la plus alerte.
+    Gazelle,
+    /// Renne — taïga et toundra (le futur troupeau du Nord).
+    Reindeer,
+    // — Prédateurs —
+    /// Loup — chasse en meute, suit le gibier partout.
+    Wolf,
+    /// Lion des cavernes — solitaire, redoutable à affronter.
+    CaveLion,
+}
+
+impl Species {
+    pub fn is_predator(self) -> bool {
+        matches!(self, Species::Wolf | Species::CaveLion)
+    }
+
+    /// Nom lisible (affichage client, Chronique à venir).
+    pub fn label(self) -> &'static str {
+        match self {
+            Species::Deer => "cerf",
+            Species::Aurochs => "aurochs",
+            Species::Gazelle => "gazelle",
+            Species::Reindeer => "renne",
+            Species::Wolf => "loup",
+            Species::CaveLion => "lion des cavernes",
+        }
+    }
+
+    /// À quel point ce biome nourrit l'espèce (0–1). Plein dans son habitat,
+    /// médiocre ailleurs : ce facteur module la satiété (donc la démographie),
+    /// si bien qu'un troupeau hors de son biome **fond peu à peu et se cantonne
+    /// à sa niche** — une borne d'aire de répartition *émergente*, sans qu'aucune
+    /// règle ne dise « ne va pas là ». Les prédateurs suivent la proie : leur
+    /// « pâture » est la viande, ce facteur ne les concerne pas (toujours 1).
+    pub fn habitat_factor(self, biome: Biome) -> f32 {
+        use Biome::*;
+        if self.is_predator() {
+            return 1.0;
+        }
+        let preferred = matches!(
+            (self, biome),
+            (Species::Deer, TemperateForest | TropicalForest | Taiga)
+                | (Species::Aurochs, Grassland | Steppe)
+                | (Species::Gazelle, Savanna | Steppe)
+                | (Species::Reindeer, Taiga | Tundra)
+        );
+        if preferred {
+            1.0
+        } else {
+            // Hors habitat : là où pousse de l'herbe c'est toléré (médiocre),
+            // ailleurs (toundra sèche, désert, glace) c'est la disette.
+            match biome {
+                Grassland | Steppe | Savanna | TemperateForest | TropicalForest | Taiga => 0.6,
+                _ => 0.35,
+            }
+        }
+    }
+
+    /// Rayon d'alerte d'un herbivore : à quelle distance il repère une menace
+    /// et détale. La gazelle voit loin, l'aurochs se laisse approcher. Sans
+    /// objet pour un prédateur (il ne fuit pas dans ce modèle).
+    pub fn flee_radius(self) -> f64 {
+        match self {
+            Species::Gazelle => km_to_tiles(1.0),
+            Species::Deer => km_to_tiles(0.7),
+            Species::Reindeer => km_to_tiles(0.6),
+            Species::Aurochs => km_to_tiles(0.4),
+            _ => FLEE_RADIUS_TILES,
+        }
+    }
+
+    /// **Dangerosité** — le risque à l'affronter, dans [0, 1]. Zéro pour la
+    /// plupart des proies ; élevé pour les fauves. Sert au futur incrément
+    /// « éleveur » : un humain qui chasse un prédateur pour protéger son gibier
+    /// pourra être blessé ou tué à proportion de ce chiffre. L'aurochs en a un
+    /// peu (il encorne) — anticipation, non exploitée pour l'instant.
+    pub fn danger(self) -> f32 {
+        match self {
+            Species::CaveLion => 0.7,
+            Species::Wolf => 0.3,
+            Species::Aurochs => 0.15,
+            _ => 0.0,
+        }
+    }
+
+    /// Cette espèce se laisse-t-elle **domestiquer** ? Anticipation de
+    /// l'incrément « éleveur » (l'aurochs → bétail, le renne → troupeau du
+    /// Nord). Non exploité pour l'instant.
+    pub fn domesticable(self) -> bool {
+        matches!(self, Species::Aurochs | Species::Reindeer)
+    }
+
+    /// Choisit une espèce d'**herbivore** adaptée à `biome` (tirage déterministe
+    /// parmi les candidats du biome). C'est ce qui met « le bon animal au bon
+    /// endroit » : l'aurochs en prairie, le renne en toundra. Généraliste
+    /// (aurochs) là où aucun n'est clairement chez lui.
+    pub fn herbivore_for_biome(biome: Biome, rng: &mut Pcg32) -> Species {
+        use Biome::*;
+        let candidates: &[Species] = match biome {
+            Grassland => &[Species::Aurochs],
+            Steppe => &[Species::Aurochs, Species::Gazelle],
+            Savanna => &[Species::Gazelle],
+            TemperateForest | TropicalForest => &[Species::Deer],
+            Taiga => &[Species::Reindeer, Species::Deer],
+            Tundra => &[Species::Reindeer],
+            _ => &[Species::Aurochs], // brouteur généraliste par défaut
+        };
+        candidates[(rng.next_u32() as usize) % candidates.len()]
+    }
+
+    /// Choisit une espèce de **prédateur** : le loup partout, le lion des
+    /// cavernes plus rare et plutôt en terrain ouvert/chaud.
+    pub fn predator_for_biome(biome: Biome, rng: &mut Pcg32) -> Species {
+        use Biome::*;
+        let lion_country = matches!(biome, Grassland | Steppe | Savanna | HotDesert);
+        if lion_country && rng.next_f32() < 0.4 {
+            Species::CaveLion
+        } else {
+            Species::Wolf
+        }
+    }
+}
+
 /// Ce que fait un troupeau — la machine à états du brief (§3.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HerdState {
@@ -119,15 +256,18 @@ pub struct Herd {
     pub flee_ticks: u16,
     /// Satiété du dernier tick (0–1) : lue par la démo et les overlays.
     pub satiation: f32,
+    /// L'espèce (cerf, aurochs…) : paramètre l'habitat et la vigilance.
+    pub species: Species,
 }
 
 impl Herd {
-    pub fn new(population: f32) -> Self {
+    pub fn new(population: f32, species: Species) -> Self {
         Self {
             population,
             state: HerdState::Grazing,
             flee_ticks: 0,
             satiation: 1.0,
+            species,
         }
     }
 }
@@ -137,11 +277,13 @@ pub struct Pack {
     pub population: f32,
     /// Proies tuées au dernier tick : le signal qui nourrit sa croissance.
     pub last_kills: f32,
+    /// L'espèce de prédateur (loup, lion des cavernes…) : porte sa dangerosité.
+    pub species: Species,
 }
 
 impl Pack {
-    pub fn new(population: f32) -> Self {
-        Self { population, last_kills: 0.0 }
+    pub fn new(population: f32, species: Species) -> Self {
+        Self { population, last_kills: 0.0, species }
     }
 }
 
@@ -164,6 +306,10 @@ pub struct Kill {
     pub herd: hecs::Entity,
     pub head: f32,
 }
+
+/// Une scission de troupeau à faire naître (hors itération) : position `(x, y)`,
+/// effectif, et **espèce héritée de la mère**.
+pub type Fission = (f64, f64, f32, Species);
 
 // — Équations pures (testables sans monde) —
 
@@ -197,15 +343,14 @@ fn away_from(pos: (f64, f64), threat: (f64, f64)) -> (f64, f64) {
     if len < 1e-6 { (1.0, 0.0) } else { (dx / len, dy / len) }
 }
 
-/// La menace la plus proche dans `threats`, si elle est dans le rayon de
-/// détection. Départage déterministe par distance puis par ordre de la liste.
-fn nearest_threat(pos: (f64, f64), threats: &[(f64, f64)]) -> Option<(f64, f64)> {
+/// La menace la plus proche dans `threats`, si elle est dans le `radius` de
+/// détection (propre à l'espèce — la gazelle voit loin, l'aurochs non).
+/// Départage déterministe par distance puis par ordre de la liste.
+fn nearest_threat(pos: (f64, f64), threats: &[(f64, f64)], radius: f64) -> Option<(f64, f64)> {
     let mut best: Option<(f64, (f64, f64))> = None;
     for &t in threats {
         let d2 = (pos.0 - t.0).powi(2) + (pos.1 - t.1).powi(2);
-        if d2 <= FLEE_RADIUS_TILES * FLEE_RADIUS_TILES
-            && best.is_none_or(|(bd, _)| d2 < bd)
-        {
+        if d2 <= radius * radius && best.is_none_or(|(bd, _)| d2 < bd) {
             best = Some((d2, t));
         }
     }
@@ -299,7 +444,7 @@ pub fn update_herds(
     time: SimTime,
     seed: WorldSeed,
     threats: &[(f64, f64)],
-) -> (Vec<hecs::Entity>, Vec<(f64, f64, f32)>) {
+) -> (Vec<hecs::Entity>, Vec<Fission>) {
     let tick_seed = seed.derive(salt::FAUNA) ^ splitmix64(time.tick);
     let mut doomed = Vec::new();
     let mut fissions = Vec::new();
@@ -314,7 +459,7 @@ pub fn update_herds(
 
         // — Fuite : elle prime sur tout le reste, y compris la faim — mais
         //   seulement si la bête a encore du souffle.
-        let threat = nearest_threat((pos.x, pos.y), threats);
+        let threat = nearest_threat((pos.x, pos.y), threats, herd.species.flee_radius());
         let bolting = match threat {
             Some(t) if herd.flee_ticks == 0 => {
                 herd.state = HerdState::Fleeing;
@@ -338,12 +483,14 @@ pub fn update_herds(
             //   voisin le plus vert. Une zone entièrement broutée fait donc
             //   fondre puis dériver le troupeau, sans stampede.
             let (target, biomass) = best_pasture(world, &mut rng, (pos.x, pos.y));
-            herd.satiation = f32::from(biomass) / 255.0;
+            // La satiété = l'herbe trouvée, PONDÉRÉE par l'adéquation du biome
+            // à l'espèce (un cerf en plein désert broute mal) — c'est ce qui
+            // cantonne chaque espèce à sa niche, sans règle « ne va pas là ».
+            let here_tile = world.tile(pos.x.floor() as i64, pos.y.floor() as i64);
+            herd.satiation =
+                (f32::from(biomass) / 255.0) * herd.species.habitat_factor(here_tile.biome);
 
-            let winter = {
-                let tile = world.tile(pos.x.floor() as i64, pos.y.floor() as i64);
-                !climate.grows(&tile, pos.y.floor() as i64, time)
-            };
+            let winter = !climate.grows(&here_tile, pos.y.floor() as i64, time);
             if winter {
                 // Seul l'hiver — la pâture gelée sur toute la bande — met le
                 // troupeau en route vers le chaud. Lentement.
@@ -375,7 +522,14 @@ pub fn update_herds(
             herd.population *= 0.5;
             let angle = rng.next_f64() * std::f64::consts::TAU;
             let d = km_to_tiles(1.0);
-            fissions.push((pos.x + angle.cos() * d, pos.y + angle.sin() * d, herd.population));
+            // La fille hérite de l'espèce de la mère (un troupeau de cerfs se
+            // scinde en deux troupeaux de cerfs).
+            fissions.push((
+                pos.x + angle.cos() * d,
+                pos.y + angle.sin() * d,
+                herd.population,
+                herd.species,
+            ));
         }
     }
     (doomed, fissions)
@@ -665,11 +819,50 @@ mod tests {
     #[test]
     fn la_menace_hors_de_portee_n_alarme_pas() {
         let loin = FLEE_RADIUS_TILES + 10.0;
-        assert!(nearest_threat((0.0, 0.0), &[(loin, 0.0)]).is_none());
-        assert!(nearest_threat((0.0, 0.0), &[(10.0, 0.0)]).is_some());
+        assert!(nearest_threat((0.0, 0.0), &[(loin, 0.0)], FLEE_RADIUS_TILES).is_none());
+        assert!(nearest_threat((0.0, 0.0), &[(10.0, 0.0)], FLEE_RADIUS_TILES).is_some());
         // La plus proche gagne.
-        let t = nearest_threat((0.0, 0.0), &[(200.0, 0.0), (10.0, 0.0)]).unwrap();
+        let t = nearest_threat((0.0, 0.0), &[(200.0, 0.0), (10.0, 0.0)], FLEE_RADIUS_TILES).unwrap();
         assert_eq!(t, (10.0, 0.0));
+    }
+
+    // — Diversité d'espèces —
+
+    #[test]
+    fn l_espece_choisie_colle_au_biome() {
+        // Biomes à candidat unique : le tirage est déterministe quel que soit
+        // le RNG — c'est « le bon animal au bon endroit ».
+        let mut rng = Pcg32::new(1, 0);
+        assert_eq!(Species::herbivore_for_biome(Biome::Grassland, &mut rng), Species::Aurochs);
+        assert_eq!(Species::herbivore_for_biome(Biome::Savanna, &mut rng), Species::Gazelle);
+        assert_eq!(Species::herbivore_for_biome(Biome::Tundra, &mut rng), Species::Reindeer);
+        assert_eq!(Species::herbivore_for_biome(Biome::TemperateForest, &mut rng), Species::Deer);
+    }
+
+    #[test]
+    fn l_habitat_borne_la_niche_et_les_predateurs_l_ignorent() {
+        // Un herbivore est au mieux dans son habitat, médiocre ailleurs : c'est
+        // ce qui le cantonne à sa niche (aire de répartition émergente).
+        assert_eq!(Species::Aurochs.habitat_factor(Biome::Grassland), 1.0);
+        assert!(Species::Aurochs.habitat_factor(Biome::HotDesert) < 1.0);
+        assert_eq!(Species::Reindeer.habitat_factor(Biome::Tundra), 1.0);
+        assert!(Species::Reindeer.habitat_factor(Biome::Savanna) < 1.0);
+        // Un prédateur suit la proie : son habitat ne le borne pas.
+        assert_eq!(Species::Wolf.habitat_factor(Biome::HotDesert), 1.0);
+        assert_eq!(Species::CaveLion.habitat_factor(Biome::Tundra), 1.0);
+    }
+
+    #[test]
+    fn dangerosite_et_domestication_distinguent_les_especes() {
+        // Anticipation « éleveur » : les fauves sont dangereux à chasser, pas
+        // les proies (sauf l'aurochs, qui encorne un peu).
+        assert!(Species::CaveLion.danger() > Species::Wolf.danger());
+        assert_eq!(Species::Gazelle.danger(), 0.0);
+        assert!(Species::Aurochs.danger() > 0.0);
+        // Domesticables : le bétail (aurochs) et le renne, pas le cerf ni les
+        // fauves.
+        assert!(Species::Aurochs.domesticable() && Species::Reindeer.domesticable());
+        assert!(!Species::Deer.domesticable() && !Species::Wolf.domesticable());
     }
 
     /// Cherche une tuile praticable et giboyeuse près de `from`, pour les
