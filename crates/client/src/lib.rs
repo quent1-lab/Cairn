@@ -1381,6 +1381,7 @@ fn activity_color(activity: Activity) -> &'static str {
         Activity::Drinking => "#46b4ff",                 // bleu : boit
         Activity::Sleeping => "#6a6ad0",                 // indigo : dort
         Activity::Sheltering => "#b070c8",               // mauve : s'abrite
+        Activity::Farming => "#7bc86c",                  // vert : cultive
     }
 }
 
@@ -1536,6 +1537,7 @@ fn task_name(kind: TaskKind) -> String {
         TaskKind::BringSurplusHome => "rapporter du gibier".to_string(),
         TaskKind::Build(k) => format!("bâtir : {}", structure_name(k)),
         TaskKind::Expedition => "expédition (chercher l'étain)".to_string(),
+        TaskKind::Cultivate => "cultiver un champ".to_string(),
     }
 }
 
@@ -1549,6 +1551,7 @@ fn activity_name(a: Activity) -> &'static str {
         Activity::Sleeping => "dort",
         Activity::Sheltering => "s'abrite",
         Activity::Hunting => "chasse",
+        Activity::Farming => "cultive",
     }
 }
 

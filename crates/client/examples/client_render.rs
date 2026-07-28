@@ -319,5 +319,6 @@ fn activity_rgb(a: Activity) -> [u8; 3] {
         Activity::Drinking => [70, 180, 255],
         Activity::Sleeping => [106, 106, 208],
         Activity::Sheltering => [176, 112, 200],
+        Activity::Farming => [123, 200, 108],
     }
 }

@@ -86,6 +86,9 @@ pub enum Activity {
     Sleeping,
     Sheltering,
     Hunting,
+    /// Entretenir un champ : semer, sarcler — le travail agricole qui élève la
+    /// biomasse d'une prairie au-dessus de son état sauvage.
+    Farming,
 }
 
 /// Tâche persistante de moyen terme (BRIEF §4 : on ne re-délibère pas à
@@ -143,6 +146,13 @@ pub enum TaskKind {
     /// vital ne presse) — c'est ce qui la fait *résister au rappel du clan* le
     /// temps d'aller au bout de la route.
     Expedition,
+    /// Entretenir un champ dans le territoire du clan (agriculture, Phase 5) :
+    /// l'agriculteur élève la biomasse de la prairie où il se tient au-dessus de
+    /// ce que la nature y met. La récolte passe par la cueillette ordinaire (une
+    /// tuile plus riche rend davantage) ; un champ laissé à l'abandon retourne en
+    /// friche (l'écologie le ramène vers sa capacité sauvage — §2.4). Réservé à
+    /// qui maîtrise l'agriculture.
+    Cultivate,
 }
 
 /// Le composant « comportement » : la tâche en cours et l'activité de l'heure.

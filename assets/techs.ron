@@ -57,6 +57,23 @@
         skill: Foraging,
         age: Neolithic,
     ),
+    (
+        // La sédentarisation (permise par le stockage étanche de la poterie)
+        // rend l'agriculture possible : avoir OBSERVÉ les graminées sauvages,
+        // près d'une eau douce, sous la faim (BRIEF §5.3 : poterie →
+        // sédentarisation → observation des graminées → agriculture → surplus).
+        // Une fois découverte, un agriculteur ENTRETIENT des champs (voir
+        // `TaskKind::Cultivate`) : la prairie tendue rend plus que la nature,
+        // et retourne en friche si on l'abandonne.
+        id: "agriculture",
+        label: "Agriculture",
+        prereq_techs: ["pottery"],
+        prereq_exposure: [WildGrasses],
+        prereq_environment: [FreshWater],
+        pressure: [Famine],
+        skill: Foraging,
+        age: Neolithic,
+    ),
 
     // — La chaîne du bronze (BRIEF §5.3, « le clou du système ») —
     // Le four pousse le feu plus haut ; la métallurgie du cuivre suppose un

@@ -81,6 +81,14 @@ const MIN_CARRYING_WORTH_TRIP: f32 = 0.05;
 /// `HUNT_NUTRITION` dans `sim.rs`) : sert à normaliser l'urgence du retour,
 /// pas une limite dure — porter plus ne fait qu'accentuer le plafond.
 const CARRYING_FULL_LOAD: f32 = 0.9;
+/// Seuil de faim sous lequel un agriculteur peut consacrer du temps au champ :
+/// on cultive **au calme** (surplus de temps), pas quand on meurt de faim — la
+/// même philosophie que « bâtir repu ». La *découverte* de l'agriculture, elle,
+/// demande la faim (voir `techs.ron`) : nécessité pour inventer, surplus pour
+/// travailler.
+const FED_TO_FARM: f32 = 0.55;
+/// Poussée du drive agricole : modeste, il ne prime jamais sur la survie.
+const FARM_DRIVE: f32 = 0.3;
 
 /// L'agent vu par la délibération : son identité et ses composants, groupés
 /// pour ne pas trimballer sept paramètres.
@@ -95,6 +103,10 @@ pub struct AgentCtx<'a> {
     /// Surplus de chasse actuellement porté (`crate::agent::Carrying`),
     /// déballé ici en `f32` brut — même traitement que `clan`.
     pub carrying: f32,
+    /// Cet agent maîtrise-t-il l'agriculture ? Résolu une fois par le pas de
+    /// simulation (`knowledge.has(agriculture)`) et déballé en `bool` ici, pour
+    /// que `brain` reste découplé de l'arbre technologique.
+    pub knows_agriculture: bool,
 }
 
 /// Choisit la prochaine tâche de l'agent. Déterministe : le tirage dérive de
@@ -149,9 +161,9 @@ fn build_candidates(
     humans: &[HumanView],
     clan_views: &BTreeMap<ClanId, ClanView>,
 ) -> Vec<(TaskKind, (i64, i64), f32)> {
-    let (id, pos, phys, traits, demo, kin, clan, carrying) = (
+    let (id, pos, phys, traits, demo, kin, clan, carrying, knows_agriculture) = (
         agent.id, agent.pos, agent.phys, agent.traits, agent.demo, agent.kin, agent.clan,
-        agent.carrying,
+        agent.carrying, agent.knows_agriculture,
     );
     let adult = demo.is_adult(time.tick);
     let here = pos.tile();
@@ -325,6 +337,29 @@ fn build_candidates(
             let target = (view.home.0.floor() as i64, view.home.1.floor() as i64);
             let score = 0.3 * travel_discount(pos.distance_tiles(target));
             candidates.push((TaskKind::Build(kind), target, score));
+        }
+    }
+
+    // — Cultiver (agriculture, Phase 5, chaîne §5.3) : un agriculteur, dans son
+    //   territoire et assez repu pour dégager du temps, entretient la prairie où
+    //   il se tient — il en élève la biomasse au-dessus de l'état sauvage. La
+    //   *découverte* de l'agriculture demande la faim (nécessité, voir
+    //   `techs.ron`) ; le *travail*, lui, se fait au calme (surplus). La récolte
+    //   passe ensuite par la cueillette ordinaire d'une tuile devenue plus riche.
+    if knows_agriculture
+        && adult
+        && phys.hunger < FED_TO_FARM
+        && let Some(clan_id) = clan
+        && let Some(view) = clan_views.get(&clan_id)
+        && (pos.x - view.home.0).hypot(pos.y - view.home.1) <= RESIDENCE_RADIUS_TILES
+    {
+        let tile = world.tile(here.0, here.1);
+        let cultivable = tile.is_walkable()
+            && matches!(tile.biome, Biome::Grassland | Biome::Steppe | Biome::Savanna)
+            && tile.soil_fertility > crate::sim::FIELD_MIN_FERTILITY
+            && tile.biomass < crate::sim::CULTIVATED_CEILING;
+        if cultivable {
+            candidates.push((TaskKind::Cultivate, here, FARM_DRIVE));
         }
     }
 

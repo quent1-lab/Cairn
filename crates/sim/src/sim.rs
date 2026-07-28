@@ -82,6 +82,25 @@ pub const STOCK_CAP_PER_MEMBER: f32 = 3.0;
 /// ligne droite pour rien.
 const PATH_REQUESTS_PER_TICK: u32 = 8;
 
+// — Agriculture (Phase 5, chaîne §5.3) : entretenir un champ élève la biomasse
+//   d'une prairie au-dessus de sa capacité sauvage. La récolte passe par la
+//   cueillette ordinaire (tuile plus riche → meilleur rendement) ; l'écologie
+//   ramène un champ abandonné vers la friche. `pub` (comme `STOCK_CAP...`) : la
+//   délibération (`brain`) en a besoin pour proposer le candidat `Cultivate`. —
+/// Plafond de biomasse d'un champ entretenu — la richesse d'un champ cultivé,
+/// bien au-dessus de ce que la prairie sauvage porte seule (`u8`, 0–255).
+pub const CULTIVATED_CEILING: u8 = 230;
+/// Fertilité minimale d'un sol pour qu'il vaille d'être cultivé : on ne sème
+/// pas la roche nue.
+pub const FIELD_MIN_FERTILITY: u8 = 40;
+/// Biomasse ajoutée par tour d'entretien, avant modulation par la capacité de
+/// travail et la fertilité du sol.
+const CULTIVATE_GAIN: f32 = 30.0;
+/// Fertilité prélevée par tour d'entretien : le champ épuise lentement le sol
+/// (§2.4) — sans jachère ni fumure, il finit par ne plus rien rendre, et le
+/// clan doit défricher ailleurs (agriculture itinérante émergente).
+const CULTIVATE_FERTILITY_COST: u8 = 1;
+
 /// Trajet calculé par l'A* pour contourner l'eau : une suite d'étapes à
 /// rejoindre en ligne droite, vers un `goal` donné. Vit dans une table à côté
 /// de l'ECS (le composant `Behavior` doit rester `Copy`, or un chemin est un
@@ -419,7 +438,8 @@ impl Sim {
         // On extrait les composants de l'agent (copies, plus un clone de la
         // mémoire) pour relâcher l'emprunt de `self.agents` avant d'appeler
         // `brain::inspect`, qui veut `&mut self.world`.
-        let (pos, phys, traits, demo, kin, clan, carrying, current, mem) = self
+        let agriculture = self.tech_tree.id_of("agriculture");
+        let (pos, phys, traits, demo, kin, clan, carrying, current, knows_agriculture, mem) = self
             .agents
             .query::<(
                 &AgentId,
@@ -431,11 +451,12 @@ impl Sim {
                 &ClanMembership,
                 &Carrying,
                 &Behavior,
+                &Knowledge,
                 &Memory,
             )>()
             .iter()
             .find(|(_, (aid, ..))| aid.0 == id.0)
-            .map(|(_, (_, pos, phys, traits, demo, kin, membership, carrying, behavior, mem))| {
+            .map(|(_, (_, pos, phys, traits, demo, kin, membership, carrying, behavior, knowledge, mem))| {
                 (
                     *pos,
                     *phys,
@@ -445,6 +466,7 @@ impl Sim {
                     membership.0,
                     carrying.0,
                     behavior.task.map(|t| t.kind),
+                    agriculture.is_some_and(|a| knowledge.has(a)),
                     mem.clone(),
                 )
             })?;
@@ -460,6 +482,7 @@ impl Sim {
             kin: &kin,
             clan,
             carrying,
+            knows_agriculture,
         };
         Some(brain::inspect(&mut self.world, time, &ctx, &mem, current, &herds, &humans, &clan_views))
     }
@@ -497,10 +520,15 @@ impl Sim {
             .map(|c| (c.id, ClanView { home: c.home, stock: c.stock, desired: c.desired }))
             .collect();
 
+        // L'id de l'agriculture, résolu une seule fois : sert à déballer un
+        // `knows_agriculture: bool` par agent pour la délibération (`brain`
+        // reste ainsi découplé de l'arbre technologique).
+        let agriculture = self.tech_tree.id_of("agriculture");
+
         // 1. Délibération — bucketée : l'agent i ne repense sa tâche qu'aux
         // ticks (tick + i) % période == 0, ou dès qu'il n'a plus de tâche.
         // Les nourrissons ne délibèrent pas : ils sont portés.
-        for (_, (id, pos, phys, traits, demo, kin, membership, carrying, behavior, mem)) in self
+        for (_, (id, pos, phys, traits, demo, kin, membership, carrying, knowledge, behavior, mem)) in self
             .agents
             .query_mut::<(
                 &AgentId,
@@ -511,6 +539,7 @@ impl Sim {
                 &Kinship,
                 &ClanMembership,
                 &Carrying,
+                &Knowledge,
                 &mut Behavior,
                 &mut Memory,
             )>()
@@ -546,6 +575,7 @@ impl Sim {
                         kin,
                         clan: membership.0,
                         carrying: carrying.0,
+                        knows_agriculture: agriculture.is_some_and(|a| knowledge.has(a)),
                     };
                     behavior.task = brain::decide(
                         &mut self.world,
@@ -970,6 +1000,20 @@ fn execute(
             if phys.hunger <= 0.05 || tile.biomass == 0 {
                 behavior.task = None; // rassasié, ou tuile épuisée
             }
+        }
+        TaskKind::Cultivate => {
+            behavior.activity = Activity::Farming;
+            // Semer/sarcler : le travail agricole ÉLÈVE la biomasse de la tuile
+            // au-dessus de ce que la nature y met — un champ rend plus qu'une
+            // prairie sauvage. La récolte, elle, reste la cueillette ordinaire
+            // (biomasse plus riche → meilleur rendement). Le sol se fatigue un
+            // peu (§2.4) ; sans entretien, l'écologie ramène le champ en friche.
+            skills::practice(&mut agent_skills.foraging, skills::forage_cap(traits), 1.0);
+            let tile = world.tile_mut(task.target.0, task.target.1);
+            let gain = (CULTIVATE_GAIN * work * f32::from(tile.soil_fertility) / 255.0) as u8;
+            tile.biomass = tile.biomass.saturating_add(gain).min(CULTIVATED_CEILING);
+            tile.soil_fertility = tile.soil_fertility.saturating_sub(CULTIVATE_FERTILITY_COST);
+            behavior.task = None; // un tour d'entretien, puis on redélibère
         }
         TaskKind::EatFromStock => {
             behavior.activity = Activity::Eating;
@@ -2180,6 +2224,95 @@ mod tests {
         );
         assert_eq!(structures.len(), 1, "une hutte existe déjà : pas de doublon");
         assert_eq!(clan_stock[&clan_id], stock_intermediaire, "no-op : le stock ne bouge pas");
+    }
+
+    /// Agriculture (Phase 5, chaîne §5.3) : entretenir un champ
+    /// (`TaskKind::Cultivate`) ÉLÈVE la biomasse de la tuile au-dessus de son
+    /// état, en prélevant un peu de fertilité (§2.4). Mécanisme testé par
+    /// `execute` direct, la tuile forcée à un état connu (prairie fertile,
+    /// biomasse basse) via `tile_mut`.
+    #[test]
+    fn cultiver_eleve_la_biomasse_et_epuise_le_sol() {
+        let mut sim = Sim::new(WorldSeed(42), 512);
+        let field = find_land(&sim);
+        {
+            let tile = sim.world.tile_mut(field.0, field.1);
+            tile.soil_fertility = 200;
+            tile.biomass = 20;
+        }
+        let mut pos = Position { x: field.0 as f64 + 0.5, y: field.1 as f64 + 0.5 };
+        let mut phys = Physiology::default();
+        let mut behavior = Behavior {
+            task: Some(Task { kind: TaskKind::Cultivate, target: field }),
+            ..Behavior::default()
+        };
+        let traits = Traits::default();
+        let mut skills = Skills::default();
+        let mut routes: BTreeMap<u64, Route> = BTreeMap::new();
+        let mut budget = PATH_REQUESTS_PER_TICK;
+        let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::new();
+        let mut carrying = Carrying::default();
+        let mut prestige = Prestige::default();
+        let mut structures: Vec<Structure> = Vec::new();
+
+        execute(
+            &mut sim.world, &mut routes, &mut budget, AgentId(0), &mut pos, &mut phys,
+            &mut behavior, &[], 1.0, &traits, &mut skills, None, &mut clan_stock,
+            &mut carrying, &mut prestige, &mut structures, 0,
+        );
+
+        let tile = sim.world.tile(field.0, field.1);
+        assert!(tile.biomass > 20, "le champ entretenu doit gagner de la biomasse (20 → {})", tile.biomass);
+        assert_eq!(tile.soil_fertility, 199, "l'entretien prélève un peu de fertilité");
+    }
+
+    /// Le candidat « cultiver » n'apparaît que pour qui **maîtrise
+    /// l'agriculture** : deux agents repus au foyer sur la même prairie
+    /// fertile, seul l'agriculteur l'envisage. Lu via `inspect_agent` (pur).
+    #[test]
+    fn seul_l_agriculteur_envisage_de_cultiver() {
+        let mut sim = Sim::new(WorldSeed(42), 512);
+        let home = find_land(&sim);
+        {
+            let tile = sim.world.tile_mut(home.0, home.1);
+            tile.biome = cairn_worldgen::Biome::Grassland;
+            tile.soil_fertility = 200;
+            tile.biomass = 20;
+        }
+        let agri = sim.tech_tree.id_of("agriculture").unwrap();
+        let farmer = sim.spawn_agent(home.0 as f64 + 0.5, home.1 as f64 + 0.5);
+        let profane = sim.spawn_agent(home.0 as f64 + 0.5, home.1 as f64 + 0.5);
+        for (_, (id, know, phys, membership)) in
+            sim.agents.query_mut::<(&AgentId, &mut Knowledge, &mut Physiology, &mut ClanMembership)>()
+        {
+            phys.hunger = 0.2; // repu : on cultive au calme
+            phys.thirst = 0.2;
+            phys.cold = 0.0;
+            membership.0 = Some(social::ClanId(1));
+            if *id == farmer {
+                know.insert(agri);
+            }
+        }
+        sim.clans.push(Clan {
+            id: social::ClanId(1),
+            founded_tick: 0,
+            members: [farmer, profane].into_iter().collect(),
+            home: (home.0 as f64 + 0.5, home.1 as f64 + 0.5),
+            stock: 0.0,
+            chief: farmer,
+            desired: None,
+        });
+
+        let m_farmer = sim.inspect_agent(farmer).unwrap();
+        assert!(
+            m_farmer.iter().any(|m| m.kind == TaskKind::Cultivate),
+            "un agriculteur repu au foyer sur prairie fertile doit envisager de cultiver"
+        );
+        let m_profane = sim.inspect_agent(profane).unwrap();
+        assert!(
+            !m_profane.iter().any(|m| m.kind == TaskKind::Cultivate),
+            "qui ne connaît pas l'agriculture ne cultive pas"
+        );
     }
 
     /// Le bug réellement signalé par l'utilisateur : le client permet de
