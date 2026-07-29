@@ -1564,6 +1564,7 @@ fn task_name(kind: TaskKind) -> String {
         TaskKind::Expedition => "expédition (chercher l'étain)".to_string(),
         TaskKind::Cultivate => "cultiver un champ".to_string(),
         TaskKind::HuntPredator => "chasser un prédateur".to_string(),
+        TaskKind::Herd => "garder le cheptel".to_string(),
     }
 }
 

@@ -112,6 +112,13 @@ const WOUND_WORK_PENALTY: f32 = 0.5;
 /// besoins vitaux (~deux semaines pour une plaie pleine).
 const WOUND_HEAL_PER_TICK: f32 = 1.0 / (24.0 * 14.0);
 
+/// Têtes prélevées **durablement** sur un cheptel à chaque tour de garde
+/// (domestication, `crate::pastoral`) : bien moins que la croissance d'un
+/// troupeau protégé, pour qu'il se refasse (traite/abattage mesuré). La
+/// nourriture obtenue (au taux d'une prise, `HUNT_NUTRITION`) va au stock
+/// commun, pas dans le ventre de l'éleveur.
+const HERD_HARVEST_HEAD: f32 = 0.3;
+
 /// Trajet calculé par l'A* pour contourner l'eau : une suite d'étapes à
 /// rejoindre en ligne droite, vers un `goal` donné. Vit dans une table à côté
 /// de l'ECS (le composant `Behavior` doit rester `Copy`, or un chemin est un
@@ -456,6 +463,7 @@ impl Sim {
                 entity,
                 pos: (pos.x, pos.y),
                 population: herd.population,
+                tameness: herd.tameness,
             })
             .collect()
     }
@@ -849,6 +857,11 @@ impl Sim {
             structures::maintain(self, time.tick / TICKS_PER_DAY);
             structures::plan(self);
             structures::anchor_homes(self);
+            // Domestication (Phase 5) : les foyers étant fixés, apprivoiser (ou
+            // refaroucher) les troupeaux domesticables selon la proximité d'un
+            // clan et la protection contre les prédateurs — le cheptel émerge de
+            // l'éleveur, sans tech ni règle « possède ce troupeau ».
+            crate::pastoral::daily(self);
             // Les feux de forêt (Phase 5) : font vivre les foyers (brûlent le
             // fourrage, exposent au feu les agents proches) et tentent un
             // nouveau départ. Ambivalent : la biomasse détruite nourrit la
@@ -1068,6 +1081,33 @@ fn execute(
         return None;
     }
 
+    // Garder le cheptel (domestication) : comme la chasse, la cible bouge un
+    // peu (le troupeau apprivoisé, quoique ancré). On prélève durablement sur
+    // lui et l'on verse au **stock commun** (le cheptel nourrit le clan, pas
+    // le seul éleveur) — bien moins que sa croissance, pour qu'il se refasse.
+    if task.kind == TaskKind::Herd {
+        let Some(cheptel) = closest_tame_herd(pos, herds) else {
+            behavior.task = None; // plus de cheptel apprivoisé en vue
+            behavior.activity = Activity::Idle;
+            return None;
+        };
+        let target = (cheptel.pos.0.floor() as i64, cheptel.pos.1.floor() as i64);
+        if pos.distance_tiles(target) > HUNT_REACH_TILES {
+            behavior.activity = Activity::Walking;
+            if advance(world, routes, path_budget, id, pos, target) == Move::Stuck {
+                behavior.task = None;
+            }
+            return None;
+        }
+        behavior.activity = Activity::Farming; // même geste pastoral que le champ
+        skills::practice(&mut agent_skills.foraging, skills::forage_cap(traits), 1.0);
+        if let Some(clan_id) = clan {
+            *clan_stock.entry(clan_id).or_insert(0.0) += HERD_HARVEST_HEAD * HUNT_NUTRITION;
+        }
+        behavior.task = None;
+        return Some(Kill { herd: cheptel.entity, head: HERD_HARVEST_HEAD });
+    }
+
     // Phase trajet : la cible est trop loin, on marche (budget d'une heure).
     if pos.distance_tiles(task.target) > ARRIVAL_TILES {
         behavior.activity = Activity::Walking;
@@ -1193,6 +1233,7 @@ fn execute(
         TaskKind::HuntPredator => {
             unreachable!("l'affrontement d'une meute est traité avant, sa cible bouge")
         }
+        TaskKind::Herd => unreachable!("la garde du cheptel est traitée avant, sa cible bouge"),
     }
     None
 }
@@ -1226,6 +1267,24 @@ fn closest_pack(pos: &Position, packs: &[PackView]) -> Option<PackView> {
         }
     }
     best.map(|(_, p)| p)
+}
+
+/// Le **cheptel** (troupeau apprivoisé) le plus proche dans un rayon de vue —
+/// pour l'éleveur qui va le garder (`TaskKind::Herd`). Ignore le gibier sauvage
+/// (apprivoisement sous le seuil de domestication).
+fn closest_tame_herd(pos: &Position, herds: &[HerdView]) -> Option<HerdView> {
+    let sight2 = cairn_core::km_to_tiles(2.0).powi(2);
+    let mut best: Option<(f64, HerdView)> = None;
+    for h in herds {
+        if h.tameness < crate::pastoral::DOMESTICATED_THRESHOLD {
+            continue;
+        }
+        let d2 = (pos.x - h.pos.0).powi(2) + (pos.y - h.pos.1).powi(2);
+        if d2 <= sight2 && best.is_none_or(|(bd, _)| d2 < bd) {
+            best = Some((d2, *h));
+        }
+    }
+    best.map(|(_, h)| h)
 }
 
 /// Fait avancer l'agent vers `target` pour ce tick, en gérant l'évitement de
@@ -2118,7 +2177,8 @@ mod tests {
         let mut structures: Vec<Structure> = Vec::new();
         // Le troupeau est juste sous la main : cette scène teste la
         // mécanique de mise à mort, pas l'approche.
-        let herd = HerdView { entity: hecs::Entity::DANGLING, pos: (pos.x, pos.y), population: 20.0 };
+        let herd =
+            HerdView { entity: hecs::Entity::DANGLING, pos: (pos.x, pos.y), population: 20.0, tameness: 0.0 };
 
         let kill = execute(
             &mut sim.world,
@@ -2496,6 +2556,86 @@ mod tests {
         assert!(
             brave_score > timid_score,
             "l'agressif s'y risque bien plus que le placide (brave {brave_score}, timid {timid_score})"
+        );
+    }
+
+    /// Domestication : garder un cheptel apprivoisé (`TaskKind::Herd`) verse un
+    /// prélèvement durable au **stock commun** du clan. Mécanisme testé par
+    /// `execute` direct, avec un cheptel synthétique à portée.
+    #[test]
+    fn garder_le_cheptel_alimente_le_stock() {
+        let mut sim = Sim::new(WorldSeed(1), 512);
+        let home = find_land(&sim);
+        let homef = (home.0 as f64 + 0.5, home.1 as f64 + 0.5);
+        let cheptel = HerdView {
+            entity: hecs::Entity::DANGLING,
+            pos: homef,
+            population: 20.0,
+            tameness: 0.8, // franchement domestiqué
+        };
+        let mut pos = Position { x: homef.0, y: homef.1 };
+        let mut phys = Physiology::default();
+        let mut behavior =
+            Behavior { task: Some(Task { kind: TaskKind::Herd, target: home }), ..Behavior::default() };
+        let traits = Traits::default();
+        let mut skills = Skills::default();
+        let mut routes: BTreeMap<u64, Route> = BTreeMap::new();
+        let mut budget = PATH_REQUESTS_PER_TICK;
+        let clan_id = social::ClanId(2);
+        let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::new();
+        let mut carrying = Carrying::default();
+        let mut prestige = Prestige::default();
+        let mut structures: Vec<Structure> = Vec::new();
+
+        execute(
+            &mut sim.world, &mut routes, &mut budget, AgentId(0), &mut pos, &mut phys,
+            &mut behavior, &[cheptel], &[], 1.0, &traits, &mut skills, Some(clan_id),
+            &mut clan_stock, &mut carrying, &mut prestige, &mut structures, &mut Vec::new(), 0,
+        );
+
+        assert!(
+            clan_stock.get(&clan_id).copied().unwrap_or(0.0) > 0.0,
+            "garder le cheptel doit nourrir le stock commun"
+        );
+    }
+
+    /// Un cheptel apprivoisé à portée du foyer appelle l'éleveur (candidat
+    /// `Herd`) ; sans cheptel apprivoisé, personne ne garde. Lu via
+    /// `inspect_agent` (pur).
+    #[test]
+    fn un_cheptel_apprivoise_appelle_l_eleveur() {
+        let mut sim = Sim::new(WorldSeed(5), 512);
+        let home = find_land(&sim);
+        let homef = (home.0 as f64 + 0.5, home.1 as f64 + 0.5);
+        let cheptel = sim.spawn_herd(homef.0 + 30.0, homef.1, 20.0);
+        for (_, (id, herd)) in sim.fauna.query_mut::<(&FaunaId, &mut Herd)>() {
+            if *id == cheptel {
+                herd.tameness = 0.8;
+            }
+        }
+        let herder = sim.spawn_agent(homef.0, homef.1);
+        for (_, (phys, membership)) in
+            sim.agents.query_mut::<(&mut Physiology, &mut ClanMembership)>()
+        {
+            phys.hunger = 0.2;
+            phys.thirst = 0.2;
+            phys.cold = 0.0;
+            membership.0 = Some(social::ClanId(1));
+        }
+        sim.clans.push(Clan {
+            id: social::ClanId(1),
+            founded_tick: 0,
+            members: [herder].into_iter().collect(),
+            home: homef,
+            stock: 0.0,
+            chief: herder,
+            desired: None,
+        });
+
+        let m = sim.inspect_agent(herder).unwrap();
+        assert!(
+            m.iter().any(|x| x.kind == TaskKind::Herd),
+            "un éleveur repu au foyer, cheptel à portée, doit envisager de le garder"
         );
     }
 

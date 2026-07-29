@@ -71,6 +71,9 @@ const PRED_DEATH_PER_DAY: f32 = 0.020;
 
 /// Dérive d'un troupeau qui broute : ~80 m/h, un pâturage qui avance.
 const GRAZE_STEP_TILES: f64 = 40.0;
+/// Laisse d'un cheptel ancré (~600 m) : au-delà, il revient vers son foyer
+/// (domestication, voir `crate::pastoral`).
+const HERD_LEASH_TILES: f64 = km_to_tiles(0.6);
 /// Portée d'échantillonnage de l'herbe autour du troupeau (~160 m).
 const GRAZE_SAMPLE_TILES: i64 = 80;
 /// Fuite : ~2 km avalés d'un trait.
@@ -258,6 +261,13 @@ pub struct Herd {
     pub satiation: f32,
     /// L'espèce (cerf, aurochs…) : paramètre l'habitat et la vigilance.
     pub species: Species,
+    /// Apprivoisement, dans [0, 1] (domestication, `crate::pastoral`) : monte
+    /// pour une espèce **domesticable** protégée et gardée près d'un foyer,
+    /// redescend sinon (réversion férale). Reste 0 pour le gibier sauvage.
+    pub tameness: f32,
+    /// Foyer auquel le cheptel est **ancré** : tant qu'il est gardé, il reste à
+    /// proximité (il ne migre plus, ne dérive plus). `None` = libre.
+    pub anchor: Option<(f64, f64)>,
 }
 
 impl Herd {
@@ -268,6 +278,8 @@ impl Herd {
             flee_ticks: 0,
             satiation: 1.0,
             species,
+            tameness: 0.0,
+            anchor: None,
         }
     }
 }
@@ -297,6 +309,9 @@ pub struct HerdView {
     pub entity: hecs::Entity,
     pub pos: (f64, f64),
     pub population: f32,
+    /// Apprivoisement (0 = sauvage) : un troupeau bien apprivoisé est le
+    /// **cheptel** qu'un éleveur va garder (`TaskKind::Herd`).
+    pub tameness: f32,
 }
 
 /// Instantané d'une meute, pris avant les systèmes — ce que lisent les humains
@@ -502,7 +517,26 @@ pub fn update_herds(
                 (f32::from(biomass) / 255.0) * herd.species.habitat_factor(here_tile.biome);
 
             let winter = !climate.grows(&here_tile, pos.y.floor() as i64, time);
-            if winter {
+            if let Some(anchor) = herd.anchor {
+                // — Cheptel ancré (domestication) : il **reste au foyer**. Trop
+                //   loin → il y revient ; sinon il broute sur place. Il ne migre
+                //   pas (le clan l'abrite l'hiver). C'est ce qui fait qu'un
+                //   troupeau apprivoisé « suit » les gens au lieu de partir avec
+                //   les saisons — sans règle « reste ici ».
+                herd.state = HerdState::Grazing;
+                let d = ((anchor.0 - pos.x).powi(2) + (anchor.1 - pos.y).powi(2)).sqrt();
+                if d > HERD_LEASH_TILES {
+                    try_move(world, pos, away_from(anchor, (pos.x, pos.y)), GRAZE_STEP_TILES);
+                } else {
+                    let dx = target.0 as f64 + 0.5 - pos.x;
+                    let dy = target.1 as f64 + 0.5 - pos.y;
+                    let len = (dx * dx + dy * dy).sqrt();
+                    if len > 1e-6 {
+                        try_move(world, pos, (dx / len, dy / len), GRAZE_STEP_TILES.min(len));
+                    }
+                }
+                graze(world, (pos.x, pos.y), herd.population);
+            } else if winter {
                 // Seul l'hiver — la pâture gelée sur toute la bande — met le
                 // troupeau en route vers le chaud. Lentement.
                 herd.state = HerdState::Migrating;

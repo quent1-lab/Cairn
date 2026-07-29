@@ -31,6 +31,7 @@ pub mod exposure;
 pub mod fauna;
 pub mod fire;
 pub mod memory;
+pub mod pastoral;
 pub mod pathfind;
 pub mod pressure;
 pub mod scenario;

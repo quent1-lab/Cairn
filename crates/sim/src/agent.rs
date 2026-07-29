@@ -162,6 +162,13 @@ pub enum TaskKind {
     /// ou tuer. La cible est la meute la plus proche, re-visée en chemin (comme
     /// la chasse ordinaire suit son gibier).
     HuntPredator,
+    /// Garder le cheptel (domestication, `crate::pastoral`) : un éleveur va
+    /// traire/prélever durablement sur un troupeau **apprivoisé** de son
+    /// territoire, ce qui alimente le stock commun sans le décimer (le cheptel,
+    /// protégé, se refait). Réservé aux adultes au calme, au foyer. La cible est
+    /// le troupeau apprivoisé le plus proche, re-visé en chemin (il bouge peu,
+    /// étant ancré).
+    Herd,
 }
 
 /// Le composant « comportement » : la tâche en cours et l'activité de l'heure.

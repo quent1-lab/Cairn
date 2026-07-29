@@ -95,6 +95,9 @@ const PREDATOR_THREAT_TILES: f64 = km_to_tiles(1.5);
 /// Poussée du drive de défense (chasse des prédateurs) : modulée par
 /// l'agressivité et la force — qui décident *qui* ose s'y risquer.
 const PREDATOR_DEFENSE_DRIVE: f32 = 0.8;
+/// Poussée du drive d'élevage (garder le cheptel) : modeste, comme
+/// l'agriculture — le travail pastoral se fait au calme, pas dans l'urgence.
+const HERD_DRIVE: f32 = 0.35;
 
 /// L'agent vu par la délibération : son identité et ses composants, groupés
 /// pour ne pas trimballer sept paramètres.
@@ -401,6 +404,33 @@ fn build_candidates(
             && tile.biomass < crate::sim::CULTIVATED_CEILING;
         if cultivable {
             candidates.push((TaskKind::Cultivate, here, FARM_DRIVE));
+        }
+    }
+
+    // — Garder le cheptel (domestication, Phase 5) : le pendant animal du champ.
+    //   Un éleveur au calme, dans son territoire, va prélever durablement sur un
+    //   troupeau **apprivoisé** proche (le cheptel a émergé de la protection —
+    //   l'éleveur ayant chassé les prédateurs — et de la sédentarité). On garde
+    //   repu, comme on cultive repu ; la récolte va au stock commun.
+    if adult
+        && phys.hunger < FED_TO_FARM
+        && let Some(clan_id) = clan
+        && let Some(view) = clan_views.get(&clan_id)
+        && (pos.x - view.home.0).hypot(pos.y - view.home.1) <= RESIDENCE_RADIUS_TILES
+    {
+        let mut nearest: Option<(f64, (f64, f64))> = None;
+        for h in herds {
+            if h.tameness < crate::pastoral::DOMESTICATED_THRESHOLD {
+                continue;
+            }
+            let d2 = (pos.x - h.pos.0).powi(2) + (pos.y - h.pos.1).powi(2);
+            if nearest.is_none_or(|(bd, _)| d2 < bd) {
+                nearest = Some((d2, h.pos));
+            }
+        }
+        if let Some((_, hpos)) = nearest {
+            let target = (hpos.0.floor() as i64, hpos.1.floor() as i64);
+            candidates.push((TaskKind::Herd, target, HERD_DRIVE));
         }
     }
 
