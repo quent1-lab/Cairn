@@ -45,7 +45,7 @@ pub mod world;
 
 pub use agent::{Activity, AgentId, Behavior, DeathCause, Physiology, Position, Task, TaskKind, Wound};
 pub use brain::Motivation;
-pub use combat::Engagement;
+pub use combat::{Clash, Engagement};
 pub use chunk::{CHUNK_AREA, CHUNK_SIZE, Chunk, ChunkCoord};
 pub use commerce::Expedition;
 pub use climate::Climate;

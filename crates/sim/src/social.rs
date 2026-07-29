@@ -1055,7 +1055,7 @@ mod tests {
     use crate::demography::{HumanView, Sex};
 
     fn human_at(id: u64, x: f64, y: f64) -> HumanView {
-        HumanView { id: AgentId(id), pos: (x, y), sex: Sex::Female, adult: true }
+        HumanView { id: AgentId(id), pos: (x, y), sex: Sex::Female, adult: true, clan: None }
     }
 
     type SocialFixture = (BTreeSet<u64>, BTreeMap<(u64, u64), f32>, Vec<HumanView>);

@@ -169,6 +169,12 @@ pub enum TaskKind {
     /// le troupeau apprivoisé le plus proche, re-visé en chemin (il bouge peu,
     /// étant ancré).
     Herd,
+    /// Razzier un clan rival (conflit inter-clans, `crate::combat`) : un
+    /// agresseur va en découdre avec un membre d'un clan avec lequel le sien est
+    /// **en tension** (mesurée depuis la Phase 4), au corps à corps — les deux
+    /// peuvent être blessés ou tués, et un raid réussi razzie le stock du rival.
+    /// La cible est le rival hostile le plus proche, re-visé en chemin.
+    Raid,
 }
 
 /// Le composant « comportement » : la tâche en cours et l'activité de l'heure.
@@ -215,6 +221,9 @@ pub enum DeathCause {
     OldAge,
     /// Tué par une meute de prédateurs en la combattant (voir `crate::combat`).
     Predation,
+    /// Tué par un autre humain lors d'un raid inter-clans (`crate::combat`) :
+    /// la tension entre clans voisins qui trouve sa conclusion dans le sang.
+    Violence,
 }
 
 /// Les besoins vitaux, tous dans [0, 1] : 0 = comblé, 1 = critique.

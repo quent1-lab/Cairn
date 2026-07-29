@@ -39,7 +39,7 @@ use crate::agent::{
 };
 use crate::brain::{self, AgentCtx, DELIBERATION_PERIOD};
 use crate::climate::Climate;
-use crate::combat::{self, Engagement};
+use crate::combat::{self, Clash, Engagement};
 use crate::commerce::{self, Expedition};
 use crate::demography::{self, Demographics, HumanView, Kinship, Sex, Traits};
 use crate::ecology;
@@ -409,13 +409,14 @@ impl Sim {
     pub fn human_views(&self) -> Vec<HumanView> {
         let mut views: Vec<HumanView> = self
             .agents
-            .query::<(&AgentId, &Position, &Demographics)>()
+            .query::<(&AgentId, &Position, &Demographics, &ClanMembership)>()
             .iter()
-            .map(|(_, (id, pos, demo))| HumanView {
+            .map(|(_, (id, pos, demo, membership))| HumanView {
                 id: *id,
                 pos: (pos.x, pos.y),
                 sex: demo.sex,
                 adult: demo.is_adult(self.time.tick),
+                clan: membership.0,
             })
             .collect();
         views.sort_unstable_by_key(|h| h.id.0);
@@ -548,7 +549,10 @@ impl Sim {
             carrying,
             knows_agriculture,
         };
-        Some(brain::inspect(&mut self.world, time, &ctx, &mem, current, &herds, &packs, &humans, &clan_views))
+        Some(brain::inspect(
+            &mut self.world, time, &ctx, &mem, current, &herds, &packs, &humans, &clan_views,
+            &self.clan_relations,
+        ))
     }
 
     /// Effectifs totaux (herbivores, prédateurs) et nombre de groupes.
@@ -652,6 +656,7 @@ impl Sim {
                         &packs,
                         &humans,
                         &clan_views,
+                        &self.clan_relations,
                     );
                 }
             }
@@ -672,6 +677,7 @@ impl Sim {
         // boucle. Clairsemé — quelques éléments par clan, clone négligeable.
         let mut structures = self.structures.clone();
         let mut engagements: Vec<Engagement> = Vec::new();
+        let mut clashes: Vec<Clash> = Vec::new();
         for (
             _,
             (id, pos, phys, traits, demo, behavior, mem, agent_skills, membership, carrying, prestige, wound),
@@ -707,6 +713,7 @@ impl Sim {
                 behavior,
                 &herds,
                 &packs,
+                &humans,
                 work,
                 traits,
                 agent_skills,
@@ -716,6 +723,7 @@ impl Sim {
                 prestige,
                 &mut structures,
                 &mut engagements,
+                &mut clashes,
                 time.tick,
             );
             // Où que la tâche l'ait mené, l'agent note où il a mis les pieds.
@@ -727,6 +735,8 @@ impl Sim {
         // Dénouement des affrontements du tick : les meutes encaissent la somme
         // des coups, leur riposte se partage en plaies (mortelles à 1).
         combat::resolve(self, &engagements);
+        // Puis les raids inter-clans : coups mutuels, butin, morts par violence.
+        combat::resolve_clashes(self, &clashes);
         self.hunted_head += kills.iter().map(|k| k.head).sum::<f32>();
         self.path_calls += u64::from(PATH_REQUESTS_PER_TICK - path_budget);
         structures.sort_by_key(|s| (s.clan.0, s.kind));
@@ -991,6 +1001,7 @@ fn execute(
     behavior: &mut Behavior,
     herds: &[HerdView],
     packs: &[PackView],
+    humans: &[HumanView],
     work: f32,
     traits: &Traits,
     agent_skills: &mut Skills,
@@ -1000,6 +1011,7 @@ fn execute(
     prestige: &mut Prestige,
     structures: &mut Vec<Structure>,
     engagements: &mut Vec<Engagement>,
+    clashes: &mut Vec<Clash>,
     tick: u64,
 ) -> Option<Kill> {
     let task = match behavior.task {
@@ -1106,6 +1118,50 @@ fn execute(
         }
         behavior.task = None;
         return Some(Kill { herd: cheptel.entity, head: HERD_HARVEST_HEAD });
+    }
+
+    // Razzier un rival : comme la chasse, la cible bouge (un humain d'un clan
+    // rival) — on ré-évalue le plus proche à chaque tick. Au contact, on
+    // enregistre une passe d'armes, dénouée **en groupe** après l'exécution
+    // (`combat::resolve_clashes`) : la cible encaisse la somme des assauts et
+    // riposte. On ne re-teste pas la tension ici (le cerveau a décidé de
+    // razzier un hostile ; les territoires étant distincts, le rival le plus
+    // proche est bien le voisin en tension).
+    if task.kind == TaskKind::Raid {
+        let Some(my_clan) = clan else {
+            behavior.task = None;
+            return None;
+        };
+        let sight2 = cairn_core::km_to_tiles(1.5).powi(2);
+        let mut target: Option<(AgentId, (f64, f64))> = None;
+        let mut best = sight2;
+        for h in humans {
+            if h.id == id || h.clan == Some(my_clan) || h.clan.is_none() {
+                continue;
+            }
+            let d2 = (pos.x - h.pos.0).powi(2) + (pos.y - h.pos.1).powi(2);
+            if d2 <= best {
+                best = d2;
+                target = Some((h.id, h.pos));
+            }
+        }
+        let Some((tid, tpos)) = target else {
+            behavior.task = None; // plus de rival en vue
+            behavior.activity = Activity::Idle;
+            return None;
+        };
+        let tt = (tpos.0.floor() as i64, tpos.1.floor() as i64);
+        if pos.distance_tiles(tt) > HUNT_REACH_TILES {
+            behavior.activity = Activity::Walking;
+            if advance(world, routes, path_budget, id, pos, tt) == Move::Stuck {
+                behavior.task = None;
+            }
+            return None;
+        }
+        behavior.activity = Activity::Fighting;
+        clashes.push(Clash { attacker: id, target: tid });
+        behavior.task = None; // une passe d'armes, puis on redélibère
+        return None;
     }
 
     // Phase trajet : la cible est trop loin, on marche (budget d'une heure).
@@ -1234,6 +1290,7 @@ fn execute(
             unreachable!("l'affrontement d'une meute est traité avant, sa cible bouge")
         }
         TaskKind::Herd => unreachable!("la garde du cheptel est traitée avant, sa cible bouge"),
+        TaskKind::Raid => unreachable!("le raid est traité avant, sa cible (un rival) bouge"),
     }
     None
 }
@@ -2190,6 +2247,7 @@ mod tests {
             &mut behavior,
             &[herd],
             &[],
+            &[],
             1.0,
             &traits,
             &mut skills,
@@ -2198,6 +2256,7 @@ mod tests {
             &mut carrying,
             &mut prestige,
             &mut structures,
+            &mut Vec::new(),
             &mut Vec::new(),
             0,
         );
@@ -2249,6 +2308,7 @@ mod tests {
             &mut behavior,
             &[],
             &[],
+            &[],
             1.0,
             &traits,
             &mut skills,
@@ -2257,6 +2317,7 @@ mod tests {
             &mut carrying,
             &mut prestige,
             &mut structures,
+            &mut Vec::new(),
             &mut Vec::new(),
             0,
         );
@@ -2305,6 +2366,7 @@ mod tests {
             &mut behavior,
             &[],
             &[],
+            &[],
             1.0,
             &traits,
             &mut skills,
@@ -2313,6 +2375,7 @@ mod tests {
             &mut carrying,
             &mut prestige,
             &mut structures,
+            &mut Vec::new(),
             &mut Vec::new(),
             0,
         );
@@ -2365,6 +2428,7 @@ mod tests {
             &mut behavior,
             &[],
             &[],
+            &[],
             1.0,
             &traits,
             &mut skills,
@@ -2373,6 +2437,7 @@ mod tests {
             &mut carrying,
             &mut prestige,
             &mut structures,
+            &mut Vec::new(),
             &mut Vec::new(),
             0,
         );
@@ -2402,6 +2467,7 @@ mod tests {
             &mut behavior2,
             &[],
             &[],
+            &[],
             1.0,
             &traits,
             &mut skills,
@@ -2410,6 +2476,7 @@ mod tests {
             &mut carrying,
             &mut prestige,
             &mut structures,
+            &mut Vec::new(),
             &mut Vec::new(),
             0,
         );
@@ -2448,8 +2515,8 @@ mod tests {
 
         execute(
             &mut sim.world, &mut routes, &mut budget, AgentId(0), &mut pos, &mut phys,
-            &mut behavior, &[], &[], 1.0, &traits, &mut skills, None, &mut clan_stock,
-            &mut carrying, &mut prestige, &mut structures, &mut Vec::new(), 0,
+            &mut behavior, &[], &[], &[], 1.0, &traits, &mut skills, None, &mut clan_stock,
+            &mut carrying, &mut prestige, &mut structures, &mut Vec::new(), &mut Vec::new(), 0,
         );
 
         let tile = sim.world.tile(field.0, field.1);
@@ -2589,8 +2656,9 @@ mod tests {
 
         execute(
             &mut sim.world, &mut routes, &mut budget, AgentId(0), &mut pos, &mut phys,
-            &mut behavior, &[cheptel], &[], 1.0, &traits, &mut skills, Some(clan_id),
-            &mut clan_stock, &mut carrying, &mut prestige, &mut structures, &mut Vec::new(), 0,
+            &mut behavior, &[cheptel], &[], &[], 1.0, &traits, &mut skills, Some(clan_id),
+            &mut clan_stock, &mut carrying, &mut prestige, &mut structures, &mut Vec::new(),
+            &mut Vec::new(), 0,
         );
 
         assert!(
@@ -2637,6 +2705,67 @@ mod tests {
             m.iter().any(|x| x.kind == TaskKind::Herd),
             "un éleveur repu au foyer, cheptel à portée, doit envisager de le garder"
         );
+    }
+
+    /// Conflit inter-clans : une forte **tension** avec un clan voisin appelle
+    /// les agressifs au **raid** quand un rival passe à portée ; sans tension,
+    /// personne ne razzie. Lu via `inspect_agent` (la tension vit dans
+    /// `sim.clan_relations`, que `inspect` consulte).
+    #[test]
+    fn une_forte_tension_appelle_au_raid() {
+        let mut sim = Sim::new(WorldSeed(7), 512);
+        let home = find_land(&sim);
+        let homef = (home.0 as f64 + 0.5, home.1 as f64 + 0.5);
+        let raider = sim.spawn_agent(homef.0, homef.1);
+        let rival = sim.spawn_agent(homef.0 + 20.0, homef.1); // ~40 m : à portée de raid
+        for (_, (id, membership, traits, phys)) in sim.agents.query_mut::<(
+            &AgentId,
+            &mut ClanMembership,
+            &mut Traits,
+            &mut Physiology,
+        )>() {
+            phys.hunger = 0.2;
+            phys.thirst = 0.2;
+            phys.cold = 0.0;
+            traits.aggression = 0.9;
+            traits.strength = 0.7;
+            membership.0 = Some(social::ClanId(if *id == raider { 1 } else { 2 }));
+        }
+        sim.clans.push(Clan {
+            id: social::ClanId(1),
+            founded_tick: 0,
+            members: [raider].into_iter().collect(),
+            home: homef,
+            stock: 0.0,
+            chief: raider,
+            desired: None,
+        });
+        sim.clans.push(Clan {
+            id: social::ClanId(2),
+            founded_tick: 0,
+            members: [rival].into_iter().collect(),
+            home: (homef.0 + 20.0, homef.1),
+            stock: 3.0,
+            chief: rival,
+            desired: None,
+        });
+
+        let raid_score = |sim: &mut Sim| {
+            sim.inspect_agent(raider)
+                .unwrap()
+                .iter()
+                .find(|x| x.kind == TaskKind::Raid)
+                .map(|x| x.score)
+        };
+        // Forte tension (clé normalisée (min, max) = (1, 2)).
+        sim.clan_relations.tension.insert((1, 2), 0.8);
+        assert!(
+            raid_score(&mut sim).is_some_and(|s| s > 0.0),
+            "un agressif face à un rival hostile proche doit envisager le raid"
+        );
+        // Sans tension : plus de raid.
+        sim.clan_relations.tension.clear();
+        assert!(raid_score(&mut sim).is_none(), "sans tension, pas de raid");
     }
 
     /// Le bug réellement signalé par l'utilisateur : le client permet de

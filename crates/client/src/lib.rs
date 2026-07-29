@@ -769,8 +769,8 @@ impl App {
         }
 
         // Effectifs (grand total + puces par sexe/âge) et décès par cause.
-        let (mut starved, mut dehydrated, mut frozen, mut old_age, mut predated) =
-            (0u32, 0u32, 0u32, 0u32, 0u32);
+        let (mut starved, mut dehydrated, mut frozen, mut old_age, mut predated, mut killed) =
+            (0u32, 0u32, 0u32, 0u32, 0u32, 0u32);
         for d in &self.sim.deaths {
             match d.cause {
                 DeathCause::Starvation => starved += 1,
@@ -778,6 +778,7 @@ impl App {
                 DeathCause::Hypothermia => frozen += 1,
                 DeathCause::OldAge => old_age += 1,
                 DeathCause::Predation => predated += 1,
+                DeathCause::Violence => killed += 1,
             }
         }
         set_html(
@@ -792,7 +793,7 @@ impl App {
                  <div class=\"deaths\">\
                    <span><b>{}</b> naissances</span>\
                    <span><b>{}</b> décès</span>\
-                   <span>faim {starved} · soif {dehydrated} · froid {frozen} · vieillesse {old_age} · prédation {predated}</span>\
+                   <span>faim {starved} · soif {dehydrated} · froid {frozen} · vieillesse {old_age} · prédation {predated} · violence {killed}</span>\
                  </div>",
                 self.sim.births.len(),
                 self.sim.deaths.len(),
@@ -1565,6 +1566,7 @@ fn task_name(kind: TaskKind) -> String {
         TaskKind::Cultivate => "cultiver un champ".to_string(),
         TaskKind::HuntPredator => "chasser un prédateur".to_string(),
         TaskKind::Herd => "garder le cheptel".to_string(),
+        TaskKind::Raid => "razzier un rival".to_string(),
     }
 }
 

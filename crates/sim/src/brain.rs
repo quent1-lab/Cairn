@@ -26,7 +26,7 @@ use crate::demography::{Demographics, HumanView, Kinship, Traits, find_human};
 use crate::fauna::{HerdView, PackView};
 use crate::memory::{Memory, cell_of};
 use crate::salt;
-use crate::social::{ClanId, ClanView, RESIDENCE_RADIUS_TILES};
+use crate::social::{ClanId, ClanRelations, ClanView, RESIDENCE_RADIUS_TILES};
 use crate::world::World;
 
 /// Un agent re-délibère toutes les 4 h (et dès qu'il n'a plus de tâche).
@@ -98,6 +98,14 @@ const PREDATOR_DEFENSE_DRIVE: f32 = 0.8;
 /// Poussée du drive d'élevage (garder le cheptel) : modeste, comme
 /// l'agriculture — le travail pastoral se fait au calme, pas dans l'urgence.
 const HERD_DRIVE: f32 = 0.35;
+/// Tension (mesurée en [0, 1], Phase 4) au-delà de laquelle un clan voisin est
+/// un ennemi qu'on peut razzier.
+const RAID_TENSION_THRESHOLD: f32 = 0.4;
+/// Portée à laquelle un rival hostile devient une cible de raid (~1 km).
+const RAID_RADIUS_TILES: f64 = km_to_tiles(1.0);
+/// Poussée du drive de raid : forte, mais modulée par l'agressivité et la
+/// tension — qui décident qui razzie qui, et quand.
+const RAID_DRIVE: f32 = 0.9;
 
 /// L'agent vu par la délibération : son identité et ses composants, groupés
 /// pour ne pas trimballer sept paramètres.
@@ -133,6 +141,7 @@ pub fn decide(
     packs: &[PackView],
     humans: &[HumanView],
     clan_views: &BTreeMap<ClanId, ClanView>,
+    relations: &ClanRelations,
 ) -> Option<Task> {
     // La perception de l'eau est **mémorisée** — délibérer, c'est déjà
     // mémoriser. C'est le seul effet de bord de la délibération : il reste ici,
@@ -144,7 +153,7 @@ pub fn decide(
         mem.remember_spring(seen, (agent.pos.x, agent.pos.y));
     }
     let candidates =
-        build_candidates(world, time, &agent, mem, spring, current, herds, packs, humans, clan_views);
+        build_candidates(world, time, &agent, mem, spring, current, herds, packs, humans, clan_views, relations);
 
     let scores: Vec<f32> = candidates.iter().map(|c| c.2).collect();
     let mut rng =
@@ -171,6 +180,7 @@ fn build_candidates(
     packs: &[PackView],
     humans: &[HumanView],
     clan_views: &BTreeMap<ClanId, ClanView>,
+    relations: &ClanRelations,
 ) -> Vec<(TaskKind, (i64, i64), f32)> {
     let (id, pos, phys, traits, demo, kin, clan, carrying, knows_agriculture) = (
         agent.id, agent.pos, agent.phys, agent.traits, agent.demo, agent.kin, agent.clan,
@@ -246,6 +256,40 @@ fn build_candidates(
                 * urgency;
             let target = (ppos.0.floor() as i64, ppos.1.floor() as i64);
             candidates.push((TaskKind::HuntPredator, target, score));
+        }
+    }
+
+    // — Razzier un clan rival (conflit inter-clans, Phase 5) : la tension
+    //   mesurée depuis la Phase 4 qui trouve enfin sa conclusion. Un adulte
+    //   **agressif**, quand un membre d'un clan avec lequel le sien est en forte
+    //   **tension** passe à portée, va en découdre. Score ∝ agressivité ×
+    //   tension — jamais « déclare la guerre », juste le trait et la tension
+    //   changés en probabilité. La cible : le rival hostile le plus proche.
+    if adult
+        && let Some(my_clan) = clan
+    {
+        let mut best: Option<(f64, (f64, f64), f32)> = None; // (dist², position, tension)
+        for h in humans {
+            if h.id == id {
+                continue;
+            }
+            let Some(their_clan) = h.clan else { continue };
+            if their_clan == my_clan {
+                continue;
+            }
+            let tension = relations.tension_between(my_clan, their_clan);
+            if tension < RAID_TENSION_THRESHOLD {
+                continue;
+            }
+            let d2 = (pos.x - h.pos.0).powi(2) + (pos.y - h.pos.1).powi(2);
+            if d2 <= RAID_RADIUS_TILES.powi(2) && best.is_none_or(|(bd, _, _)| d2 < bd) {
+                best = Some((d2, h.pos, tension));
+            }
+        }
+        if let Some((_, hpos, tension)) = best {
+            let score = RAID_DRIVE * traits.aggression * tension;
+            let target = (hpos.0.floor() as i64, hpos.1.floor() as i64);
+            candidates.push((TaskKind::Raid, target, score));
         }
     }
 
@@ -564,11 +608,12 @@ pub fn inspect(
     packs: &[PackView],
     humans: &[HumanView],
     clan_views: &BTreeMap<ClanId, ClanView>,
+    relations: &ClanRelations,
 ) -> Vec<Motivation> {
     let here = agent.pos.tile();
     let spring = world.nearest_spring(here, SPRING_RADIUS_CHUNKS); // lue, jamais mémorisée
     let candidates =
-        build_candidates(world, time, agent, mem, spring, current, herds, packs, humans, clan_views);
+        build_candidates(world, time, agent, mem, spring, current, herds, packs, humans, clan_views, relations);
     let scores: Vec<f32> = candidates.iter().map(|c| c.2).collect();
     let probs = softmax_weights(&scores, SOFTMAX_TAU);
     let mut out: Vec<Motivation> = candidates

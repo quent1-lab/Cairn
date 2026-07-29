@@ -185,6 +185,9 @@ pub struct HumanView {
     pub pos: (f64, f64),
     pub sex: Sex,
     pub adult: bool,
+    /// Clan d'appartenance : c'est lui qui distingue un compagnon d'un **rival**
+    /// (conflit inter-clans, `crate::combat`). `None` = sans clan.
+    pub clan: Option<crate::social::ClanId>,
 }
 
 /// Recherche binaire dans un instantané trié par identifiant.
