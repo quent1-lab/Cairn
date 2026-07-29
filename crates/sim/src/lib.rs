@@ -21,6 +21,7 @@
 pub mod agent;
 pub mod brain;
 pub mod chunk;
+pub mod combat;
 pub mod commerce;
 pub mod climate;
 pub mod curves;
@@ -41,15 +42,16 @@ pub mod tech;
 pub mod tile;
 pub mod world;
 
-pub use agent::{Activity, AgentId, Behavior, DeathCause, Physiology, Position, Task, TaskKind};
+pub use agent::{Activity, AgentId, Behavior, DeathCause, Physiology, Position, Task, TaskKind, Wound};
 pub use brain::Motivation;
+pub use combat::Engagement;
 pub use chunk::{CHUNK_AREA, CHUNK_SIZE, Chunk, ChunkCoord};
 pub use commerce::Expedition;
 pub use climate::Climate;
 pub use demography::{Demographics, HumanView, Kinship, Pregnancy, Sex, Traits};
 pub use exposure::{Exposure, Exposures};
 pub use fire::Fire;
-pub use fauna::{FaunaId, Herd, HerdState, Pack, Species};
+pub use fauna::{FaunaId, Herd, HerdState, Pack, PackView, Species};
 pub use memory::Memory;
 pub use pressure::ClanPressure;
 pub use sim::{BirthRecord, DeathRecord, Sim};
@@ -98,4 +100,6 @@ pub(crate) mod salt {
     pub const DIFFUSION: u64 = 1013;
     /// Feux de forêt : tirage quotidien d'un départ de feu et de son site.
     pub const FIRE: u64 = 1014;
+    /// Combat homme↔prédateur : la part d'incertitude de la riposte des meutes.
+    pub const COMBAT: u64 = 1015;
 }

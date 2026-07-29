@@ -89,6 +89,9 @@ pub enum Activity {
     /// Entretenir un champ : semer, sarcler — le travail agricole qui élève la
     /// biomasse d'une prairie au-dessus de son état sauvage.
     Farming,
+    /// En découdre avec une meute de prédateurs — l'affrontement lui-même
+    /// (voir `crate::combat`), où l'on blesse et où l'on est blessé.
+    Fighting,
 }
 
 /// Tâche persistante de moyen terme (BRIEF §4 : on ne re-délibère pas à
@@ -153,6 +156,12 @@ pub enum TaskKind {
     /// friche (l'écologie le ramène vers sa capacité sauvage — §2.4). Réservé à
     /// qui maîtrise l'agriculture.
     Cultivate,
+    /// Aller en découdre avec une meute de prédateurs qui rôde près du foyer
+    /// (défense de la faune et du troupeau, `crate::combat`). Réservé aux
+    /// adultes assez agressifs pour s'y risquer ; l'affrontement peut blesser
+    /// ou tuer. La cible est la meute la plus proche, re-visée en chemin (comme
+    /// la chasse ordinaire suit son gibier).
+    HuntPredator,
 }
 
 /// Le composant « comportement » : la tâche en cours et l'activité de l'heure.
@@ -181,6 +190,15 @@ pub struct Carrying(pub f32);
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Prestige(pub f32);
 
+/// Blessure accumulée, dans [0, 1] (BRIEF §3.1 « blessures ») — infligée en
+/// combattant les prédateurs (`crate::combat`). **Persistante et distincte de
+/// la santé** : une plaie handicape (moins de travail, marche plus lente) et
+/// se referme lentement, indépendamment des besoins vitaux. À 1, elle est
+/// mortelle (la santé tombe alors à zéro, cause `Predation`). Vierge à la
+/// naissance, comme les autres composants d'agent.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Wound(pub f32);
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeathCause {
     Starvation,
@@ -188,6 +206,8 @@ pub enum DeathCause {
     Hypothermia,
     /// Sénescence (tirage quotidien de Gompertz, voir `demography`).
     OldAge,
+    /// Tué par une meute de prédateurs en la combattant (voir `crate::combat`).
+    Predation,
 }
 
 /// Les besoins vitaux, tous dans [0, 1] : 0 = comblé, 1 = critique.

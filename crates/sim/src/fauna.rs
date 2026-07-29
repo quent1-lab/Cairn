@@ -299,6 +299,17 @@ pub struct HerdView {
     pub population: f32,
 }
 
+/// Instantané d'une meute, pris avant les systèmes — ce que lisent les humains
+/// qui songent à l'affronter (`crate::combat`). Porte l'**espèce**, donc sa
+/// dangerosité (`Species::danger`) : c'est elle qui fait le risque du combat.
+#[derive(Debug, Clone, Copy)]
+pub struct PackView {
+    pub entity: hecs::Entity,
+    pub pos: (f64, f64),
+    pub population: f32,
+    pub species: Species,
+}
+
 /// Effectif retiré à un troupeau (prédation ou chasse humaine), à appliquer
 /// après coup.
 #[derive(Debug, Clone, Copy)]

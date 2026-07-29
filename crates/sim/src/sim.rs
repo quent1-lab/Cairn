@@ -35,16 +35,17 @@ use cairn_worldgen::WorldGenConfig;
 
 use crate::agent::{
     Activity, AgentId, Behavior, Carrying, DeathCause, FOREST_BONUS_C, Physiology, Position,
-    Prestige, SHELTER_BONUS_C, TaskKind, WALK_TILES_PER_TICK,
+    Prestige, SHELTER_BONUS_C, TaskKind, WALK_TILES_PER_TICK, Wound,
 };
 use crate::brain::{self, AgentCtx, DELIBERATION_PERIOD};
 use crate::climate::Climate;
+use crate::combat::{self, Engagement};
 use crate::commerce::{self, Expedition};
 use crate::demography::{self, Demographics, HumanView, Kinship, Sex, Traits};
 use crate::ecology;
 use crate::exposure::Exposures;
 use crate::fire::{self, Fire};
-use crate::fauna::{self, FaunaId, Herd, HerdView, Kill, Pack};
+use crate::fauna::{self, FaunaId, Herd, HerdView, Kill, Pack, PackView};
 use crate::memory::{self, Memory};
 use crate::pathfind;
 use crate::salt;
@@ -101,6 +102,15 @@ const CULTIVATE_GAIN: f32 = 30.0;
 /// (§2.4) — sans jachère ni fumure, il finit par ne plus rien rendre, et le
 /// clan doit défricher ailleurs (agriculture itinérante émergente).
 const CULTIVATE_FERTILITY_COST: u8 = 1;
+
+// — Plaies (BRIEF §3.1) : infligées en combattant les prédateurs (`combat`),
+//   persistantes, distinctes de la santé. —
+/// Part de capacité de travail qu'une plaie **pleine** retire : un blessé grave
+/// est deux fois moins efficace à tout geste (cueillette, chasse, combat…).
+const WOUND_WORK_PENALTY: f32 = 0.5;
+/// Cicatrisation par tick : une plaie se referme lentement, indépendamment des
+/// besoins vitaux (~deux semaines pour une plaie pleine).
+const WOUND_HEAL_PER_TICK: f32 = 1.0 / (24.0 * 14.0);
 
 /// Trajet calculé par l'A* pour contourner l'eau : une suite d'étapes à
 /// rejoindre en ligne droite, vers un `goal` donné. Vit dans une table à côté
@@ -289,6 +299,8 @@ impl Sim {
             // Et il ne sait faire aucune tech : tout reste à découvrir ou à
             // apprendre — c'est le point de départ de « L'ÉTINCELLE ».
             Knowledge::default(),
+            // Vierge de toute blessure : les plaies s'acquièrent en combattant.
+            Wound::default(),
         ));
         id
     }
@@ -335,6 +347,8 @@ impl Sim {
             // Ni aucun savoir-faire : les techs de ses parents ne sont pas
             // héritées, elles s'apprendront (diffusion, incrément 4) ou non.
             Knowledge::default(),
+            // Vierge de toute blessure : les plaies s'acquièrent en combattant.
+            Wound::default(),
         ));
         id
     }
@@ -446,6 +460,21 @@ impl Sim {
             .collect()
     }
 
+    /// Instantané des meutes, dans l'ordre d'itération de `hecs` (déterministe)
+    /// — ce que lisent les humains pour décider d'affronter un prédateur.
+    pub fn pack_views(&self) -> Vec<PackView> {
+        self.fauna
+            .query::<(&Pack, &Position)>()
+            .iter()
+            .map(|(entity, (pack, pos))| PackView {
+                entity,
+                pos: (pos.x, pos.y),
+                population: pack.population,
+                species: pack.species,
+            })
+            .collect()
+    }
+
     /// Rejoue la délibération d'un agent (désigné par identifiant) pour
     /// l'inspection : la **pile de motivations avec scores** du panneau d'agent
     /// (BRIEF §7.2). Reconstruit les mêmes instantanés que `step` (faune,
@@ -455,6 +484,7 @@ impl Sim {
     pub fn inspect_agent(&mut self, id: AgentId) -> Option<Vec<brain::Motivation>> {
         let time = self.time;
         let herds = self.herd_views();
+        let packs = self.pack_views();
         let humans = self.human_views();
         let clan_views: BTreeMap<ClanId, ClanView> = self
             .clans
@@ -510,7 +540,7 @@ impl Sim {
             carrying,
             knows_agriculture,
         };
-        Some(brain::inspect(&mut self.world, time, &ctx, &mem, current, &herds, &humans, &clan_views))
+        Some(brain::inspect(&mut self.world, time, &ctx, &mem, current, &herds, &packs, &humans, &clan_views))
     }
 
     /// Effectifs totaux (herbivores, prédateurs) et nombre de groupes.
@@ -539,6 +569,7 @@ impl Sim {
         // Le territoire de chaque clan (voir `social::detect_clans`) est
         // recalculé une fois par jour ; on n'en prend ici qu'une lecture.
         let herds = self.herd_views();
+        let packs = self.pack_views();
         let humans = self.human_views();
         let clan_views: BTreeMap<ClanId, ClanView> = self
             .clans
@@ -610,6 +641,7 @@ impl Sim {
                         mem,
                         current,
                         &herds,
+                        &packs,
                         &humans,
                         &clan_views,
                     );
@@ -631,9 +663,10 @@ impl Sim {
         // achevée (financée par `clan_stock`), reportée sur `self` en fin de
         // boucle. Clairsemé — quelques éléments par clan, clone négligeable.
         let mut structures = self.structures.clone();
+        let mut engagements: Vec<Engagement> = Vec::new();
         for (
             _,
-            (id, pos, phys, traits, demo, behavior, mem, agent_skills, membership, carrying, prestige),
+            (id, pos, phys, traits, demo, behavior, mem, agent_skills, membership, carrying, prestige, wound),
         ) in self.agents.query_mut::<(
             &AgentId,
             &mut Position,
@@ -646,14 +679,16 @@ impl Sim {
             &ClanMembership,
             &mut Carrying,
             &mut Prestige,
+            &Wound,
         )>() {
             if demo.is_infant(time.tick) {
                 continue;
             }
-            // La capacité de travail porte l'âge : un enfant cueille mal —
-            // c'est là que « improductif » se paie (le savoir-faire, lui,
-            // vit dans `Skills` et se forge en pratiquant).
-            let work = demography::work_capacity(demo.age_years(time.tick));
+            // La capacité de travail porte l'âge (un enfant cueille mal) **et**
+            // la plaie (un blessé peine à tout — §3.1) : c'est là que
+            // « improductif » se paie. Le savoir-faire, lui, vit dans `Skills`.
+            let work = demography::work_capacity(demo.age_years(time.tick))
+                * (1.0 - WOUND_WORK_PENALTY * wound.0);
             let outcome = execute(
                 &mut self.world,
                 &mut self.routes,
@@ -663,6 +698,7 @@ impl Sim {
                 phys,
                 behavior,
                 &herds,
+                &packs,
                 work,
                 traits,
                 agent_skills,
@@ -671,6 +707,7 @@ impl Sim {
                 carrying,
                 prestige,
                 &mut structures,
+                &mut engagements,
                 time.tick,
             );
             // Où que la tâche l'ait mené, l'agent note où il a mis les pieds.
@@ -679,6 +716,9 @@ impl Sim {
                 kills.push(kill);
             }
         }
+        // Dénouement des affrontements du tick : les meutes encaissent la somme
+        // des coups, leur riposte se partage en plaies (mortelles à 1).
+        combat::resolve(self, &engagements);
         self.hunted_head += kills.iter().map(|k| k.head).sum::<f32>();
         self.path_calls += u64::from(PATH_REQUESTS_PER_TICK - path_budget);
         structures.sort_by_key(|s| (s.clan.0, s.kind));
@@ -723,7 +763,7 @@ impl Sim {
             .collect();
         let mut dead = Vec::new();
         let mut sheltered = 0u64;
-        for (entity, (id, pos, phys, traits, demo, behavior, membership, exposures)) in
+        for (entity, (id, pos, phys, traits, demo, behavior, membership, exposures, wound)) in
             self.agents.query_mut::<(
                 &AgentId,
                 &Position,
@@ -733,6 +773,7 @@ impl Sim {
                 &Behavior,
                 &ClanMembership,
                 &mut Exposures,
+                &mut Wound,
             )>()
         {
             let (x, y) = pos.tile();
@@ -756,6 +797,9 @@ impl Sim {
             }
             felt += structures::hut_warmth((pos.x, pos.y), membership.0, &huts);
             phys.drift(felt, behavior.activity, traits.endurance);
+            // La plaie se referme lentement, quoi qu'il arrive (§3.1) — elle
+            // handicape le temps de guérir, mais ne s'infecte pas ici.
+            wound.0 = (wound.0 - WOUND_HEAL_PER_TICK).max(0.0);
             // Une grossesse se nourrit : le surcoût s'ajoute à la dérive.
             if demo.pregnancy.is_some() {
                 phys.hunger = (phys.hunger + demography::PREGNANCY_HUNGER_PER_TICK).min(1.0);
@@ -933,6 +977,7 @@ fn execute(
     phys: &mut Physiology,
     behavior: &mut Behavior,
     herds: &[HerdView],
+    packs: &[PackView],
     work: f32,
     traits: &Traits,
     agent_skills: &mut Skills,
@@ -941,6 +986,7 @@ fn execute(
     carrying: &mut Carrying,
     prestige: &mut Prestige,
     structures: &mut Vec<Structure>,
+    engagements: &mut Vec<Engagement>,
     tick: u64,
 ) -> Option<Kill> {
     let task = match behavior.task {
@@ -990,6 +1036,36 @@ fn execute(
         }
         behavior.task = None;
         return Some(Kill { herd: prey.entity, head: HUNT_YIELD_HEAD });
+    }
+
+    // Affronter une meute : comme la chasse, la cible **bouge** (on ré-évalue la
+    // meute la plus proche) ; mais l'issue ne se règle pas ici. Au contact, on
+    // enregistre une passe d'armes — le combat se dénoue **en groupe** après
+    // l'exécution (`combat::resolve`), pour que la meute encaisse la somme des
+    // coups et que sa riposte se partage entre les assaillants.
+    if task.kind == TaskKind::HuntPredator {
+        let Some(prey) = closest_pack(pos, packs) else {
+            behavior.task = None; // meute morte ou hors de vue
+            behavior.activity = Activity::Idle;
+            return None;
+        };
+        let target = (prey.pos.0.floor() as i64, prey.pos.1.floor() as i64);
+        if pos.distance_tiles(target) > HUNT_REACH_TILES {
+            behavior.activity = Activity::Walking;
+            if advance(world, routes, path_budget, id, pos, target) == Move::Stuck {
+                behavior.task = None;
+            }
+            return None;
+        }
+        behavior.activity = Activity::Fighting;
+        // Le coup porté ∝ force × compétence de combat × capacité de travail
+        // (un blessé frappe moins fort — `work` porte déjà la plaie). La riposte
+        // est atténuée par force + combat. Le geste se forge dans `resolve`.
+        let power = combat::ATTACK_POWER * traits.strength * (0.5 + agent_skills.combat) * work;
+        let defense = 0.3 * traits.strength + 0.4 * agent_skills.combat;
+        engagements.push(Engagement { attacker: id, pack: prey.entity, power, defense });
+        behavior.task = None; // une passe d'armes, puis on redélibère
+        return None;
     }
 
     // Phase trajet : la cible est trop loin, on marche (budget d'une heure).
@@ -1114,6 +1190,9 @@ fn execute(
             behavior.task = None; // arrivé — on re-délibérera aussitôt
         }
         TaskKind::Hunt => unreachable!("la chasse est traitée avant, sa cible bouge"),
+        TaskKind::HuntPredator => {
+            unreachable!("l'affrontement d'une meute est traité avant, sa cible bouge")
+        }
     }
     None
 }
@@ -1131,6 +1210,22 @@ fn closest_herd(pos: &Position, herds: &[HerdView]) -> Option<HerdView> {
         }
     }
     best.map(|(_, h)| h)
+}
+
+/// La meute la plus proche **dans un rayon de vue** (~2 km) — au-delà, on ne la
+/// poursuit pas à travers la carte (sinon un défenseur courrait sans fin après
+/// une meute lointaine). Départage déterministe : distance, puis ordre de
+/// l'instantané.
+fn closest_pack(pos: &Position, packs: &[PackView]) -> Option<PackView> {
+    let sight2 = cairn_core::km_to_tiles(2.0).powi(2);
+    let mut best: Option<(f64, PackView)> = None;
+    for p in packs {
+        let d2 = (pos.x - p.pos.0).powi(2) + (pos.y - p.pos.1).powi(2);
+        if d2 <= sight2 && best.is_none_or(|(bd, _)| d2 < bd) {
+            best = Some((d2, *p));
+        }
+    }
+    best.map(|(_, p)| p)
 }
 
 /// Fait avancer l'agent vers `target` pour ce tick, en gérant l'évitement de
@@ -2034,6 +2129,7 @@ mod tests {
             &mut phys,
             &mut behavior,
             &[herd],
+            &[],
             1.0,
             &traits,
             &mut skills,
@@ -2042,6 +2138,7 @@ mod tests {
             &mut carrying,
             &mut prestige,
             &mut structures,
+            &mut Vec::new(),
             0,
         );
 
@@ -2091,6 +2188,7 @@ mod tests {
             &mut phys,
             &mut behavior,
             &[],
+            &[],
             1.0,
             &traits,
             &mut skills,
@@ -2099,6 +2197,7 @@ mod tests {
             &mut carrying,
             &mut prestige,
             &mut structures,
+            &mut Vec::new(),
             0,
         );
 
@@ -2145,6 +2244,7 @@ mod tests {
             &mut phys,
             &mut behavior,
             &[],
+            &[],
             1.0,
             &traits,
             &mut skills,
@@ -2153,6 +2253,7 @@ mod tests {
             &mut carrying,
             &mut prestige,
             &mut structures,
+            &mut Vec::new(),
             0,
         );
 
@@ -2203,6 +2304,7 @@ mod tests {
             &mut phys,
             &mut behavior,
             &[],
+            &[],
             1.0,
             &traits,
             &mut skills,
@@ -2211,6 +2313,7 @@ mod tests {
             &mut carrying,
             &mut prestige,
             &mut structures,
+            &mut Vec::new(),
             0,
         );
 
@@ -2238,6 +2341,7 @@ mod tests {
             &mut phys,
             &mut behavior2,
             &[],
+            &[],
             1.0,
             &traits,
             &mut skills,
@@ -2246,6 +2350,7 @@ mod tests {
             &mut carrying,
             &mut prestige,
             &mut structures,
+            &mut Vec::new(),
             0,
         );
         assert_eq!(structures.len(), 1, "une hutte existe déjà : pas de doublon");
@@ -2283,8 +2388,8 @@ mod tests {
 
         execute(
             &mut sim.world, &mut routes, &mut budget, AgentId(0), &mut pos, &mut phys,
-            &mut behavior, &[], 1.0, &traits, &mut skills, None, &mut clan_stock,
-            &mut carrying, &mut prestige, &mut structures, 0,
+            &mut behavior, &[], &[], 1.0, &traits, &mut skills, None, &mut clan_stock,
+            &mut carrying, &mut prestige, &mut structures, &mut Vec::new(), 0,
         );
 
         let tile = sim.world.tile(field.0, field.1);
@@ -2338,6 +2443,59 @@ mod tests {
         assert!(
             !m_profane.iter().any(|m| m.kind == TaskKind::Cultivate),
             "qui ne connaît pas l'agriculture ne cultive pas"
+        );
+    }
+
+    /// « Éleveur » : une meute qui rôde près du foyer appelle les **agressifs**
+    /// à la chasser, bien plus que les placides — la défense du territoire naît
+    /// du trait, pas d'une règle. Lu via `inspect_agent` (pur).
+    #[test]
+    fn une_meute_pres_du_foyer_appelle_les_agressifs() {
+        let mut sim = Sim::new(WorldSeed(3), 512);
+        let home = find_land(&sim);
+        let homef = (home.0 as f64 + 0.5, home.1 as f64 + 0.5);
+        // Une meute à ~100 m du foyer : une menace franche sur le territoire.
+        sim.spawn_pack(homef.0 + 50.0, homef.1, 20.0);
+        let brave = sim.spawn_agent(homef.0, homef.1);
+        let timid = sim.spawn_agent(homef.0, homef.1);
+        for (_, (id, traits, phys, membership)) in sim.agents.query_mut::<(
+            &AgentId,
+            &mut Traits,
+            &mut Physiology,
+            &mut ClanMembership,
+        )>() {
+            phys.hunger = 0.2; // repu : la survie ne monopolise pas la décision
+            phys.thirst = 0.2;
+            phys.cold = 0.0;
+            membership.0 = Some(social::ClanId(1));
+            if *id == brave {
+                traits.aggression = 0.9;
+                traits.strength = 0.8;
+            } else {
+                traits.aggression = 0.02;
+                traits.strength = 0.5;
+            }
+        }
+        sim.clans.push(Clan {
+            id: social::ClanId(1),
+            founded_tick: 0,
+            members: [brave, timid].into_iter().collect(),
+            home: homef,
+            stock: 0.0,
+            chief: brave,
+            desired: None,
+        });
+
+        let hunt_score = |m: &[crate::brain::Motivation]| {
+            m.iter().find(|x| x.kind == TaskKind::HuntPredator).map(|x| x.score)
+        };
+        let brave_score = hunt_score(&sim.inspect_agent(brave).unwrap())
+            .expect("un agressif face à une meute proche envisage de la chasser");
+        let timid_score = hunt_score(&sim.inspect_agent(timid).unwrap()).unwrap_or(0.0);
+        assert!(brave_score > 0.0);
+        assert!(
+            brave_score > timid_score,
+            "l'agressif s'y risque bien plus que le placide (brave {brave_score}, timid {timid_score})"
         );
     }
 

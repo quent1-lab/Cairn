@@ -959,7 +959,7 @@ mod tests {
         assert_eq!(TechPressure::Cold.of(&p), 0.7);
         assert_eq!(TechPressure::Threat.of(&p), 0.3);
 
-        let s = Skills { foraging: 0.4, hunting: 0.6, oratory: 0.2 };
+        let s = Skills { foraging: 0.4, hunting: 0.6, oratory: 0.2, combat: 0.0 };
         assert_eq!(TechSkill::Foraging.of(&s), 0.4);
         assert_eq!(TechSkill::Hunting.of(&s), 0.6);
     }

@@ -38,6 +38,9 @@ pub struct Skills {
     /// Art de convaincre — l'un des deux facteurs du chef (BRIEF §5.1 :
     /// « chef : max(oratoire × prestige) »), voir `social::elect_chiefs`.
     pub oratory: f32,
+    /// L'art de se battre (BRIEF §3.1) — forgé en affrontant les prédateurs
+    /// (`crate::combat`) : un vétéran frappe plus fort et encaisse mieux.
+    pub combat: f32,
 }
 
 impl Skills {
@@ -47,6 +50,7 @@ impl Skills {
             foraging: 0.5 * forage_cap(traits),
             hunting: 0.5 * hunt_cap(traits),
             oratory: 0.5 * oratory_cap(traits),
+            combat: 0.5 * combat_cap(traits),
         }
     }
 }
@@ -66,6 +70,13 @@ pub fn hunt_cap(traits: &Traits) -> f32 {
 /// inventé pour l'occasion.
 pub fn oratory_cap(traits: &Traits) -> f32 {
     0.4 + 0.6 * traits.sociability
+}
+
+/// Plafond de combat : la force frappe, l'agressivité ose — les deux traits
+/// qui, ensemble, font le guerrier (et qui commandaient déjà l'envie même de
+/// se battre, voir `brain` et `crate::combat`).
+pub fn combat_cap(traits: &Traits) -> f32 {
+    0.4 + 0.3 * (traits.strength + traits.aggression)
 }
 
 /// Une heure de pratique (ou `hours` d'équivalent, pour les gestes rares).

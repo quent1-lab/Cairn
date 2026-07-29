@@ -213,6 +213,7 @@ fn death_counts(sim: &Sim) -> (usize, usize, usize, usize) {
             DeathCause::Dehydration => c.1 += 1,
             DeathCause::Hypothermia => c.2 += 1,
             DeathCause::OldAge => c.3 += 1,
+            DeathCause::Predation => {} // non ventilée dans cette démo Phase 2
         }
     }
     c

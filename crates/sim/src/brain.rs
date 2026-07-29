@@ -23,7 +23,7 @@ use cairn_worldgen::Biome;
 use crate::agent::{AgentId, Physiology, Position, Task, TaskKind, WALK_TILES_PER_TICK};
 use crate::curves::{Curve, softmax_pick, softmax_weights};
 use crate::demography::{Demographics, HumanView, Kinship, Traits, find_human};
-use crate::fauna::HerdView;
+use crate::fauna::{HerdView, PackView};
 use crate::memory::{Memory, cell_of};
 use crate::salt;
 use crate::social::{ClanId, ClanView, RESIDENCE_RADIUS_TILES};
@@ -89,6 +89,12 @@ const CARRYING_FULL_LOAD: f32 = 0.9;
 const FED_TO_FARM: f32 = 0.55;
 /// Poussée du drive agricole : modeste, il ne prime jamais sur la survie.
 const FARM_DRIVE: f32 = 0.3;
+/// Rayon autour du foyer en deçà duquel une meute est perçue comme une
+/// **menace** sur le territoire (~1,5 km) : c'est ce qu'on défend.
+const PREDATOR_THREAT_TILES: f64 = km_to_tiles(1.5);
+/// Poussée du drive de défense (chasse des prédateurs) : modulée par
+/// l'agressivité et la force — qui décident *qui* ose s'y risquer.
+const PREDATOR_DEFENSE_DRIVE: f32 = 0.8;
 
 /// L'agent vu par la délibération : son identité et ses composants, groupés
 /// pour ne pas trimballer sept paramètres.
@@ -121,6 +127,7 @@ pub fn decide(
     mem: &mut Memory,
     current: Option<TaskKind>,
     herds: &[HerdView],
+    packs: &[PackView],
     humans: &[HumanView],
     clan_views: &BTreeMap<ClanId, ClanView>,
 ) -> Option<Task> {
@@ -134,7 +141,7 @@ pub fn decide(
         mem.remember_spring(seen, (agent.pos.x, agent.pos.y));
     }
     let candidates =
-        build_candidates(world, time, &agent, mem, spring, current, herds, humans, clan_views);
+        build_candidates(world, time, &agent, mem, spring, current, herds, packs, humans, clan_views);
 
     let scores: Vec<f32> = candidates.iter().map(|c| c.2).collect();
     let mut rng =
@@ -158,6 +165,7 @@ fn build_candidates(
     spring: Option<(i64, i64)>,
     current: Option<TaskKind>,
     herds: &[HerdView],
+    packs: &[PackView],
     humans: &[HumanView],
     clan_views: &BTreeMap<ClanId, ClanView>,
 ) -> Vec<(TaskKind, (i64, i64), f32)> {
@@ -203,6 +211,39 @@ fn build_candidates(
         let size = Curve::Power { k: 0.5 }.eval(herd.population / 60.0);
         let score = urgency * (0.55 + 0.45 * size) * travel_discount(pos.distance_tiles(target));
         candidates.push((TaskKind::Hunt, target, score));
+    }
+
+    // — Défendre le territoire des prédateurs (« éleveur », Phase 5) : une meute
+    //   qui rôde près du foyer menace le gibier dont on vit (et, demain, le
+    //   cheptel). Un adulte assez **agressif** et **fort** va l'affronter — au
+    //   risque d'être blessé ou tué (`crate::combat`). Rien ne dit « attaque le
+    //   loup » : c'est l'agressivité héritée changée en probabilité, et seulement
+    //   quand la meute menace vraiment le foyer. La cible est la meute la plus
+    //   proche du foyer ; l'exécution la (re)vise en chemin.
+    if adult
+        && let Some(clan_id) = clan
+        && let Some(view) = clan_views.get(&clan_id)
+    {
+        let mut nearest: Option<(f64, (f64, f64))> = None;
+        for p in packs {
+            let d2 = (view.home.0 - p.pos.0).powi(2) + (view.home.1 - p.pos.1).powi(2);
+            if nearest.is_none_or(|(bd, _)| d2 < bd) {
+                nearest = Some((d2, p.pos));
+            }
+        }
+        if let Some((d2, ppos)) = nearest
+            && d2.sqrt() <= PREDATOR_THREAT_TILES
+        {
+            // Plus la meute est proche du foyer, plus ça presse ; l'agressivité
+            // et la force décident qui ose s'y risquer.
+            let urgency = 1.0 - (d2.sqrt() / PREDATOR_THREAT_TILES) as f32;
+            let score = PREDATOR_DEFENSE_DRIVE
+                * traits.aggression
+                * (0.4 + 0.6 * traits.strength)
+                * urgency;
+            let target = (ppos.0.floor() as i64, ppos.1.floor() as i64);
+            candidates.push((TaskKind::HuntPredator, target, score));
+        }
     }
 
     // — Puiser dans le stock du clan : le pendant collectif de la cueillette
@@ -490,13 +531,14 @@ pub fn inspect(
     mem: &Memory,
     current: Option<TaskKind>,
     herds: &[HerdView],
+    packs: &[PackView],
     humans: &[HumanView],
     clan_views: &BTreeMap<ClanId, ClanView>,
 ) -> Vec<Motivation> {
     let here = agent.pos.tile();
     let spring = world.nearest_spring(here, SPRING_RADIUS_CHUNKS); // lue, jamais mémorisée
     let candidates =
-        build_candidates(world, time, agent, mem, spring, current, herds, humans, clan_views);
+        build_candidates(world, time, agent, mem, spring, current, herds, packs, humans, clan_views);
     let scores: Vec<f32> = candidates.iter().map(|c| c.2).collect();
     let probs = softmax_weights(&scores, SOFTMAX_TAU);
     let mut out: Vec<Motivation> = candidates

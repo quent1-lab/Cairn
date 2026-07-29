@@ -769,13 +769,15 @@ impl App {
         }
 
         // Effectifs (grand total + puces par sexe/âge) et décès par cause.
-        let (mut starved, mut dehydrated, mut frozen, mut old_age) = (0u32, 0u32, 0u32, 0u32);
+        let (mut starved, mut dehydrated, mut frozen, mut old_age, mut predated) =
+            (0u32, 0u32, 0u32, 0u32, 0u32);
         for d in &self.sim.deaths {
             match d.cause {
                 DeathCause::Starvation => starved += 1,
                 DeathCause::Dehydration => dehydrated += 1,
                 DeathCause::Hypothermia => frozen += 1,
                 DeathCause::OldAge => old_age += 1,
+                DeathCause::Predation => predated += 1,
             }
         }
         set_html(
@@ -790,7 +792,7 @@ impl App {
                  <div class=\"deaths\">\
                    <span><b>{}</b> naissances</span>\
                    <span><b>{}</b> décès</span>\
-                   <span>faim {starved} · soif {dehydrated} · froid {frozen} · vieillesse {old_age}</span>\
+                   <span>faim {starved} · soif {dehydrated} · froid {frozen} · vieillesse {old_age} · prédation {predated}</span>\
                  </div>",
                 self.sim.births.len(),
                 self.sim.deaths.len(),
@@ -951,7 +953,7 @@ impl App {
             let mut found = None;
             for (
                 _,
-                (id, phys, demo, traits, skills, beh, exp, know, mem, kin, membership, prestige, carrying),
+                (id, phys, demo, traits, skills, beh, exp, know, mem, kin, membership, prestige, carrying, wound),
             ) in self
                 .sim
                 .agents
@@ -969,6 +971,7 @@ impl App {
                     &cairn_sim::ClanMembership,
                     &cairn_sim::agent::Prestige,
                     &cairn_sim::agent::Carrying,
+                    &cairn_sim::Wound,
                 )>()
                 .iter()
             {
@@ -1013,12 +1016,18 @@ impl App {
                 //   besoin haut = alarme) —
                 let pc = |v: f32| format!("{:.0}%", v * 100.0);
                 let needs = format!(
-                    "{}{}{}{}{}",
+                    "{}{}{}{}{}{}",
                     gauge_html("Santé", phys.health, &pc(phys.health), health_fill(phys.health)),
                     gauge_html("Faim", phys.hunger, &pc(phys.hunger), need_fill(phys.hunger)),
                     gauge_html("Soif", phys.thirst, &pc(phys.thirst), need_fill(phys.thirst)),
                     gauge_html("Fatigue", phys.fatigue, &pc(phys.fatigue), need_fill(phys.fatigue)),
                     gauge_html("Froid", phys.cold, &pc(phys.cold), need_fill(phys.cold)),
+                    // La plaie ne s'affiche que si l'agent est blessé (§3.1).
+                    if wound.0 > 0.01 {
+                        gauge_html("Plaie", wound.0, &pc(wound.0), need_fill(wound.0))
+                    } else {
+                        String::new()
+                    },
                 );
 
                 // — Traits & compétences (jauges accent) —
@@ -1383,6 +1392,7 @@ fn activity_color(activity: Activity) -> &'static str {
         Activity::Sleeping => "#6a6ad0",                 // indigo : dort
         Activity::Sheltering => "#b070c8",               // mauve : s'abrite
         Activity::Farming => "#7bc86c",                  // vert : cultive
+        Activity::Fighting => "#d64545",                 // rouge sombre : combat
     }
 }
 
@@ -1553,6 +1563,7 @@ fn task_name(kind: TaskKind) -> String {
         TaskKind::Build(k) => format!("bâtir : {}", structure_name(k)),
         TaskKind::Expedition => "expédition (chercher l'étain)".to_string(),
         TaskKind::Cultivate => "cultiver un champ".to_string(),
+        TaskKind::HuntPredator => "chasser un prédateur".to_string(),
     }
 }
 
@@ -1567,6 +1578,7 @@ fn activity_name(a: Activity) -> &'static str {
         Activity::Sheltering => "s'abrite",
         Activity::Hunting => "chasse",
         Activity::Farming => "cultive",
+        Activity::Fighting => "combat une meute",
     }
 }
 
