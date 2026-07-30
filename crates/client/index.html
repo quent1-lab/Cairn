@@ -181,6 +181,19 @@
     .stockline .s-l { font-size: 10.5px; color: var(--faint); }
     .stockline .s-v { font-size: 10.5px; text-align: right; color: var(--dim); font-family: var(--mono); }
 
+    /* ————— Chronique ————— */
+    /* Le récit se lit du plus récent au plus ancien, comme un fil : la date en
+       exergue, la phrase en dessous. Hauteur bornée + défilement propre — le
+       journal grandit sans fin, le panneau non. */
+    .chronicle { display: flex; flex-direction: column; gap: 9px;
+                 max-height: 232px; overflow-y: auto; padding-right: 4px; }
+    .chronicle .entry { border-left: 2px solid var(--line-soft); padding-left: 9px; }
+    .chronicle .entry.fresh { border-left-color: rgba(150,190,255,0.55); }
+    .chronicle .e-when { font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase;
+                         color: var(--faint); font-family: var(--mono); }
+    .chronicle .e-text { font-size: 11.5px; color: var(--dim); line-height: 1.5; margin-top: 2px; }
+    .chronicle .entry.fresh .e-text { color: var(--text); }
+
     /* ————— Agent ————— */
     .ident { display: flex; flex-direction: column; gap: 8px; }
     .ident .name { font-size: 16px; font-weight: 680; letter-spacing: -0.01em; }
@@ -319,6 +332,12 @@
       <div class="sect">
         <div class="eyebrow">Clans</div>
         <div id="clan-panel" class="rows">…</div>
+      </div>
+
+      <!-- La Chronique (Phase 6, BRIEF §6.4) : ce qu'on lit en revenant. -->
+      <div class="sect">
+        <div class="eyebrow">Chronique</div>
+        <div id="chronicle-panel" class="chronicle">…</div>
       </div>
     </div>
   </section>

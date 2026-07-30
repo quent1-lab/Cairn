@@ -302,7 +302,15 @@ impl Physiology {
         }
         if let Some((_, cause)) = worst {
             self.last_damage = Some(cause);
-        } else if self.hunger < 0.8 && self.thirst < 0.8 && self.cold < 0.8 {
+        } else if self.health > 0.0 && self.hunger < 0.8 && self.thirst < 0.8 && self.cold < 0.8 {
+            // `health > 0` : **on ne soigne pas un cadavre**. Sans cette garde,
+            // un combattant bien nourri que le combat vient de tuer (santé mise
+            // à zéro par `crate::combat`, plaie pleine) se voyait rendre un peu
+            // de santé ici même, dans le tick de sa mort — et ne mourait donc
+            // jamais. Mesuré : une année de la scène par défaut annonçait des
+            // centaines de morts en raids pour **une seule** mort réelle (de
+            // soif). La régénération n'a jamais eu vocation à ressusciter ; elle
+            // ne concerne que les vivants dont les besoins sont couverts.
             self.health = (self.health + HEALTH_REGEN).min(1.0);
         }
         self.health = self.health.max(0.0);
@@ -316,6 +324,36 @@ impl Physiology {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Non-régression : **la régénération ne ressuscite pas**.
+    ///
+    /// Un combattant en pleine forme que le combat vient de tuer (santé mise à
+    /// zéro par `crate::combat`) doit rester mort au tick suivant. Sans la garde
+    /// `health > 0` de `drift`, la branche de régénération lui rendait un peu de
+    /// santé dans le tick même de sa mort : mesuré sur une année de la scène par
+    /// défaut, la Chronique annonçait des centaines de morts en raids pour une
+    /// seule mort réelle. Aucune plaie mortelle ne tuait jamais.
+    #[test]
+    fn la_regeneration_ne_ressuscite_pas() {
+        // Besoins couverts (< 0,8 partout) : le cas exact qui déclenchait la
+        // résurrection — un guerrier nourri, désaltéré et au chaud.
+        let mut tue = Physiology {
+            hunger: 0.2,
+            thirst: 0.2,
+            fatigue: 0.3,
+            cold: 0.0,
+            health: 0.0,
+            last_damage: Some(DeathCause::Violence),
+        };
+        tue.drift(15.0, Activity::Idle, 0.5);
+        assert!(tue.is_dead(), "un mort au combat ne se relève pas (santé {})", tue.health);
+        assert_eq!(tue.last_damage, Some(DeathCause::Violence), "la cause reste la violence");
+
+        // Contre-épreuve : un vivant entamé, lui, se soigne bien.
+        let mut blesse = Physiology { health: 0.5, ..tue };
+        blesse.drift(15.0, Activity::Idle, 0.5);
+        assert!(blesse.health > 0.5, "un vivant aux besoins couverts récupère");
+    }
 
     #[test]
     fn sans_boire_on_meurt_en_trois_jours_environ() {

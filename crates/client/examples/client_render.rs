@@ -52,6 +52,7 @@ fn main() {
     if log_every_days > 0 {
         println!("jour   humains  gibier  troupeaux  prédateurs  meutes  chassé(cumul)  clans  struct");
     }
+    let t0 = std::time::Instant::now();
     for _ in 0..ticks {
         sim.step();
         if log_every_days > 0 && sim.time.tick.is_multiple_of(cairn_core::TICKS_PER_DAY) {
@@ -202,15 +203,50 @@ fn main() {
         );
     }
 
+    // Morts par cause : le contre-champ de la Chronique. Un bilan de raid ne
+    // veut rien dire s'il ne correspond pas à des morts réellement enregistrées.
+    {
+        use cairn_sim::DeathCause::*;
+        let count = |c: cairn_sim::DeathCause| {
+            sim.deaths.iter().filter(|d| d.cause == c).count()
+        };
+        println!(
+            "morts : {} au total — faim {}, soif {}, froid {}, vieillesse {}, prédation {}, violence {}",
+            sim.deaths.len(),
+            count(Starvation),
+            count(Dehydration),
+            count(Hypothermia),
+            count(OldAge),
+            count(Predation),
+            count(Violence),
+        );
+    }
+
     let (g1, p1, _, _) = sim.fauna_census();
     println!(
         "après {ticks} ticks (an {}, jour {}) : {} humains, {g1:.0} gibier, {p1:.0} prédateurs",
         sim.time.year(), sim.time.day_of_year(), sim.population(),
     );
+    // Débit : la mesure que `docs/AUDIT.md` (axe D) compare à la référence
+    // versionnée de `docs/perf-baseline.txt`. Chronométré sur la boucle de
+    // simulation seule — le rendu PNG qui suit n'en fait pas partie.
+    let secs = t0.elapsed().as_secs_f64();
     println!(
-        "perf : {} chunks générés, {} appels A* ({:.1}/tick)",
-        sim.world.generated, sim.path_calls, sim.path_calls as f64 / ticks.max(1) as f64,
+        "perf : tps={:.2} ({ticks} ticks en {secs:.1} s), {} chunks générés, {} appels A* ({:.1}/tick)",
+        ticks as f64 / secs.max(1e-9),
+        sim.world.generated,
+        sim.path_calls,
+        sim.path_calls as f64 / ticks.max(1) as f64,
     );
+
+    // — La Chronique (Phase 6, BRIEF §6.4). C'est la vérification la moins
+    //   chère de la phase : le journal se lit en console, sans navigateur.
+    //   `chronicle_tail` rend du plus récent au plus ancien ; on le retourne
+    //   pour lire l'histoire dans le sens où elle s'est passée.
+    println!("\nChronique — {} fait(s) notable(s) :", sim.chronicle.len());
+    for line in sim.chronicle_tail(30).iter().rev() {
+        println!("  {line}");
+    }
 
     std::fs::create_dir_all("out").ok();
     let img = image::RgbaImage::from_raw(W as u32, H as u32, buf).expect("buffer");

@@ -73,6 +73,57 @@ impl Climate {
     pub fn grows(&self, tile: &Tile, y: i64, time: SimTime) -> bool {
         self.daily_mean(tile, y, time) > GROWTH_THRESHOLD_C
     }
+
+    /// La saison **locale** à la latitude de `y`. `None` près de l'équateur,
+    /// où l'amplitude saisonnière est trop faible pour qu'une saison veuille
+    /// dire quoi que ce soit — un an y est plat, et la Chronique s'abstient
+    /// alors d'en parler plutôt que d'inventer un hiver tropical.
+    ///
+    /// Purement descriptif : rien dans la simulation ne lit une `Season`
+    /// (la physiologie et l'écologie lisent la **température**, pas une
+    /// étiquette) — même discipline que `tech::Age`.
+    pub fn season(&self, y: i64, time: SimTime) -> Option<Season> {
+        let l = self.latitude.signed_fraction(y);
+        if l.abs() < SEASONLESS_LATITUDE {
+            return None;
+        }
+        // Phase locale : 0 = cœur de l'hiver *ici*. Les bandes australes
+        // (ℓ < 0) sont en opposition de phase — même géométrie que
+        // `seasonal_offset`, d'où le demi-tour d'année.
+        let mut p = time.year_phase() + if l < 0.0 { 0.5 } else { 0.0 };
+        p -= p.floor();
+        Some(match p {
+            p if p < 0.125 || p >= 0.875 => Season::Winter,
+            p if p < 0.375 => Season::Spring,
+            p if p < 0.625 => Season::Summer,
+            _ => Season::Autumn,
+        })
+    }
+}
+
+/// Latitude signée en deçà de laquelle on ne nomme pas de saison : l'amplitude
+/// y vaut moins de ~3 °C sur l'année (voir [`SEASONAL_AMPLITUDE_C`]).
+const SEASONLESS_LATITUDE: f64 = 0.15;
+
+/// Les quatre saisons, pour dater un fait de la Chronique. Étiquette dérivée,
+/// jamais une condition (voir [`Climate::season`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Season {
+    Winter,
+    Spring,
+    Summer,
+    Autumn,
+}
+
+impl Season {
+    pub fn label(self) -> &'static str {
+        match self {
+            Season::Winter => "hiver",
+            Season::Spring => "printemps",
+            Season::Summer => "été",
+            Season::Autumn => "automne",
+        }
+    }
 }
 
 #[cfg(test)]
@@ -124,5 +175,24 @@ mod tests {
     fn pas_d_ecart_saisonnier_a_l_equateur() {
         let (climate, _) = setup();
         assert_eq!(climate.seasonal_offset(0, SimTime { tick: 0 }), 0.0);
+    }
+
+    /// La saison nommée suit la température : quand `seasonal_offset` est au
+    /// plus bas, c'est l'hiver — et les deux hémisphères restent opposés.
+    #[test]
+    fn la_saison_nommee_suit_la_temperature() {
+        let (climate, _) = setup();
+        let period = cairn_worldgen::DEFAULT_PLANET_PERIOD as i64;
+        let (nord, sud) = (period / 4, -period / 4);
+        let t0 = SimTime { tick: 0 };
+        assert_eq!(climate.season(nord, t0), Some(Season::Winter));
+        assert_eq!(climate.season(sud, t0), Some(Season::Summer));
+        let t_mi = SimTime { tick: TICKS_PER_YEAR / 2 };
+        assert_eq!(climate.season(nord, t_mi), Some(Season::Summer));
+        assert_eq!(climate.season(sud, t_mi), Some(Season::Winter));
+        // Le quart d'année après le solstice d'hiver : le printemps du nord.
+        assert_eq!(climate.season(nord, SimTime { tick: TICKS_PER_YEAR / 4 }), Some(Season::Spring));
+        // À l'équateur, on ne nomme rien.
+        assert_eq!(climate.season(0, t0), None);
     }
 }

@@ -48,6 +48,16 @@ projet) : famine ↔ satiété, froid ↔ chaleur, immigration de gibier ↔ de
 prédateurs. Un moteur qui ne modélise qu'un côté dérive (ex. la faune qui
 s'emballe faute d'immigration de prédateurs).
 
+**Une mécanique dont l'effet n'est jamais observé sur une scène réelle est
+suspecte, même avec des tests verts.** Cherché : un système dont les tests
+n'exercent que la *cause* (les plaies infligées) sans jamais vérifier l'*effet*
+attendu (la mort). Cas réel : le combat mettait `health = 0`, que la
+régénération de `Physiology::drift` annulait dans le même tick — aucune plaie
+mortelle ne tuait, et les trois tests de combat passaient. Le contrôle qui
+l'aurait attrapé : comparer les **morts par cause** (`client_render` les
+imprime) au récit de la Chronique. Deux compteurs indépendants qui doivent
+concorder valent mieux qu'un test.
+
 ---
 
 ## Axe B — Règles non-négociables (BRIEF §0.2-3, §8.2)
@@ -87,7 +97,7 @@ dette tracée.
 | 3 | 50→300 en 100 ans sans explosion ; curieux explorent plus loin ; échange d'info ; carte mentale ⊆ perçu | | banc démographique long, tests memory |
 | 4 | clans sans règle « former un clan » ; fission ; effondrement ; tension observable ; inspection clan | | tests social, panneau client |
 | 5 | feu ≥ 1 clan/3 en 500 ans ; chaîne feu→…→agriculture 1/5 ; bronze⇒route ; oubli visible ; seeds→histoires ≠ ; « pourquoi » cliquable | | `example etincelle`, run 500 ans |
-| 6 | serveur 1 semaine sans fuite ; reconnexion+Chronique ; 3 régions ; foudre ambivalente ; théologie cohérente ; 2 vCPU/2 Go | | (Phase 6, non commencée) |
+| 6 | serveur 1 semaine sans fuite ; reconnexion+Chronique ; 3 régions ; foudre ambivalente ; théologie cohérente ; 2 vCPU/2 Go | 🟡 | Chronique ✅ (`sim::chronicle`, panneau client) ; serveur/réseau/persistance **reportés** (choix utilisateur) ; foudre + Foi + théologie ⬜ |
 
 **Écarts d'architecture assumés à retracer** (pas des manques — des choix) :
 - `Tile::structure` / `Tile::claim` (§2.3) **non stockés dans la tuile** :

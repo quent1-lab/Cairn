@@ -20,6 +20,7 @@
 
 pub mod agent;
 pub mod brain;
+pub mod chronicle;
 pub mod chunk;
 pub mod combat;
 pub mod commerce;
@@ -31,6 +32,7 @@ pub mod exposure;
 pub mod fauna;
 pub mod fire;
 pub mod memory;
+pub mod names;
 pub mod pastoral;
 pub mod pathfind;
 pub mod pressure;
@@ -45,6 +47,8 @@ pub mod world;
 
 pub use agent::{Activity, AgentId, Behavior, DeathCause, Physiology, Position, Task, TaskKind, Wound};
 pub use brain::Motivation;
+pub use chronicle::{Event, EventKind};
+pub use climate::Season;
 pub use combat::{Clash, Engagement};
 pub use chunk::{CHUNK_AREA, CHUNK_SIZE, Chunk, ChunkCoord};
 pub use commerce::Expedition;
@@ -103,4 +107,9 @@ pub(crate) mod salt {
     pub const FIRE: u64 = 1014;
     /// Combat homme↔prédateur : la part d'incertitude de la riposte des meutes.
     pub const COMBAT: u64 = 1015;
+    /// Noms propres des humains et des clans (Phase 6, la Chronique). Ce flux
+    /// ne pilote **aucun** comportement — un nom n'a pas d'effet — mais il a
+    /// son salt comme les autres : deux consommateurs qui le partageraient
+    /// seraient corrélés le jour où l'un des deux compterait vraiment.
+    pub const NAMES: u64 = 1016;
 }

@@ -41,6 +41,7 @@
 use cairn_core::{Pcg32, TICKS_PER_DAY, km_to_tiles};
 
 use crate::agent::Position;
+use crate::chronicle::EventKind;
 use crate::exposure::{Exposure, Exposures};
 use crate::salt;
 use crate::sim::Sim;
@@ -179,6 +180,9 @@ fn try_ignite(sim: &mut Sim) {
     let tile = sim.world.tile(pos.0.floor() as i64, pos.1.floor() as i64);
     if is_flammable(&tile) {
         sim.fires.push(Fire { pos, radius: FIRE_START_RADIUS_TILES, age_days: 0 });
+        // Un incendie fait date : c'est la seconde voie d'accès au feu (§5.3) —
+        // celle qui n'a besoin d'aucun silex, et bientôt d'aucune divinité.
+        sim.record((pos.0.floor() as i64, pos.1.floor() as i64), EventKind::Wildfire);
     }
 }
 

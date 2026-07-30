@@ -34,14 +34,15 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use cairn_core::km_to_tiles;
+use cairn_core::{km_to_tiles, tiles_to_km};
 use cairn_worldgen::Deposit;
 
 use crate::agent::{AgentId, Physiology, Position};
-use crate::demography::{Demographics, Traits};
+use crate::chronicle::EventKind;
+use crate::demography::{Demographics, Sex, Traits};
 use crate::exposure::{Exposure, Exposures};
 use crate::sim::Sim;
-use crate::social::ClanMembership;
+use crate::social::{ClanId, ClanMembership};
 use crate::tech::Knowledge;
 use crate::world::World;
 
@@ -176,6 +177,9 @@ pub(crate) fn dispatch(sim: &mut Sim) {
         }
     }
 
+    // Les départs à raconter, relevés ici et journalisés après la boucle :
+    // `sim.clans` y est emprunté en écriture, `sim.record` veut tout `sim`.
+    let mut departures: Vec<((i64, i64), ClanId, u64, f32)> = Vec::new();
     for clan in &mut sim.clans {
         let Some(info) = infos.get(&clan.id.0) else { continue };
         if !info.has_copper || info.has_tin || info.active || clan.stock < EXPEDITION_COST {
@@ -188,7 +192,33 @@ pub(crate) fn dispatch(sim: &mut Sim) {
         };
         clan.stock -= EXPEDITION_COST;
         sim.expeditions.insert(envoy, Expedition { tin, home: clan.home, returning: false });
+        let tiles = ((tin.0 - home_tile.0) as f64).hypot((tin.1 - home_tile.1) as f64);
+        departures.push((home_tile, clan.id, envoy, tiles_to_km(tiles) as f32));
     }
+    for (pos, clan, envoy, km) in departures {
+        // Un homme part au bout du monde pour un métal : ça fait date (§6.4).
+        if let Some(sex) = sex_of(sim, envoy) {
+            sim.record(
+                pos,
+                EventKind::ExpeditionDeparted {
+                    clan,
+                    agent: AgentId(envoy),
+                    sex,
+                    distance_km: km,
+                },
+            );
+        }
+    }
+}
+
+/// Le sexe d'un agent vivant — ce que la Chronique doit figer pour pouvoir le
+/// nommer plus tard (voir `crate::chronicle`). `None` s'il n'est plus là.
+fn sex_of(sim: &Sim, agent: u64) -> Option<Sex> {
+    sim.agents
+        .query::<(&AgentId, &Demographics)>()
+        .iter()
+        .find(|(_, (id, _))| id.0 == agent)
+        .map(|(_, (_, demo))| demo.sex)
 }
 
 /// Passe par tick : fait aboutir les expéditions. Arrivé près de l'étain,
@@ -233,8 +263,25 @@ pub(crate) fn advance(sim: &mut Sim) {
         }
     }
     for aid in completed {
-        sim.expeditions.remove(&aid);
+        let exp = sim.expeditions.remove(&aid);
+        // Le retour est le fait notable : c'est lui qui rend le bronze possible
+        // (l'étain rapporté se rediffuse au clan par le troc).
+        if let (Some(exp), Some(sex)) = (exp, sex_of(sim, aid))
+            && let Some(clan) = clan_of(sim, aid)
+        {
+            let pos = (exp.home.0.floor() as i64, exp.home.1.floor() as i64);
+            sim.record(pos, EventKind::ExpeditionReturned { clan, agent: AgentId(aid), sex });
+        }
     }
+}
+
+/// Le clan d'un agent vivant, s'il en a un.
+fn clan_of(sim: &Sim, agent: u64) -> Option<ClanId> {
+    sim.agents
+        .query::<(&AgentId, &ClanMembership)>()
+        .iter()
+        .find(|(_, (id, _))| id.0 == agent)
+        .and_then(|(_, (_, m))| m.0)
 }
 
 #[cfg(test)]

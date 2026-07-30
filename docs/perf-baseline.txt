@@ -1,1 +1,9 @@
+# Référence de débit (axe D de docs/AUDIT.md). Une ligne par mesure, la plus
+# récente en bas. Mesure : cargo run --release -p cairn-client --example
+# client_render -- <seed> <ticks>  → imprime « perf : tps=… ».
+# Une chute nette entre deux lignes = régression à investiguer.
+
 tps=8.58  # 2026-07-27 seed42 400ticks client_render (machine dev)
+tps=9.44  # 2026-07-30 seed42 400ticks — Phase 6 incr. 1 (Chronique) + correctif
+          #   de résurrection au combat. Pas de régression : le journal ne
+          #   coûte rien (quelques dizaines d'entrées par an de jeu).

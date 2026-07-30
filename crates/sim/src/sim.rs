@@ -38,6 +38,7 @@ use crate::agent::{
     Prestige, SHELTER_BONUS_C, TaskKind, WALK_TILES_PER_TICK, Wound,
 };
 use crate::brain::{self, AgentCtx, DELIBERATION_PERIOD};
+use crate::chronicle::{self, EventKind};
 use crate::climate::Climate;
 use crate::combat::{self, Clash, Engagement};
 use crate::commerce::{self, Expedition};
@@ -47,6 +48,7 @@ use crate::exposure::Exposures;
 use crate::fire::{self, Fire};
 use crate::fauna::{self, FaunaId, Herd, HerdView, Kill, Pack, PackView};
 use crate::memory::{self, Memory};
+use crate::names;
 use crate::pathfind;
 use crate::salt;
 use crate::pressure::{self, ClanPressure};
@@ -214,6 +216,12 @@ pub struct Sim {
     /// côté `Sim`, jamais un champ de `Tile` (voir `crate::fire`). Rare et
     /// localisé ; vide la plupart du temps.
     pub fires: Vec<Fire>,
+    /// **La Chronique** (Phase 6, BRIEF §6.4) : le journal narratif du monde,
+    /// append-only et ordonné par tick (on n'y pousse qu'au tick courant).
+    /// Ne reçoit que ce qui **fait date** — pas les naissances et les morts
+    /// ordinaires, qui restent des statistiques dans `births`/`deaths`. Voir
+    /// `crate::chronicle` pour la distinction journal / log.
+    pub chronicle: Vec<crate::chronicle::Event>,
     /// Les expéditions commerciales en cours (Phase 5, incrément 6b), par
     /// identifiant d'agent — une table à côté de l'ECS, comme `routes`,
     /// nettoyée à la mort de l'envoyé. Voir `crate::commerce`.
@@ -271,6 +279,7 @@ impl Sim {
             tech_events: Vec::new(),
             known_techs: BTreeSet::new(),
             fires: Vec::new(),
+            chronicle: Vec::new(),
             expeditions: BTreeMap::new(),
             allow_wildfires: true,
             allow_fauna_immigration: true,
@@ -453,6 +462,42 @@ impl Sim {
     /// sert qu'à l'affichage.
     pub fn clan_age(&self, clan: ClanId) -> tech::Age {
         tech::age_of(&self.clan_corpus(clan), &self.tech_tree)
+    }
+
+    /// Consigne un fait dans la Chronique, daté du tick courant. **Le seul**
+    /// chemin d'écriture du journal : la date n'est jamais fournie par
+    /// l'appelant, donc les entrées sont ordonnées par construction (elles ne
+    /// peuvent pas remonter le temps).
+    pub(crate) fn record(&mut self, pos: (i64, i64), kind: crate::chronicle::EventKind) {
+        self.chronicle.push(crate::chronicle::Event { tick: self.time.tick, pos, kind });
+    }
+
+    /// Le nom d'un agent **vivant** (voir `crate::names`) — `None` s'il est
+    /// mort ou hors du monde résident. C'est ici et non dans `names` parce que
+    /// le nom dépend du sexe, qu'il faut aller chercher dans l'ECS.
+    pub fn agent_name(&self, id: AgentId) -> Option<String> {
+        self.agents
+            .query::<(&AgentId, &Demographics)>()
+            .iter()
+            .find(|(_, (a, _))| **a == id)
+            .map(|(_, (_, demo))| names::agent_name(self.world.seed(), id, demo.sex))
+    }
+
+    /// Le nom d'un clan — pur (aucune recherche), mais exposé ici pour que les
+    /// consommateurs n'aient pas à connaître la seed.
+    pub fn clan_name(&self, id: ClanId) -> String {
+        names::clan_name(self.world.seed(), id)
+    }
+
+    /// Les `n` derniers faits de la Chronique, **rédigés**, du plus récent au
+    /// plus ancien — ce qu'on lit en se reconnectant (BRIEF §6.4).
+    pub fn chronicle_tail(&self, n: usize) -> Vec<String> {
+        self.chronicle
+            .iter()
+            .rev()
+            .take(n)
+            .map(|e| chronicle::tell(e, self.world.seed(), &self.tech_tree, &self.climate))
+            .collect()
     }
 
     /// Instantané des troupeaux, dans l'ordre d'itération de `hecs`.
@@ -824,16 +869,23 @@ impl Sim {
             }
             if phys.is_dead() {
                 let cause = phys.last_damage.unwrap_or(DeathCause::Starvation);
-                dead.push((entity, *id, cause, (x, y)));
+                // Le sexe part avec le corps : on le note ici, sans quoi la
+                // Chronique ne saurait plus nommer le défunt (voir `chronicle`).
+                dead.push((entity, *id, cause, (x, y), demo.sex));
             }
         }
         self.shelter_ticks += sheltered;
-        for (entity, agent, cause, pos) in dead {
+        for (entity, agent, cause, pos, sex) in dead {
             // Le despawn est hors itération : l'emprunt de la requête est
             // rendu, l'ordre de retrait suit l'ordre de collecte.
             let _ = self.agents.despawn(entity);
             self.routes.remove(&agent.0); // pas de trajet fantôme d'un mort
             self.expeditions.remove(&agent.0); // une expédition meurt avec son envoyé
+            // Une mort ordinaire est une statistique ; la mort de celui qui
+            // menait un clan est une succession — et donc un fait de Chronique.
+            if let Some(clan) = self.clans.iter().find(|c| c.chief == agent).map(|c| c.id) {
+                self.record(pos, EventKind::ChiefFallen { clan, agent, sex, cause });
+            }
             self.deaths.push(DeathRecord { tick: time.tick, agent, cause, pos });
         }
 
@@ -1633,6 +1685,88 @@ mod tests {
         assert_eq!(a.hunted_head.to_bits(), b.hunted_head.to_bits());
         assert_eq!(a.tech_events.len(), b.tech_events.len());
         assert_eq!(a.known_techs, b.known_techs);
+        // La Chronique aussi, jusqu'au contenu : deux mondes de même seed
+        // racontent exactement la même histoire (BRIEF §8.2, le replay).
+        assert_eq!(a.chronicle, b.chronicle);
+    }
+
+    /// La Chronique (Phase 6) doit se **remplir en jouant**, pas seulement dans
+    /// un test unitaire qui pousse des événements à la main : on vérifie ici que
+    /// les points de collecte sont réellement câblés dans la boucle, et que ce
+    /// qu'elle raconte est lisible.
+    ///
+    /// Scène du groupe resserré (celle des tests de clan), pour la même raison
+    /// qu'eux : sans faune ni incendie, 24 agents groupés visitent peu de chunks
+    /// — la même vérification sur la scène dispersée coûtait 35 minutes.
+    ///
+    /// L'observable est l'entrée d'un clan dans la Chronique, qui suppose deux
+    /// choses de suite : qu'un clan se forme (Phase 4) **et** qu'il tienne
+    /// `chronicle::CLAN_NOTABLE_DAYS` (la règle de notabilité, Phase 6).
+    #[test]
+    fn la_chronique_se_remplit_en_jouant() {
+        let (mut sim, _) = scenario_setup(42, 24, 0);
+        let deadline = 24 * (crate::chronicle::CLAN_NOTABLE_DAYS + 40);
+        for _ in 0..deadline {
+            sim.step();
+            if !sim.chronicle.is_empty() {
+                break;
+            }
+        }
+        assert!(
+            !sim.chronicle.is_empty(),
+            "un groupe resserré doit finir par entrer dans la Chronique"
+        );
+        // Elle est ordonnée : un journal ne remonte pas le temps.
+        assert!(
+            sim.chronicle.windows(2).all(|w| w[0].tick <= w[1].tick),
+            "la Chronique doit rester ordonnée par tick"
+        );
+        // Et elle se lit : chaque entrée produit une phrase datée et nommée.
+        for line in sim.chronicle_tail(20) {
+            assert!(line.starts_with("An "), "chaque entrée s'ouvre sur sa date : {line}");
+            assert!(line.ends_with('.'), "et se termine comme une phrase : {line}");
+            assert!(!line.contains("AgentId"), "aucun type Rust ne fuit : {line}");
+        }
+    }
+
+    /// La règle de notabilité des clans (Phase 6) : un groupe détecté puis
+    /// reperdu aussitôt ne laisse **aucune** trace dans le récit, alors que
+    /// `clan_events` — la statistique — l'enregistre bien.
+    ///
+    /// C'est le correctif d'un vrai défaut observé : la première version
+    /// journalisait chaque détection, et un an de la scène par défaut produisait
+    /// des dizaines de « les X se reconnaissent comme un peuple » suivis
+    /// immédiatement de « les X se dispersent » — le churn de détection étalé en
+    /// récit, exactement le log que le §6.4 refuse.
+    #[test]
+    fn un_clan_ephemere_ne_fait_pas_date() {
+        let (mut sim, _) = scenario_setup(42, 24, 0);
+        // Un clan planté à la main, vieux d'un seul jour : la détection de
+        // minuit ne le retrouvera pas (le graphe social ne le connaît pas) et
+        // l'effacera — sans rien raconter.
+        sim.clans.push(Clan {
+            id: ClanId(9999),
+            founded_tick: sim.time.tick,
+            members: (0..12).map(AgentId).collect(),
+            home: (0.0, 0.0),
+            stock: 0.0,
+            chief: AgentId(0),
+            desired: None,
+        });
+        for _ in 0..24 {
+            sim.step();
+        }
+        assert!(
+            sim.clan_events.iter().any(|e| e.clan == ClanId(9999)),
+            "la statistique, elle, doit bien voir la dissolution"
+        );
+        assert!(
+            !sim.chronicle.iter().any(|e| matches!(
+                e.kind,
+                crate::chronicle::EventKind::ClanDissolved { clan: ClanId(9999), .. }
+            )),
+            "un clan d'un jour n'a pas d'histoire à clore"
+        );
     }
 
     /// Incrément 1 de la Phase 5 (« l'exposition ») : en vivant et en se

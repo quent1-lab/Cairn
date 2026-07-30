@@ -244,13 +244,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::agent::{AgentId, Position, Prestige};
+use crate::chronicle::EventKind;
 use crate::fauna::Herd;
 use crate::demography::{Kinship, Traits, find_human};
 use crate::memory::TALK_RADIUS_TILES;
 use crate::sim::Sim;
 use crate::skills::{self, Skills};
 use crate::structures::{self, StructureKind};
-use cairn_core::km_to_tiles;
+use cairn_core::{TICKS_PER_DAY, km_to_tiles};
 
 // — Affinités —
 
@@ -927,6 +928,22 @@ fn detect_clans(sim: &mut Sim) {
                 kind: ClanEventKind::Dissolved,
                 members: clan.members.len(),
             });
+            // La fin d'un peuple fait date (BRIEF §6.4) — mais seulement d'un
+            // peuple dont on avait annoncé la naissance : voir
+            // `chronicle::CLAN_NOTABLE_DAYS`. Un groupe détecté le matin et
+            // reperdu le soir n'a pas d'histoire à clore.
+            // Strictement supérieur, pas « ≥ » : les dissolutions sont traitées
+            // **avant** les annonces de fin de fonction, donc un clan qui
+            // s'efface le jour même où il atteint le seuil n'a jamais été
+            // annoncé — le clore serait une fin sans commencement.
+            let days = (sim.time.tick.saturating_sub(clan.founded_tick)) / TICKS_PER_DAY;
+            if days > crate::chronicle::CLAN_NOTABLE_DAYS {
+                let home = (clan.home.0.floor() as i64, clan.home.1.floor() as i64);
+                sim.record(
+                    home,
+                    EventKind::ClanDissolved { clan: clan.id, members: clan.members.len() },
+                );
+            }
         }
     }
     for (i, (cluster, home)) in clusters.into_iter().enumerate() {
@@ -941,6 +958,9 @@ fn detect_clans(sim: &mut Sim) {
             kind: ClanEventKind::Formed,
             members: cluster.len(),
         });
+        // Rien dans la Chronique ici : un clan tout juste détecté n'est pas
+        // encore un peuple. C'est le jour où il atteint `CLAN_NOTABLE_DAYS`
+        // qu'on peut l'affirmer — voir la fin de cette fonction.
         next.push(Clan {
             id,
             founded_tick: sim.time.tick,
@@ -965,6 +985,25 @@ fn detect_clans(sim: &mut Sim) {
         cm.0 = membership.get(&id.0).copied();
     }
     sim.clans = next;
+
+    // Les peuples qui viennent d'atteindre l'ancienneté notable : c'est
+    // aujourd'hui qu'ils entrent dans la Chronique (voir `CLAN_NOTABLE_DAYS`).
+    // L'égalité stricte suffit et ne peut pas se manquer — cette passe tombe
+    // exactement une fois par jour.
+    let born: Vec<(ClanId, (i64, i64), usize)> = sim
+        .clans
+        .iter()
+        .filter(|c| {
+            (sim.time.tick.saturating_sub(c.founded_tick)) / TICKS_PER_DAY
+                == crate::chronicle::CLAN_NOTABLE_DAYS
+        })
+        .map(|c| {
+            (c.id, (c.home.0.floor() as i64, c.home.1.floor() as i64), c.members.len())
+        })
+        .collect();
+    for (clan, pos, members) in born {
+        sim.record(pos, EventKind::ClanFormed { clan, members });
+    }
 }
 
 #[cfg(test)]

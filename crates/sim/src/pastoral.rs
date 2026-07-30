@@ -21,8 +21,10 @@
 use cairn_core::km_to_tiles;
 
 use crate::agent::Position;
+use crate::chronicle::EventKind;
 use crate::fauna::{Herd, Pack};
 use crate::sim::Sim;
+use crate::social::ClanId;
 
 /// Rayon autour d'un foyer dans lequel un troupeau peut s'apprivoiser (~2 km) :
 /// le territoire du clan.
@@ -47,13 +49,19 @@ pub const DOMESTICATED_THRESHOLD: f32 = 0.5;
 pub(crate) fn daily(sim: &mut Sim) {
     // Instantanés (lecture) avant de muter les troupeaux : foyers des clans et
     // menace prédatrice.
-    let homes: Vec<(f64, f64)> = sim.clans.iter().map(|c| c.home).collect();
+    // Le clan est retenu à côté de son foyer : la Chronique veut savoir *qui*
+    // a domestiqué la bête, pas seulement où.
+    let homes: Vec<(ClanId, (f64, f64))> = sim.clans.iter().map(|c| (c.id, c.home)).collect();
     let packs: Vec<((f64, f64), f32)> = sim
         .fauna
         .query::<(&Pack, &Position)>()
         .iter()
         .map(|(_, (p, pos))| ((pos.x, pos.y), p.population))
         .collect();
+
+    // Les franchissements du seuil de cheptel, relevés puis journalisés hors de
+    // l'emprunt de `sim.fauna`.
+    let mut tamed: Vec<((i64, i64), ClanId, crate::fauna::Species)> = Vec::new();
 
     for (_, (herd, pos)) in sim.fauna.query_mut::<(&mut Herd, &Position)>() {
         if !herd.species.domesticable() {
@@ -64,8 +72,8 @@ pub(crate) fn daily(sim: &mut Sim) {
         let home = homes
             .iter()
             .copied()
-            .filter(|h| dist2(*h, here) <= TAME_RADIUS * TAME_RADIUS)
-            .min_by(|a, b| dist2(*a, here).total_cmp(&dist2(*b, here)));
+            .filter(|(_, h)| dist2(*h, here) <= TAME_RADIUS * TAME_RADIUS)
+            .min_by(|(_, a), (_, b)| dist2(*a, here).total_cmp(&dist2(*b, here)));
         // Pression prédatrice autour du troupeau.
         let predators: f32 = packs
             .iter()
@@ -73,17 +81,28 @@ pub(crate) fn daily(sim: &mut Sim) {
             .map(|(_, pop)| pop)
             .sum();
 
-        if let Some(h) = home
+        let before = herd.tameness;
+        if let Some((clan, h)) = home
             && predators < PROTECT_MAX_PREDATORS
         {
             herd.tameness = (herd.tameness + TAME_RATE).min(1.0);
             herd.anchor = Some(h);
+            // Le jour où l'apprivoisement franchit le seuil : ce troupeau n'est
+            // plus du gibier, c'est un cheptel. Un fait qui fait date, et qu'on
+            // ne peut lire que du dedans (le seuil ne se franchit qu'une fois).
+            if before < DOMESTICATED_THRESHOLD && herd.tameness >= DOMESTICATED_THRESHOLD {
+                tamed.push(((here.0.floor() as i64, here.1.floor() as i64), clan, herd.species));
+            }
         } else {
             herd.tameness = (herd.tameness - FERAL_RATE).max(0.0);
             if herd.tameness <= 0.0 {
                 herd.anchor = None; // redevenu sauvage : il repart avec les saisons
             }
         }
+    }
+
+    for (pos, clan, species) in tamed {
+        sim.record(pos, EventKind::Domesticated { clan, species });
     }
 }
 

@@ -37,6 +37,7 @@ use cairn_core::{Pcg32, km_to_tiles, splitmix64};
 use serde::Deserialize;
 
 use crate::agent::{AgentId, Physiology, Position};
+use crate::chronicle::EventKind;
 use crate::demography::{Demographics, Traits};
 use crate::exposure::{Exposure, Exposures};
 use crate::memory::{Memory, TALK_RADIUS_TILES};
@@ -160,6 +161,13 @@ pub struct TechId(pub u16);
 struct TechSpec {
     id: String,
     label: String,
+    /// Le groupe nominal **avec son déterminant**, tel qu'on l'écrit dans une
+    /// phrase : « la maîtrise du feu », « le bronze », « l'agriculture ». La
+    /// Chronique en a besoin — le français n'a pas d'article neutre, et rien
+    /// dans le code ne peut deviner le genre d'un libellé. Optionnel : à défaut,
+    /// `label` décapitalisé fait l'affaire (voir `Tech::narrated`).
+    #[serde(default)]
+    narrative: Option<String>,
     #[serde(default)]
     prereq_techs: Vec<String>,
     #[serde(default)]
@@ -191,6 +199,8 @@ pub struct Tech {
     pub name: String,
     /// Libellé lisible (affichage client).
     pub label: String,
+    /// Forme narrative — voir `TechSpec::narrative` et [`Tech::narrated`].
+    pub narrative: Option<String>,
     pub prereq_techs: Vec<TechId>,
     pub prereq_exposure: Vec<Exposure>,
     /// « Au moins une parmi » — voir `TechSpec::prereq_exposure_any`.
@@ -200,6 +210,26 @@ pub struct Tech {
     pub skill: Option<TechSkill>,
     /// Marqueur d'âge — voir `TechSpec::age` et `age_of`.
     pub age: Option<Age>,
+}
+
+impl Tech {
+    /// Le nom du savoir tel qu'il s'insère dans une phrase de Chronique :
+    /// « … découvre **la maîtrise du feu**. » À défaut de forme narrative dans
+    /// les données, on décapitalise le libellé — imparfait (l'article manque)
+    /// mais jamais fautif au point d'être illisible, et surtout : une tech
+    /// ajoutée au RON sans y penser reste racontable.
+    pub fn narrated(&self) -> String {
+        match &self.narrative {
+            Some(n) => n.clone(),
+            None => {
+                let mut chars = self.label.chars();
+                match chars.next() {
+                    Some(c) => c.to_lowercase().chain(chars).collect(),
+                    None => String::new(),
+                }
+            }
+        }
+    }
 }
 
 /// L'arbre technologique chargé : la liste des techs (indexée par [`TechId`])
@@ -248,6 +278,7 @@ impl TechTree {
                 id: TechId(i as u16),
                 name: spec.id,
                 label: spec.label,
+                narrative: spec.narrative,
                 prereq_techs,
                 prereq_exposure: spec.prereq_exposure,
                 prereq_exposure_any: spec.prereq_exposure_any,
@@ -263,6 +294,12 @@ impl TechTree {
     /// La technologie d'identifiant `id`.
     pub fn get(&self, id: TechId) -> &Tech {
         &self.techs[id.0 as usize]
+    }
+
+    /// Le nom d'une tech tel qu'on l'insère dans une phrase (voir
+    /// [`Tech::narrated`]) — le raccourci dont se sert la Chronique.
+    pub fn narrated(&self, id: TechId) -> String {
+        self.get(id).narrated()
     }
 
     /// L'identifiant de la technologie de nom `name`, si elle existe.
@@ -408,6 +445,10 @@ pub(crate) fn insight(sim: &mut Sim) {
     let seed = sim.world.seed();
     let tick = sim.time.tick;
     let mut discoveries: Vec<TechEvent> = Vec::new();
+    // Les mêmes découvertes, rédigeables : la Chronique veut le **sexe** du
+    // découvreur (son nom en dépend) et le **lieu** de l'insight, deux choses
+    // qu'on ne pourra plus retrouver le jour où on lira le journal.
+    let mut told: Vec<((i64, i64), EventKind)> = Vec::new();
 
     for (_, (id, pos, phys, traits, demo, membership, exposures, skills, mem, knowledge)) in sim
         .agents
@@ -474,11 +515,23 @@ pub(crate) fn insight(sim: &mut Sim) {
                     agent: Some(*id),
                     clan: Some(clan_id),
                 });
+                told.push((
+                    (tx, ty),
+                    EventKind::TechDiscovered {
+                        tech: tech.id,
+                        agent: *id,
+                        sex: demo.sex,
+                        clan: Some(clan_id),
+                    },
+                ));
                 break; // une découverte par jour suffit — on redécouvrira demain
             }
         }
     }
     sim.tech_events.extend(discoveries);
+    for (pos, kind) in told {
+        sim.record(pos, kind);
+    }
 }
 
 /// L'échange par contact (BRIEF §5.4, incrément 4 ; §5.3 commerce, incrément
@@ -602,16 +655,22 @@ pub(crate) fn forget(sim: &mut Sim) {
     for (_, k) in sim.agents.query::<&Knowledge>().iter() {
         current.extend(k.iter());
     }
-    for &t in &sim.known_techs {
-        if !current.contains(&t) {
-            sim.tech_events.push(TechEvent {
-                tick,
-                kind: TechEventKind::Forgotten,
-                tech: t,
-                agent: None,
-                clan: None,
-            });
-        }
+    // On relève d'abord les disparues (l'emprunt de `sim.known_techs` doit être
+    // rendu avant d'écrire dans `sim`), puis on les journalise.
+    let lost: Vec<TechId> =
+        sim.known_techs.iter().copied().filter(|t| !current.contains(t)).collect();
+    for t in lost {
+        sim.tech_events.push(TechEvent {
+            tick,
+            kind: TechEventKind::Forgotten,
+            tech: t,
+            agent: None,
+            clan: None,
+        });
+        // Un savoir perdu fait date au même titre qu'un savoir trouvé — c'est
+        // ce que le critère §9 appelle « visible dans la Chronique ». Sans
+        // lieu : il ne disparaît pas quelque part, il disparaît partout.
+        sim.record((0, 0), EventKind::TechForgotten { tech: t });
     }
     sim.known_techs = current;
 }

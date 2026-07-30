@@ -12,6 +12,10 @@
 //   id                 identifiant textuel stable (référencé par les prérequis,
 //                      la Chronique) — ne pas renommer à la légère.
 //   label              libellé lisible (affichage client).
+//   narrative          le groupe nominal AVEC son déterminant, pour la Chronique
+//                      (« la maîtrise du feu », « le bronze ») : le français n'a
+//                      pas d'article neutre et le code ne peut pas deviner le
+//                      genre. Optionnel — à défaut, `label` décapitalisé.
 //   prereq_techs       savoirs préalables (par id) — l'agent doit déjà les tenir.
 //   prereq_exposure    a déjà VU (persistant) : matières/phénomènes rencontrés
 //                      (voir `exposure::Exposure`).
@@ -31,6 +35,7 @@
     (
         id: "fire_mastery",
         label: "Maîtrise du feu",
+        narrative: "la maîtrise du feu",
         // Deux voies (« les deux », Phase 5) : il faut du bois (combustible),
         // puis SOIT du silex pour l'étincelle, SOIT avoir vu un incendie.
         prereq_exposure: [Wood],
@@ -42,6 +47,7 @@
     (
         id: "cooking",
         label: "Cuisson",
+        narrative: "la cuisson des aliments",
         prereq_techs: ["fire_mastery"],
         pressure: [Famine],
         skill: Foraging,
@@ -50,6 +56,7 @@
     (
         id: "pottery",
         label: "Poterie",
+        narrative: "la poterie",
         prereq_techs: ["fire_mastery"],
         prereq_exposure: [Clay],
         prereq_environment: [FreshWater],
@@ -67,6 +74,7 @@
         // et retourne en friche si on l'abandonne.
         id: "agriculture",
         label: "Agriculture",
+        narrative: "l'agriculture",
         prereq_techs: ["pottery"],
         prereq_exposure: [WildGrasses],
         prereq_environment: [FreshWater],
@@ -84,6 +92,7 @@
     (
         id: "kiln",
         label: "Four à haute température",
+        narrative: "le four à haute température",
         prereq_techs: ["pottery"],
         pressure: [Crowding],
         skill: Foraging,
@@ -92,6 +101,7 @@
     (
         id: "copper_metallurgy",
         label: "Métallurgie du cuivre",
+        narrative: "la métallurgie du cuivre",
         prereq_techs: ["kiln"],
         prereq_exposure: [Copper],
         pressure: [Crowding, Threat],
@@ -101,6 +111,7 @@
     (
         id: "bronze",
         label: "Bronze",
+        narrative: "le bronze",
         prereq_techs: ["copper_metallurgy"],
         prereq_exposure: [Tin],
         pressure: [Threat, Crowding],

@@ -188,6 +188,9 @@ pub(crate) fn resolve_clashes(sim: &mut Sim, clashes: &[Clash]) {
     let mut hurt: BTreeMap<u64, f32> = BTreeMap::new();
     let mut fought: BTreeSet<u64> = BTreeSet::new();
     let mut pillage: Vec<(ClanId, ClanId)> = Vec::new();
+    // Le camp de chaque combattant — de quel affrontement il relève — pour
+    // pouvoir attribuer ses éventuelles funérailles au bon récit (étape 5).
+    let mut side: BTreeMap<u64, (ClanId, ClanId)> = BTreeMap::new();
     for c in clashes {
         let (Some(&(af, ac, aclan)), Some(&(tf, tc, tclan))) =
             (stats.get(&c.attacker.0), stats.get(&c.target.0))
@@ -211,10 +214,15 @@ pub(crate) fn resolve_clashes(sim: &mut Sim, clashes: &[Clash]) {
             && a != t
         {
             pillage.push((a, t));
+            side.entry(c.attacker.0).or_insert((a, t));
+            side.entry(c.target.0).or_insert((a, t));
         }
     }
 
     // 3. Appliquer plaies (mortelles à 1 → Violence) et pratique du combat.
+    //    Les morts sont comptées par affrontement au passage : c'est le bilan
+    //    que la Chronique raconte (« Douze morts », BRIEF §6.4).
+    let mut casualties: BTreeMap<(u64, u64), usize> = BTreeMap::new();
     for (_, (id, traits, skills, wound, phys)) in sim
         .agents
         .query_mut::<(&AgentId, &Traits, &mut Skills, &mut Wound, &mut Physiology)>()
@@ -224,10 +232,18 @@ pub(crate) fn resolve_clashes(sim: &mut Sim, clashes: &[Clash]) {
         }
         skills::practice(&mut skills.combat, skills::combat_cap(traits), COMBAT_PRACTICE_HOURS);
         if let Some(&dmg) = hurt.get(&id.0) {
+            let before = wound.0;
             wound.0 = (wound.0 + dmg).min(1.0);
-            if wound.0 >= 1.0 {
+            // `before < 1.0` : on compte le **franchissement** du seuil, pas
+            // l'état. Compter l'état ferait recompter, tick après tick, un
+            // combattant déjà à plaie pleine — et la Chronique annoncerait plus
+            // de morts qu'il n'y a de vivants.
+            if wound.0 >= 1.0 && before < 1.0 {
                 phys.health = 0.0;
                 phys.last_damage = Some(DeathCause::Violence);
+                if let Some(&pair) = side.get(&id.0) {
+                    *casualties.entry((pair.0.0, pair.1.0)).or_default() += 1;
+                }
             }
         }
     }
@@ -236,6 +252,7 @@ pub(crate) fn resolve_clashes(sim: &mut Sim, clashes: &[Clash]) {
     //    l'assaillant, borné par ce que le rival possède (on ne razzie pas plus
     //    qu'il n'y a). C'est la tension — née d'une ressource rare — qui se
     //    dénoue en la prenant de force.
+    let mut plundered: BTreeMap<(u64, u64), f32> = BTreeMap::new();
     for (a, t) in pillage {
         let take = sim
             .clans
@@ -251,6 +268,32 @@ pub(crate) fn resolve_clashes(sim: &mut Sim, clashes: &[Clash]) {
         if let Some(ac) = sim.clans.iter_mut().find(|c| c.id == a) {
             ac.stock += take;
         }
+        *plundered.entry((a.0, t.0)).or_default() += take;
+    }
+
+    // 5. Le récit — **seulement quand il y a mort d'homme**. Une passe d'armes
+    //    se rejoue à chaque tick de contact ; si l'on journalisait chaque
+    //    échauffourée, la Chronique se noierait dans les egratignures. Ce qui
+    //    fait date, c'est le bilan : « Douze morts » (§6.4). La tension, elle,
+    //    reste observable en continu par `clan_relations`.
+    for (&(a, d), &dead) in &casualties {
+        if dead == 0 {
+            continue;
+        }
+        // Le lieu : le foyer du clan attaqué — c'est chez lui qu'on est venu.
+        let pos = sim
+            .clans
+            .iter()
+            .find(|c| c.id.0 == d)
+            .map_or((0, 0), |c| (c.home.0.floor() as i64, c.home.1.floor() as i64));
+        crate::chronicle::record_raid(
+            sim,
+            pos,
+            ClanId(a),
+            ClanId(d),
+            dead,
+            plundered.get(&(a, d)).copied().unwrap_or(0.0),
+        );
     }
 }
 

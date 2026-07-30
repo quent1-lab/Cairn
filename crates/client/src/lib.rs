@@ -59,6 +59,12 @@ const POP_HISTORY_CAP: usize = 400;
 const POP_CHART_W: f64 = 298.0;
 const POP_CHART_H: f64 = 52.0;
 
+/// Entrées de Chronique affichées dans le panneau. Le journal complet vit dans
+/// la sim (`Sim::chronicle`) et grandit tout au long de la partie ; on n'en rend
+/// que la fin — le reste s'atteindra par une vue filtrable (par clan, par
+/// individu, par période) quand le serveur la servira.
+const CHRONICLE_LINES: usize = 40;
+
 /// Paliers de vitesse proposés, en **ticks de jeu par seconde réelle**. Un
 /// tick = une heure ; 24 ticks/s = un jour de jeu par seconde. Le plus lent
 /// (1,5) = un jour toutes les ~16 s, pour suivre un agent pas à pas
@@ -472,8 +478,40 @@ impl App {
         self.update_readout();
         self.update_population_stats();
         self.update_clan_panel();
+        self.update_chronicle_panel();
         self.update_agent_panel();
         self.draw_population_chart();
+    }
+
+    /// La Chronique (Phase 6, BRIEF §6.4) : les derniers faits notables du
+    /// monde, du plus récent au plus ancien. Ce panneau est *le* produit de la
+    /// phase — c'est lui qu'on lit en revenant après une absence.
+    ///
+    /// La rédaction vit dans `sim::chronicle` (pure) ; ici on ne fait que la
+    /// mettre en forme. Les faits du dernier mois de jeu sont marqués « frais »
+    /// pour que l'œil accroche ce qui vient d'arriver.
+    fn update_chronicle_panel(&self) {
+        if self.sim.chronicle.is_empty() {
+            set_html(
+                "chronicle-panel",
+                "<div class=\"empty\">Rien à raconter encore. Les clans, les découvertes, \
+                 les affrontements et les incendies s'écriront ici.</div>",
+            );
+            return;
+        }
+        let seed = self.sim.world.seed();
+        let recent = self.sim.time.tick.saturating_sub(30 * cairn_core::TICKS_PER_DAY);
+        let mut html = String::new();
+        for event in self.sim.chronicle.iter().rev().take(CHRONICLE_LINES) {
+            let (when, what) =
+                cairn_sim::chronicle::tell_parts(event, seed, &self.sim.tech_tree, &self.sim.climate);
+            let cls = if event.tick >= recent { "entry fresh" } else { "entry" };
+            html.push_str(&format!(
+                "<div class=\"{cls}\"><div class=\"e-when\">{when}</div>\
+                 <div class=\"e-text\">{what}</div></div>"
+            ));
+        }
+        set_html("chronicle-panel", &html);
     }
 
     /// Dessine agents et faune par-dessus le terrain. Chaque entité est
@@ -866,14 +904,21 @@ impl App {
                 .map(|&t| self.sim.tech_tree.get(t).label.as_str())
                 .collect();
 
-            // Ligne « chef · sait · tension · veut ».
-            let mut line = format!("chef <b>#{}</b>", clan.chief.0);
+            // Ligne « chef · sait · tension · veut ». Les protagonistes sont
+            // désormais nommés (Phase 6) : un chef a un nom, un rival aussi —
+            // c'est ce qui rend le panneau lisible comme une histoire.
+            let chief = self
+                .sim
+                .agent_name(clan.chief)
+                .unwrap_or_else(|| format!("#{}", clan.chief.0));
+            let mut line = format!("chef <b>{chief}</b>");
             if !corpus.is_empty() {
                 line.push_str(&format!(" · sait : <b>{}</b>", corpus.join(", ")));
             }
             if best_t >= 0.05 {
                 line.push_str(&format!(
-                    " · <span class=\"warn\">tension {best_t:.2} avec #{best_other}</span>"
+                    " · <span class=\"warn\">tension {best_t:.2} avec les {}</span>",
+                    self.sim.clan_name(cairn_sim::ClanId(best_other))
                 ));
             }
             if let Some(kind) = clan.desired {
@@ -899,7 +944,7 @@ impl App {
                 "<div class=\"clan\">\
                    <div class=\"c-top\">\
                      <span class=\"c-id\" style=\"background:{color}\"></span>\
-                     <span class=\"c-name\">Clan #{id}</span>\
+                     <span class=\"c-name\">Les {name}</span>\
                      <span class=\"{age_class}\">{age_label}</span>\
                      <span class=\"c-meta\">{n} membres</span>\
                    </div>\
@@ -907,7 +952,7 @@ impl App {
                    <div class=\"c-line\">{line}</div>{structs_line}\
                  </div>",
                 color = clan_color(clan.id),
-                id = clan.id.0,
+                name = self.sim.clan_name(clan.id),
                 age_label = age.label(),
                 bar = bar_html(frac, health_fill(frac)),
                 stock = clan.stock,
@@ -999,17 +1044,23 @@ impl App {
                         } else {
                             "chip age"
                         };
-                        format!("<span class=\"{cls}\">clan #{} · {}</span>", cid.0, age.label())
+                        format!(
+                            "<span class=\"{cls}\">les {} · {}</span>",
+                            self.sim.clan_name(cid),
+                            age.label()
+                        )
                     }
                     None => "<span class=\"chip\">sans clan</span>".to_string(),
                 };
+                // Le nom propre remplace le numéro (Phase 6) : c'est la même
+                // personne que celle que la Chronique nommera à sa mort.
                 let ident = format!(
-                    "<div class=\"name\">Humain #{}</div>\
+                    "<div class=\"name\">{}</div>\
                      <div class=\"chips\">\
                        <span class=\"chip\"><span class=\"cd\" style=\"background:{sex_col}\"></span>{sex_sym} {:.0} ans</span>\
                        <span class=\"chip\">{stage}</span>{clan_chip}\
                      </div>",
-                    id.0,
+                    cairn_sim::names::agent_name(self.sim.world.seed(), *id, demo.sex),
                     demo.age_years(tick).max(0.0),
                 );
 
@@ -1082,12 +1133,25 @@ impl App {
                 } else {
                     format!("<div class=\"chipset\">{techs}</div>")
                 };
+                // Les ascendants se nomment même s'ils sont morts depuis
+                // longtemps : leur sexe est impliqué par le rôle (une mère est
+                // une femme), et un nom ne dépend que de (seed, id, sexe) — donc
+                // aucun besoin d'aller chercher un individu qui n'existe plus.
+                let seed = self.sim.world.seed();
                 let lineage = match (kin.mother, kin.father) {
                     (None, None) => "fondateur (sans ascendance)".to_string(),
                     (m, f) => format!(
                         "mère {} · père {}",
-                        m.map_or("?".to_string(), |a| format!("#{}", a.0)),
-                        f.map_or("?".to_string(), |a| format!("#{}", a.0)),
+                        m.map_or("inconnue".to_string(), |a| cairn_sim::names::agent_name(
+                            seed,
+                            a,
+                            Sex::Female
+                        )),
+                        f.map_or("inconnu".to_string(), |a| cairn_sim::names::agent_name(
+                            seed,
+                            a,
+                            Sex::Male
+                        )),
                     ),
                 };
                 let lore = format!(
