@@ -89,12 +89,33 @@ fn main() {
 
     let total_ticks = years * TICKS_PER_YEAR;
     let started = std::time::Instant::now();
+    // Curseur de Chronique : ce qui a déjà été raconté. Le récit s'imprime **au
+    // fil de l'eau** à chaque rapport, pas seulement au verdict — un run de
+    // plusieurs jours peut être interrompu (machine éteinte), et sa sortie doit
+    // rester exploitable jusqu'à la dernière ligne écrite.
+    let mut told = 0usize;
     for _ in 0..total_ticks {
         sim.step();
         if sim.time.tick.is_multiple_of(TICKS_PER_DAY) {
             let day = sim.time.tick / TICKS_PER_DAY;
             if day.is_multiple_of(report_days) {
                 report(&sim, day);
+                for event in &sim.chronicle[told..] {
+                    println!(
+                        "     {}",
+                        cairn_sim::chronicle::tell(
+                            event,
+                            sim.world.seed(),
+                            &sim.tech_tree,
+                            &sim.climate
+                        )
+                    );
+                }
+                told = sim.chronicle.len();
+                // Vidage explicite : sans lui, stdout redirigé vers un fichier
+                // est tamponné par blocs et le fichier reste vide des heures.
+                use std::io::Write;
+                let _ = std::io::stdout().flush();
             }
         }
     }
