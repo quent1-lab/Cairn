@@ -51,16 +51,23 @@ use crate::sim::Sim;
 use crate::social::ClanId;
 use crate::tech::{TechId, TechTree};
 
-/// Ancienneté qu'un clan doit atteindre pour entrer dans la Chronique — un mois
-/// de jeu. Les clans se détectent (et se perdent) tous les jours par cohésion
-/// et co-résidence : un groupe qui se forme le matin et se disperse le soir est
-/// un **artefact de détection**, pas un peuple. Le chroniqueur attend donc de
-/// pouvoir l'affirmer avant d'écrire « ils se reconnaissent comme un peuple »,
-/// et il ne mentionne la fin que de ceux dont il avait annoncé la naissance.
+/// Ancienneté qu'un clan doit atteindre pour entrer dans la Chronique — **une
+/// saison** de jeu. Les clans se détectent (et se perdent) tous les jours par
+/// cohésion et co-résidence : un groupe qui se forme le matin et se disperse le
+/// soir est un **artefact de détection**, pas un peuple. Le chroniqueur attend
+/// donc de pouvoir l'affirmer avant d'écrire « ils se reconnaissent comme un
+/// peuple », et il ne mentionne la fin que de ceux dont il avait annoncé la
+/// naissance.
+///
+/// Calibré sur un run réel (seeds 42 et 7, 10 ans) : à un mois, le journal
+/// annonçait encore des peuples qui se dispersaient dans la même saison —
+/// ~1 clan éphémère par an là où la scène n'en portait que deux, stables. Une
+/// saison entière est la durée à partir de laquelle un groupe a tenu un hiver
+/// ou une sécheresse, donc quelque chose.
 ///
 /// Ce seuil ne touche **rien** dans la simulation : les clans, eux, se forment
 /// et se dissolvent exactement comme avant. Il ne gouverne que le récit.
-pub const CLAN_NOTABLE_DAYS: u64 = 30;
+pub const CLAN_NOTABLE_DAYS: u64 = 90;
 
 /// Un fait notable, daté et situé. `pos` est en tuiles : le client peut y
 /// centrer la caméra d'un clic (« montrer sur la carte »), et la saison du
@@ -89,13 +96,22 @@ pub enum EventKind {
     /// (`tech::forget`) — « l'humanité peut régresser » (§5.4).
     TechForgotten { tech: TechId },
     /// Un raid a eu lieu : la tension entre voisins s'est dénouée dans le sang
-    /// (`combat::resolve_clashes`).
-    Raid { attacker: ClanId, defender: ClanId, casualties: usize, plunder: f32 },
+    /// (`combat::resolve_clashes`). `mutual` distingue la razzia subie de la
+    /// mêlée où les deux camps ont frappé — voir [`record_raid`].
+    Raid { attacker: ClanId, defender: ClanId, casualties: usize, plunder: f32, mutual: bool },
     /// Le chef d'un clan est mort. Un fait notable en soi : c'est une
     /// succession (`social::elect_chiefs` désignera un autre dès demain).
     ChiefFallen { clan: ClanId, agent: AgentId, sex: Sex, cause: DeathCause },
-    /// La foudre — ou la friction — a mis le feu à la brousse (`fire::daily`).
-    Wildfire,
+    /// Un peuple vient de voir le feu **pour la première fois** (`fire::daily`).
+    ///
+    /// Ce n'est pas la combustion qui fait date, c'est le témoignage : dans une
+    /// savane sèche il brûle plusieurs fois par an, et journaliser chaque départ
+    /// noyait le récit (80 faits sur 93 mesurés sur un run de 11 ans — la
+    /// Chronique était devenue la météo). Un incendie n'entre donc ici que le
+    /// jour où il apprend quelque chose à quelqu'un : au plus **une fois par
+    /// clan**, et cette fois-là compte, puisque c'est elle qui ouvre la voie
+    /// du feu à ceux qui n'ont pas de silex (voir `assets/techs.ron`).
+    FireWitnessed { clan: ClanId },
     /// Un clan dépêche un envoyé chercher l'étain au loin (`commerce::dispatch`)
     /// : le voyage sans lequel il n'y a jamais de bronze.
     ExpeditionDeparted { clan: ClanId, agent: AgentId, sex: Sex, distance_km: f32 },
@@ -114,6 +130,14 @@ pub enum EventKind {
 /// — précisément le log que le §6.4 refuse. On cherche donc en arrière la
 /// mention du jour et on y **ajoute** le bilan : le fait raconté est la journée
 /// de combat, pas l'heure.
+///
+/// La paire est **non ordonnée**. Deux clans qui se rendent coup pour coup
+/// produisent des passes d'armes dans les deux sens le même jour : les
+/// consolider séparément donnait « Les Atar tombent sur les Iburn » suivi de
+/// « Les Iburn tombent sur les Atar » — le même affrontement raconté deux fois
+/// (constaté sur un run de 10 ans). Un coup rendu ne fait donc pas un second
+/// fait : il bascule le premier en **mêlée** (`mutual`), l'agresseur consigné
+/// restant celui qui a ouvert les hostilités ce jour-là.
 pub(crate) fn record_raid(
     sim: &mut Sim,
     pos: (i64, i64),
@@ -132,17 +156,24 @@ pub(crate) fn record_raid(
         if event.tick < today {
             break;
         }
-        if let EventKind::Raid { attacker: a, defender: d, casualties: c, plunder: p } =
-            &mut event.kind
-            && *a == attacker
-            && *d == defender
+        if let EventKind::Raid {
+            attacker: a,
+            defender: d,
+            casualties: c,
+            plunder: p,
+            mutual,
+        } = &mut event.kind
+            && (*a == attacker && *d == defender || *a == defender && *d == attacker)
         {
             *c += casualties;
             *p += plunder;
+            // Le camp d'en face a rendu les coups : ce n'est plus une razzia
+            // subie, c'est une mêlée.
+            *mutual |= *a == defender;
             return;
         }
     }
-    sim.record(pos, EventKind::Raid { attacker, defender, casualties, plunder });
+    sim.record(pos, EventKind::Raid { attacker, defender, casualties, plunder, mutual: false });
 }
 
 /// Rédige un fait en français, en une seule ligne : « *An 3, hiver — …* ».
@@ -195,22 +226,28 @@ pub fn tell_parts(
         // « oublier » est transitif direct : la phrase reste juste quel que soit
         // le genre du savoir perdu, là où « ne sait plus faire… » boiterait.
         EventKind::TechForgotten { tech: t } => format!("le monde oublie {}.", tech(t)),
-        EventKind::Raid { attacker, defender, casualties, plunder } => {
+        EventKind::Raid { attacker, defender, casualties, plunder, mutual } => {
             let bilan = match casualties {
                 0 => "Nul n'y laisse la vie".to_string(),
                 1 => "Un mort".to_string(),
                 n => format!("{n} morts"),
             };
-            let butin = if plunder > 0.0 {
-                format!(" Les {} emportent leurs vivres.", clan(attacker))
+            let (assaut, butin) = if mutual {
+                (
+                    format!("les {} et les {} s'affrontent", clan(attacker), clan(defender)),
+                    if plunder > 0.0 { " Des vivres changent de mains." } else { "" }.to_string(),
+                )
             } else {
-                String::new()
+                (
+                    format!("les {} tombent sur les {}", clan(attacker), clan(defender)),
+                    if plunder > 0.0 {
+                        format!(" Les {} emportent leurs vivres.", clan(attacker))
+                    } else {
+                        String::new()
+                    },
+                )
             };
-            format!(
-                "les {} tombent sur les {}. {bilan}.{butin}",
-                clan(attacker),
-                clan(defender)
-            )
+            format!("{assaut}. {bilan}.{butin}")
         }
         EventKind::ChiefFallen { clan: c, agent, sex, cause } => format!(
             "{}, qui menait les {}, meurt {}.",
@@ -218,7 +255,9 @@ pub fn tell_parts(
             clan(c),
             death_circumstance(cause)
         ),
-        EventKind::Wildfire => "un feu prend dans la broussaille et court sur la plaine.".to_string(),
+        EventKind::FireWitnessed { clan: c } => {
+            format!("un feu court sur la plaine : les {} voient le feu.", clan(c))
+        }
         EventKind::ExpeditionDeparted { clan: c, agent, sex, distance_km } => format!(
             "{} quitte les {} pour chercher l'étain, à {distance_km:.0} km de là.",
             who(agent, sex),
@@ -338,7 +377,7 @@ mod tests {
     #[test]
     fn le_bilan_d_un_raid_s_accorde() {
         let (sim, seed) = scribe();
-        let raid = |casualties, plunder| {
+        let raid = |casualties, plunder, mutual| {
             let e = Event {
                 tick: 0,
                 pos: (0, 0),
@@ -347,15 +386,23 @@ mod tests {
                     defender: ClanId(2),
                     casualties,
                     plunder,
+                    mutual,
                 },
             };
             tell(&e, seed, &sim.tech_tree, &sim.climate)
         };
-        assert!(raid(0, 0.0).contains("Nul n'y laisse la vie"));
-        assert!(raid(1, 0.0).contains("Un mort"));
-        assert!(raid(12, 0.0).contains("12 morts"));
-        assert!(!raid(3, 0.0).contains("emportent"), "sans butin, on n'en parle pas");
-        assert!(raid(3, 2.5).contains("emportent"), "avec butin, on le dit");
+        assert!(raid(0, 0.0, false).contains("Nul n'y laisse la vie"));
+        assert!(raid(1, 0.0, false).contains("Un mort"));
+        assert!(raid(12, 0.0, false).contains("12 morts"));
+        assert!(!raid(3, 0.0, false).contains("emportent"), "sans butin, on n'en parle pas");
+        assert!(raid(3, 2.5, false).contains("emportent"), "avec butin, on le dit");
+        // Une razzia subie et une mêlée ne se racontent pas de la même façon.
+        assert!(raid(3, 0.0, false).contains("tombent sur"));
+        assert!(raid(3, 0.0, true).contains("s'affrontent"), "{}", raid(3, 0.0, true));
+        assert!(
+            raid(3, 2.5, true).contains("changent de mains"),
+            "dans une mêlée, le butin n'a pas de vainqueur désigné"
+        );
     }
 
     /// La consolidation des raids : un affrontement qui dure des heures ne fait
@@ -376,8 +423,30 @@ mod tests {
         assert_eq!(sim.chronicle.len(), 1, "une seule entrée pour la journée");
         assert_eq!(
             sim.chronicle[0].kind,
-            EventKind::Raid { attacker: a, defender: b, casualties: 3, plunder: 1.5 },
+            EventKind::Raid {
+                attacker: a,
+                defender: b,
+                casualties: 3,
+                plunder: 1.5,
+                mutual: false
+            },
             "le bilan s'accumule au lieu de se répéter"
+        );
+
+        // La riposte du camp d'en face, le même jour : c'est le **même**
+        // affrontement — il bascule en mêlée au lieu de faire un second fait.
+        record_raid(&mut sim, (0, 0), b, a, 2, 0.0);
+        assert_eq!(sim.chronicle.len(), 1, "un coup rendu ne fait pas un second récit");
+        assert_eq!(
+            sim.chronicle[0].kind,
+            EventKind::Raid {
+                attacker: a,
+                defender: b,
+                casualties: 5,
+                plunder: 1.5,
+                mutual: true
+            },
+            "l'agresseur reste celui qui a ouvert les hostilités ; la mêlée est notée"
         );
 
         // Le lendemain : un nouvel affrontement, une nouvelle entrée.
@@ -385,9 +454,9 @@ mod tests {
         record_raid(&mut sim, (0, 0), a, b, 2, 0.0);
         assert_eq!(sim.chronicle.len(), 2, "un autre jour, un autre fait");
 
-        // Et un autre agresseur ne se fond pas dans le récit du premier.
-        record_raid(&mut sim, (0, 0), b, a, 1, 0.0);
-        assert_eq!(sim.chronicle.len(), 3, "la riposte des Ibourn est un fait distinct");
+        // Mais un affrontement avec un **tiers** reste bien distinct.
+        record_raid(&mut sim, (0, 0), a, ClanId(3), 1, 0.0);
+        assert_eq!(sim.chronicle.len(), 3, "une autre guerre est une autre histoire");
     }
 
     /// Un fait situé sous les tropiques n'invente pas de saison ; le même fait
@@ -396,11 +465,15 @@ mod tests {
     fn la_date_ne_nomme_une_saison_que_la_ou_il_y_en_a() {
         let (sim, seed) = scribe();
         let at = |y| {
-            let e = Event { tick: TICKS_PER_YEAR, pos: (0, y), kind: EventKind::Wildfire };
+            let e = Event {
+                tick: TICKS_PER_YEAR,
+                pos: (0, y),
+                kind: EventKind::FireWitnessed { clan: ClanId(1) },
+            };
             tell(&e, seed, &sim.tech_tree, &sim.climate)
         };
         let tempere = (cairn_worldgen::DEFAULT_PLANET_PERIOD / 4.0) as i64;
-        assert_eq!(at(0), "An 1 — Un feu prend dans la broussaille et court sur la plaine.");
+        assert!(at(0).starts_with("An 1 — "), "sous les tropiques, pas de saison : {}", at(0));
         assert!(at(tempere).starts_with("An 1, hiver —"), "{}", at(tempere));
     }
 }

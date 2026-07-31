@@ -38,6 +38,8 @@
 //! l'invention ». Il ne blesse pas encore les agents directement — le « brûler
 //! vif » ambivalent viendra avec la foudre divine (Phase 6, §6.2).
 
+use std::collections::BTreeSet;
+
 use cairn_core::{Pcg32, TICKS_PER_DAY, km_to_tiles};
 
 use crate::agent::Position;
@@ -45,6 +47,7 @@ use crate::chronicle::EventKind;
 use crate::exposure::{Exposure, Exposures};
 use crate::salt;
 use crate::sim::Sim;
+use crate::social::{ClanId, ClanMembership};
 use crate::tile::Tile;
 use crate::world::World;
 
@@ -121,15 +124,50 @@ fn update_fires(sim: &mut Sim) {
         let f = sim.fires[i];
         burn_disk(&mut sim.world, f.pos, f.radius);
     }
+    // Quels peuples avaient déjà vu le feu ? Relevé **avant** d'exposer qui que
+    // ce soit : c'est la comparaison avant/après qui fait la notabilité (voir
+    // `EventKind::FireWitnessed`). `BTreeSet` — jamais de `HashSet` dans la
+    // simulation, l'ordre d'itération doit rester déterministe.
+    let mut already: BTreeSet<u64> = BTreeSet::new();
+    for (_, (exposures, membership)) in sim.agents.query::<(&Exposures, &ClanMembership)>().iter() {
+        if exposures.has(Exposure::Fire)
+            && let Some(clan) = membership.0
+        {
+            already.insert(clan.0);
+        }
+    }
+
     // Exposition : tout agent à portée de vue d'un feu voit le feu.
     let fires: Vec<(f64, f64, f64)> = sim.fires.iter().map(|f| (f.pos.0, f.pos.1, f.radius)).collect();
-    for (_, (pos, exposures)) in sim.agents.query_mut::<(&Position, &mut Exposures)>() {
+    let mut discovering: BTreeSet<u64> = BTreeSet::new();
+    for (_, (pos, exposures, membership)) in
+        sim.agents.query_mut::<(&Position, &mut Exposures, &ClanMembership)>()
+    {
         let seen = fires.iter().any(|&(fx, fy, r)| {
             (pos.x - fx).hypot(pos.y - fy) <= r + FIRE_SIGHT_MARGIN_TILES
         });
         if seen {
             exposures.expose(Exposure::Fire);
+            if let Some(clan) = membership.0
+                && !already.contains(&clan.0)
+            {
+                discovering.insert(clan.0);
+            }
         }
+    }
+
+    // Les peuples qui découvrent le feu aujourd'hui : un fait chacun, une seule
+    // fois dans leur histoire. Consigné à leur foyer (le lieu du peuple, pas
+    // celui du brasier) — c'est de lui qu'on parle, et c'est sa latitude qui
+    // donne la saison du récit.
+    let born: Vec<(ClanId, (i64, i64))> = sim
+        .clans
+        .iter()
+        .filter(|c| discovering.contains(&c.id.0))
+        .map(|c| (c.id, (c.home.0.floor() as i64, c.home.1.floor() as i64)))
+        .collect();
+    for (clan, pos) in born {
+        sim.record(pos, EventKind::FireWitnessed { clan });
     }
     // Vieillissement et extinction.
     for fire in &mut sim.fires {
@@ -180,9 +218,10 @@ fn try_ignite(sim: &mut Sim) {
     let tile = sim.world.tile(pos.0.floor() as i64, pos.1.floor() as i64);
     if is_flammable(&tile) {
         sim.fires.push(Fire { pos, radius: FIRE_START_RADIUS_TILES, age_days: 0 });
-        // Un incendie fait date : c'est la seconde voie d'accès au feu (§5.3) —
-        // celle qui n'a besoin d'aucun silex, et bientôt d'aucune divinité.
-        sim.record((pos.0.floor() as i64, pos.1.floor() as i64), EventKind::Wildfire);
+        // Rien dans la Chronique ici : un départ de feu n'est pas un fait. Il en
+        // devient un le jour où un peuple le voit pour la première fois — c'est
+        // là que se joue la seconde voie d'accès au feu (§5.3), celle qui n'a
+        // besoin d'aucun silex. Voir `update_fires`.
     }
 }
 
@@ -238,6 +277,47 @@ mod tests {
         };
         assert!(exposed(near), "l'agent proche doit être exposé au feu");
         assert!(!exposed(far), "l'agent lointain ne voit rien");
+    }
+
+    /// Notabilité : un peuple n'entre dans la Chronique qu'à **son premier**
+    /// feu. Dans une savane sèche il brûle plusieurs fois par an — journaliser
+    /// chaque départ noyait le récit sous la météo (mesuré : 80 faits sur 93 en
+    /// 11 ans). Ce qui fait date, c'est le jour où l'on voit le feu, et il n'y
+    /// en a qu'un.
+    #[test]
+    fn un_peuple_n_entre_dans_la_chronique_qu_a_son_premier_feu() {
+        use crate::social::{Clan, ClanId, ClanMembership};
+
+        let mut sim = Sim::new(WorldSeed(1), 64);
+        let member = sim.spawn_agent(0.0, 0.0);
+        for (_, membership) in sim.agents.query_mut::<&mut ClanMembership>() {
+            membership.0 = Some(ClanId(1));
+        }
+        sim.clans.push(Clan {
+            id: ClanId(1),
+            founded_tick: 0,
+            members: [member].into_iter().collect(),
+            home: (0.0, 0.0),
+            stock: 0.0,
+            chief: member,
+            desired: None,
+        });
+
+        // Premier incendie sous leurs yeux : cela fait date.
+        sim.fires.push(Fire { pos: (0.0, 0.0), radius: FIRE_START_RADIUS_TILES, age_days: 0 });
+        update_fires(&mut sim);
+        assert_eq!(sim.chronicle.len(), 1, "le premier feu vu entre dans la Chronique");
+        assert!(matches!(
+            sim.chronicle[0].kind,
+            crate::chronicle::EventKind::FireWitnessed { clan } if clan == ClanId(1)
+        ));
+
+        // Les suivants sont du climat, plus de l'histoire.
+        for _ in 0..5 {
+            sim.fires.push(Fire { pos: (0.0, 0.0), radius: FIRE_START_RADIUS_TILES, age_days: 0 });
+            update_fires(&mut sim);
+        }
+        assert_eq!(sim.chronicle.len(), 1, "les incendies suivants ne se racontent plus");
     }
 
     #[test]
