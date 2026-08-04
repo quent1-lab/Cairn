@@ -178,6 +178,7 @@ mod tests {
             stock: 0.0,
             chief: AgentId(0),
             desired: None,
+            rivalry: 0.0,
         }
     }
 

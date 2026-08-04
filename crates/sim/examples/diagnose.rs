@@ -177,6 +177,9 @@ fn report(
     println!("\n— 2. Durée de vie des clans —");
     let mut born: BTreeMap<u64, u64> = BTreeMap::new();
     let mut lifespans: Vec<f64> = Vec::new();
+    // La question qui a motivé cette distinction : combien de ces « morts »
+    // étaient en réalité des peuples qui en rejoignaient un autre ?
+    let mut merged: Vec<f64> = Vec::new();
     for e in &sim.clan_events {
         match e.kind {
             ClanEventKind::Formed => {
@@ -187,8 +190,18 @@ fn report(
                     lifespans.push((e.tick - t0) as f64 / TICKS_PER_YEAR as f64);
                 }
             }
+            ClanEventKind::Merged { .. } => {
+                if let Some(t0) = born.remove(&e.clan.0) {
+                    merged.push((e.tick - t0) as f64 / TICKS_PER_YEAR as f64);
+                }
+            }
         }
     }
+    println!(
+        "  {} fusions (absorbés par un voisin) contre {} vraies extinctions",
+        merged.len(),
+        lifespans.len()
+    );
     lifespans.sort_by(f64::total_cmp);
     if lifespans.is_empty() {
         println!("  aucun clan dissous");

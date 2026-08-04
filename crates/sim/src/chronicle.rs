@@ -90,6 +90,10 @@ pub enum EventKind {
     ClanFormed { clan: ClanId, members: usize },
     /// Un clan s'est éteint ou dispersé — il ne se reconnaît plus.
     ClanDissolved { clan: ClanId, members: usize },
+    /// Un clan a été absorbé par un autre : ses gens vivent, sous une autre
+    /// bannière. À ne pas confondre avec une fin — c'en était pourtant une
+    /// dans le modèle avant qu'on sache les distinguer.
+    ClanMerged { clan: ClanId, into: ClanId, members: usize },
     /// Un insight : quelqu'un a compris quelque chose (`tech::insight`).
     TechDiscovered { tech: TechId, agent: AgentId, sex: Sex, clan: Option<ClanId> },
     /// Le dernier porteur d'un savoir s'est éteint sans l'avoir transmis
@@ -219,6 +223,11 @@ pub fn tell_parts(
                 )
             }
         }
+        EventKind::ClanMerged { clan: c, into, members } => format!(
+            "les {} rejoignent les {} — ils sont {members} à passer sous leur bannière.",
+            clan(c),
+            clan(into)
+        ),
         EventKind::TechDiscovered { tech: t, agent, sex, clan: c } => match c {
             Some(c) => format!("{}, des {}, découvre {}.", who(agent, sex), clan(c), tech(t)),
             None => format!("{}, sans clan, découvre {}.", who(agent, sex), tech(t)),

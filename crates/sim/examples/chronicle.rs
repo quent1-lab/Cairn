@@ -135,6 +135,9 @@ impl Cumulative {
         for e in &sim.clan_events[self.seen_events..] {
             match e.kind {
                 cairn_sim::ClanEventKind::Formed => self.clans_formed += 1,
+                // Une fusion n'est pas une fin : elle ne compte pas comme une
+                // dissolution (voir `social::detect_clans`).
+                cairn_sim::ClanEventKind::Merged { .. } => {}
                 cairn_sim::ClanEventKind::Dissolved => self.clans_dissolved += 1,
             }
         }

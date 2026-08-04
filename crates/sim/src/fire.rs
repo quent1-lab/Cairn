@@ -301,6 +301,7 @@ mod tests {
             stock: 0.0,
             chief: member,
             desired: None,
+            rivalry: 0.0,
         });
 
         // Premier incendie sous leurs yeux : cela fait date.

@@ -1756,6 +1756,7 @@ mod tests {
             stock: 0.0,
             chief: AgentId(0),
             desired: None,
+            rivalry: 0.0,
         });
         for _ in 0..24 {
             sim.step();
@@ -2697,6 +2698,7 @@ mod tests {
             stock: 0.0,
             chief: farmer,
             desired: None,
+            rivalry: 0.0,
         });
 
         let m_farmer = sim.inspect_agent(farmer).unwrap();
@@ -2749,6 +2751,7 @@ mod tests {
             stock: 0.0,
             chief: brave,
             desired: None,
+            rivalry: 0.0,
         });
 
         let hunt_score = |m: &[crate::brain::Motivation]| {
@@ -2836,6 +2839,7 @@ mod tests {
             stock: 0.0,
             chief: herder,
             desired: None,
+            rivalry: 0.0,
         });
 
         let m = sim.inspect_agent(herder).unwrap();
@@ -2877,6 +2881,7 @@ mod tests {
             stock: 0.0,
             chief: raider,
             desired: None,
+            rivalry: 0.0,
         });
         sim.clans.push(Clan {
             id: social::ClanId(2),
@@ -2886,6 +2891,7 @@ mod tests {
             stock: 3.0,
             chief: rival,
             desired: None,
+            rivalry: 0.0,
         });
 
         let raid_score = |sim: &mut Sim| {

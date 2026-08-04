@@ -345,6 +345,55 @@ const MODULARITY_ESTABLISHED: f64 = 0.42;
 /// condition d'entrée de l'hystérésis ci-dessus.
 const CONTINUITY_NUM: usize = 1;
 const CONTINUITY_DEN: usize = 2;
+
+/// De combien le prestige d'autrui pèse dans l'attention qu'on lui accorde.
+///
+/// **La force centrifuge**, et la deuxième tentative : la première se contentait
+/// d'accélérer l'attachement *vers* un notable, sans que cela coûte rien aux
+/// autres relations. Résultat mesuré : le graphe s'était densifié (92-96 % des
+/// liens au-dessus du seuil, contre 79-87 %) au lieu de se structurer — une
+/// étoile là où l'on voulait deux constellations, et le clan géant intact.
+///
+/// Ce qui manquait est ici : **l'attention est finie**. Le plafond de Dunbar
+/// existait déjà (`MAX_BONDS_PER_AGENT`) mais n'agissait qu'après coup, en
+/// élaguant. Désormais chacun *répartit* son attention entre ceux qu'il croise :
+/// s'attacher à un notable en retire aux autres. C'est ce coût qui fait des
+/// factions — les voisins d'un personnage en vue gravitent vers lui, ceux d'un
+/// autre vers l'autre, et le lien entre les deux camps se dilue. La modularité
+/// y lit alors deux communautés, et le clan se scinde **le long de la ligne de
+/// rivalité** : la fission par rivalité de leadership, la plus documentée en
+/// ethnographie des bandes, sans qu'aucune taille ni aucun rôle ne soit lu.
+const PRESTIGE_PULL: f32 = 2.0;
+
+/// Prestige auquel l'attirance atteint la moitié de son maximum. Saturant :
+/// `p / (p + K)`, jamais de seuil — un notable un peu plus en vue attire un peu
+/// plus, sans effet de palier.
+const PRESTIGE_HALF: f32 = 8.0;
+
+/// L'attirance qu'exerce un prestige, dans `[0, 1)`.
+fn prestige_pull(prestige: f32) -> f32 {
+    let p = prestige.max(0.0);
+    p / (p + PRESTIGE_HALF)
+}
+
+/// Ce qu'un interlocuteur pèse dans l'attention qu'on lui accorde : la parenté
+/// d'abord (elle prime, comme l'encodent déjà `KIN_GAIN` vs `ENCOUNTER_GAIN`),
+/// puis ce qu'il représente aux yeux de tous.
+///
+/// Ce poids n'est **jamais** un gain : il ne vaut que **relativement** à celui
+/// des autres personnes présentes (voir `encounter`). Quelqu'un d'illustre entouré
+/// de gens tout aussi illustres n'attire pas plus que sa part.
+fn attention_weight(kin: bool, prestige_of_other: f32) -> f32 {
+    let base = if kin { KIN_GAIN / ENCOUNTER_GAIN } else { 1.0 };
+    base * (1.0 + PRESTIGE_PULL * prestige_pull(prestige_of_other))
+}
+
+/// Part des membres d'un clan disparu qu'il faut retrouver **sous une même
+/// bannière** pour parler de fusion plutôt que de dispersion. La moitié : en
+/// dessous, ce sont quelques rescapés qui ont trouvé refuge, pas un peuple qui
+/// en rejoint un autre.
+const MERGE_NUM_NUM: usize = 1;
+const MERGE_NUM_DEN: usize = 2;
 /// Rayon de résidence, depuis le centroïde du groupe (~4,5 km — un
 /// territoire de bande semi-nomade, pas une seule clairière : mesuré sur la
 /// scène de calibrage, voir `sim::tests::un_clan_emerge_sans_regle_explicite`
@@ -454,6 +503,11 @@ pub struct Clan {
     /// `elect_chiefs`, appelée juste après dans la même passe quotidienne,
     /// le recalcule toujours avant que quiconque d'autre ne lise `sim.clans`.
     pub chief: AgentId,
+    /// Ce que pèse le second prétendant face au chef, dans [0, 1] : la
+    /// **rivalité interne**, mesurée chaque jour par `elect_chiefs`. Proche de
+    /// 1, deux personnages se valent et le peuple a deux pôles. Purement
+    /// observationnelle : rien ne la lit pour décider quoi que ce soit.
+    pub rivalry: f32,
     /// La structure que le clan désire bâtir, s'il en désire une
     /// (`crate::structures::plan`, passe quotidienne) — `None` s'il est au
     /// chaud, son stock vide et sans voisin menaçant. Lue par `brain::decide`
@@ -505,7 +559,14 @@ impl ClanRelations {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClanEventKind {
     Formed,
+    /// Le peuple a cessé d'exister sans que ses membres se retrouvent ailleurs
+    /// ensemble : morts, ou dispersés chacun de son côté.
     Dissolved,
+    /// Le peuple a été **absorbé** par un autre — ses membres vont bien, ils
+    /// vivent désormais sous une autre bannière. Distinguer ce cas de la
+    /// dissolution n'est pas cosmétique : la plupart des « extinctions »
+    /// mesurées étaient en réalité des fusions (voir `detect_clans`).
+    Merged { into: ClanId },
 }
 
 /// Trace d'une naissance ou d'une mort de clan — le futur matériau de la
@@ -608,19 +669,27 @@ pub(crate) fn encounter(sim: &mut Sim) {
         id: AgentId,
         pos: (f64, f64),
         kin: Kinship,
+        prestige: f32,
     }
     let mut views: Vec<View> = sim
         .agents
-        .query::<(&AgentId, &Position, &Kinship)>()
+        .query::<(&AgentId, &Position, &Kinship, &Prestige)>()
         .iter()
-        .map(|(_, (id, pos, kin))| View { id: *id, pos: (pos.x, pos.y), kin: *kin })
+        .map(|(_, (id, pos, kin, prestige))| View {
+            id: *id,
+            pos: (pos.x, pos.y),
+            kin: *kin,
+            prestige: prestige.0,
+        })
         .collect();
     views.sort_unstable_by_key(|v| v.id.0);
 
-    // Qui a eu au moins une conversation cette passe : chacun pratique un
-    // peu d'oratoire (voir plus bas), qu'il ait parlé une fois ou dix — pas
-    // besoin d'un compte exact, juste « a-t-il eu l'occasion de parler ? ».
-    let mut spoke: BTreeSet<u64> = BTreeSet::new();
+    // — Passe 1 : qui croise qui, et **ce que chacun accorde** à l'autre. —
+    // On ne renforce rien encore : il faut d'abord savoir entre combien de
+    // personnes chaque agent a son attention à partager (voir `attention_weight`).
+    let mut pairs: Vec<(usize, usize, f32, f32)> = Vec::new();
+    let mut total: Vec<f32> = vec![0.0; views.len()];
+    let mut degree: Vec<u32> = vec![0; views.len()];
     for i in 0..views.len() {
         for j in (i + 1)..views.len() {
             let (a, b) = (&views[i], &views[j]);
@@ -628,11 +697,41 @@ pub(crate) fn encounter(sim: &mut Sim) {
             if d2 > TALK_RADIUS_TILES * TALK_RADIUS_TILES {
                 continue;
             }
-            let rate = if are_kin(a.id, &a.kin, b.id, &b.kin) { KIN_GAIN } else { ENCOUNTER_GAIN };
-            sim.social.reinforce(a.id, b.id, rate);
-            spoke.insert(a.id.0);
-            spoke.insert(b.id.0);
+            let kin = are_kin(a.id, &a.kin, b.id, &b.kin);
+            // Ce que `a` accorde à `b` dépend de ce que *b* pèse, et
+            // réciproquement — d'où deux poids par paire, jamais un seul.
+            let (w_ab, w_ba) =
+                (attention_weight(kin, b.prestige), attention_weight(kin, a.prestige));
+            pairs.push((i, j, w_ab, w_ba));
+            total[i] += w_ab;
+            total[j] += w_ba;
+            degree[i] += 1;
+            degree[j] += 1;
         }
+    }
+
+    // — Passe 2 : répartir. —
+    let mut spoke: BTreeSet<u64> = BTreeSet::new();
+    for &(i, j, w_ab, w_ba) in &pairs {
+        let (a, b) = (&views[i], &views[j]);
+        let base = if are_kin(a.id, &a.kin, b.id, &b.kin) { KIN_GAIN } else { ENCOUNTER_GAIN };
+        // La part de son attention que chacun consacre à l'autre, ramenée à ce
+        // qu'elle vaudrait si tous ses interlocuteurs se valaient : 1,0 quand
+        // personne ne sort du lot — le comportement d'avant ce mécanisme, à
+        // l'identique — puis au-dessus vers un notable, **et en dessous vers
+        // tous les autres**. C'est cette seconde moitié qui manquait : sans
+        // elle, s'attacher à quelqu'un ne coûtait rien à personne, et le graphe
+        // se densifiait au lieu de se structurer.
+        let share = |w: f32, sum: f32, n: u32| {
+            if sum <= 0.0 || n == 0 { 1.0 } else { (n as f32) * w / sum }
+        };
+        let invest_a = share(w_ab, total[i], degree[i]);
+        let invest_b = share(w_ba, total[j], degree[j]);
+        // Un lien se noue à deux : il vaut la moyenne des deux investissements,
+        // pas celui du plus enthousiaste.
+        sim.social.reinforce(a.id, b.id, base * 0.5 * (invest_a + invest_b));
+        spoke.insert(a.id.0);
+        spoke.insert(b.id.0);
     }
     if spoke.is_empty() {
         return;
@@ -977,6 +1076,8 @@ fn elect_chiefs(sim: &mut Sim) {
         .map(|(_, (id, skills, prestige))| (id.0, skills.oratory * prestige.0))
         .collect();
     for clan in &mut sim.clans {
+        let mut ranked: Vec<f32> =
+            clan.members.iter().map(|m| scores.get(&m.0).copied().unwrap_or(0.0)).collect();
         if let Some(&chief) = clan.members.iter().max_by(|a, b| {
             let sa = scores.get(&a.0).copied().unwrap_or(0.0);
             let sb = scores.get(&b.0).copied().unwrap_or(0.0);
@@ -984,6 +1085,17 @@ fn elect_chiefs(sim: &mut Sim) {
         }) {
             clan.chief = chief;
         }
+        // La rivalité : ce que pèse le second face au premier. Pure **mesure**,
+        // elle ne déclenche rien — la scission, quand elle vient, vient du
+        // graphe social (deux halos de prestige que la modularité sépare), pas
+        // de ce nombre. Il sert à voir venir : c'est l'indicateur qu'un peuple
+        // est sur le point de se diviser, et le futur matériau d'un fait de
+        // Chronique (« la rivalité entre X et Y déchire les Z »).
+        ranked.sort_by(|a, b| b.total_cmp(a));
+        clan.rivalry = match (ranked.first(), ranked.get(1)) {
+            (Some(&first), Some(&second)) if first > 0.0 => (second / first).clamp(0.0, 1.0),
+            _ => 0.0,
+        };
     }
 }
 
@@ -1143,6 +1255,9 @@ fn detect_clans(sim: &mut Sim) {
     // nouveau centroïde) ; sinon il s'efface.
     let mut matched = vec![false; clusters.len()];
     let mut next: Vec<Clan> = Vec::new();
+    // Les clans qui n'ont pas retrouvé leur identité — leur sort se décide une
+    // fois tous les clans du jour connus (fusion ou dispersion, voir plus bas).
+    let mut lost: Vec<Clan> = Vec::new();
     for clan in std::mem::take(&mut sim.clans) {
         let best = clusters
             .iter()
@@ -1163,6 +1278,7 @@ fn detect_clans(sim: &mut Sim) {
                     members: cluster.clone(),
                     home: *home,
                     stock: clan.stock,
+                    rivalry: clan.rivalry,
                     chief: clan.chief, // provisoire : `elect_chiefs` le recalcule juste après
                     desired: clan.desired, // reporté ; `structures::plan` le recalcule à minuit
                 });
@@ -1172,28 +1288,12 @@ fn detect_clans(sim: &mut Sim) {
             }
         });
         if !kept {
-            sim.clan_events.push(ClanEvent {
-                tick: sim.time.tick,
-                clan: clan.id,
-                kind: ClanEventKind::Dissolved,
-                members: clan.members.len(),
-            });
-            // La fin d'un peuple fait date (BRIEF §6.4) — mais seulement d'un
-            // peuple dont on avait annoncé la naissance : voir
-            // `chronicle::CLAN_NOTABLE_DAYS`. Un groupe détecté le matin et
-            // reperdu le soir n'a pas d'histoire à clore.
-            // Strictement supérieur, pas « ≥ » : les dissolutions sont traitées
-            // **avant** les annonces de fin de fonction, donc un clan qui
-            // s'efface le jour même où il atteint le seuil n'a jamais été
-            // annoncé — le clore serait une fin sans commencement.
-            let days = (sim.time.tick.saturating_sub(clan.founded_tick)) / TICKS_PER_DAY;
-            if days > crate::chronicle::CLAN_NOTABLE_DAYS {
-                let home = (clan.home.0.floor() as i64, clan.home.1.floor() as i64);
-                sim.record(
-                    home,
-                    EventKind::ClanDissolved { clan: clan.id, members: clan.members.len() },
-                );
-            }
+            // Rien n'est journalisé ici : on ne sait pas encore **ce qui est
+            // arrivé** à ce peuple. Ses membres sont peut-être morts, ou
+            // dispersés — ou bien ils ont rejoint un autre clan, et il faut
+            // pour le dire connaître les clans du jour, qui n'ont pas encore
+            // tous reçu leur identité. Verdict rendu plus bas.
+            lost.push(clan);
         }
     }
     for (i, (cluster, home)) in clusters.into_iter().enumerate() {
@@ -1218,6 +1318,7 @@ fn detect_clans(sim: &mut Sim) {
             members: cluster,
             home,
             stock: 0.0,
+            rivalry: 0.0,
             desired: None, // un clan neuf n'a encore rien mesuré ; `structures::plan` décidera
         });
     }
@@ -1235,6 +1336,54 @@ fn detect_clans(sim: &mut Sim) {
         cm.0 = membership.get(&id.0).copied();
     }
     sim.clans = next;
+
+    // Qu'est-il arrivé aux clans qui ont perdu leur identité ? Le modèle ne
+    // savait qu'**éteindre**, et comptait donc comme une mort ce qui est le
+    // plus souvent une **fusion** : un petit groupe se détache, puis rejoint le
+    // gros — ses gens vont très bien, mais la Chronique écrivait « ils se
+    // dispersent ». On regarde donc où sont passés ses membres : si la moitié
+    // d'entre eux se retrouve sous une même bannière, ce peuple n'est pas mort,
+    // il a été absorbé.
+    for clan in std::mem::take(&mut lost) {
+        let mut tally: BTreeMap<u64, usize> = BTreeMap::new();
+        for member in &clan.members {
+            if let Some(host) = membership.get(&member.0) {
+                *tally.entry(host.0).or_default() += 1;
+            }
+        }
+        // Égalité départagée par le plus petit identifiant, comme partout
+        // ailleurs (`claim_at`, `elect_chiefs`) — jamais par l'ordre d'itération.
+        let into = tally
+            .iter()
+            .max_by_key(|&(id, n)| (*n, std::cmp::Reverse(*id)))
+            .filter(|&(_, n)| n * MERGE_NUM_DEN >= clan.members.len() * MERGE_NUM_NUM)
+            .map(|(id, _)| ClanId(*id));
+        sim.clan_events.push(ClanEvent {
+            tick: sim.time.tick,
+            clan: clan.id,
+            kind: match into {
+                Some(host) => ClanEventKind::Merged { into: host },
+                None => ClanEventKind::Dissolved,
+            },
+            members: clan.members.len(),
+        });
+        // La fin d'un peuple fait date (BRIEF §6.4) — mais seulement d'un
+        // peuple dont on avait annoncé la naissance : voir
+        // `chronicle::CLAN_NOTABLE_DAYS`. Un groupe détecté le matin et reperdu
+        // le soir n'a pas d'histoire à clore.
+        let days = (sim.time.tick.saturating_sub(clan.founded_tick)) / TICKS_PER_DAY;
+        if days > crate::chronicle::CLAN_NOTABLE_DAYS {
+            let home = (clan.home.0.floor() as i64, clan.home.1.floor() as i64);
+            let members = clan.members.len();
+            sim.record(
+                home,
+                match into {
+                    Some(host) => EventKind::ClanMerged { clan: clan.id, into: host, members },
+                    None => EventKind::ClanDissolved { clan: clan.id, members },
+                },
+            );
+        }
+    }
 
     // Les peuples qui viennent d'atteindre l'ancienneté notable : c'est
     // aujourd'hui qu'ils entrent dans la Chronique (voir `CLAN_NOTABLE_DAYS`).
@@ -1481,6 +1630,82 @@ mod tests {
         );
     }
 
+    /// L'attention est finie : s'attacher à un notable en retire aux autres.
+    /// C'est **le coût** qui manquait à la première tentative — sans lui, le
+    /// graphe se densifiait au lieu de se structurer.
+    #[test]
+    fn s_attacher_a_un_notable_coute_aux_autres() {
+        let mut sim = Sim::new(WorldSeed(1), 64);
+        // Un observateur, deux anonymes, et un notable — tous à portée de voix.
+        let watcher = sim.spawn_agent(0.0, 0.0);
+        let plain = sim.spawn_agent(1.0, 0.0);
+        let _other = sim.spawn_agent(1.5, 0.0);
+        let notable = sim.spawn_agent(2.0, 0.0);
+        for (_, (id, prestige)) in sim.agents.query_mut::<(&AgentId, &mut Prestige)>() {
+            if *id == notable {
+                prestige.0 = 40.0; // des années à nourrir les siens
+            }
+        }
+        encounter(&mut sim);
+        let bond = |x: AgentId, y: AgentId| sim.social.affinity(x, y);
+        assert!(
+            bond(watcher, notable) > bond(watcher, plain),
+            "le notable capte plus ({:.4}) qu'un anonyme ({:.4})",
+            bond(watcher, notable),
+            bond(watcher, plain)
+        );
+
+        // La contre-épreuve, celle qui distingue ce mécanisme du précédent :
+        // sans notable dans l'assemblée, le même anonyme reçoit **davantage**.
+        let mut plat = Sim::new(WorldSeed(1), 64);
+        let w2 = plat.spawn_agent(0.0, 0.0);
+        let p2 = plat.spawn_agent(1.0, 0.0);
+        let _o2 = plat.spawn_agent(1.5, 0.0);
+        let _n2 = plat.spawn_agent(2.0, 0.0);
+        encounter(&mut plat);
+        assert!(
+            plat.social.affinity(w2, p2) > bond(watcher, plain),
+            "un anonyme perd de l'attention quand un notable est là ({:.4} sans, {:.4} avec)",
+            plat.social.affinity(w2, p2),
+            bond(watcher, plain)
+        );
+    }
+
+    /// À assemblée plate — personne ne sort du lot — le mécanisme doit rendre
+    /// **exactement** le comportement d'avant : sinon il aurait rééquilibré tout
+    /// le modèle social au passage, sans qu'on l'ait demandé.
+    #[test]
+    fn sans_notable_l_attachement_est_celui_d_avant() {
+        let mut sim = Sim::new(WorldSeed(1), 64);
+        let a = sim.spawn_agent(0.0, 0.0);
+        let b = sim.spawn_agent(1.0, 0.0);
+        let _c = sim.spawn_agent(1.5, 0.0);
+        encounter(&mut sim);
+        // `reinforce` est un nudge saturant depuis 0 : le premier gain vaut
+        // exactement le taux appliqué.
+        let expected = ENCOUNTER_GAIN;
+        let got = sim.social.affinity(a, b);
+        assert!(
+            (got - expected).abs() < 1e-5,
+            "sans prestige, le gain doit valoir ENCOUNTER_GAIN ({expected:.4}), obtenu {got:.4}"
+        );
+    }
+
+    /// Une fusion n'est pas une fin. Mesuré : 86 des 118 disparitions de clans
+    /// étaient en réalité des absorptions — le modèle comptait comme des morts
+    /// des gens qui allaient très bien, sous une autre bannière.
+    #[test]
+    fn un_peuple_absorbe_n_est_pas_un_peuple_mort() {
+        // Le seuil de fusion : la moitié des membres retrouvés sous une même
+        // bannière suffit à dire « ils les ont rejoints ».
+        let fusionne = |retrouves: usize, effectif: usize| {
+            retrouves * MERGE_NUM_DEN >= effectif * MERGE_NUM_NUM
+        };
+        assert!(fusionne(10, 20), "la moitié d'un peuple sous une bannière : une fusion");
+        assert!(fusionne(20, 20), "tous : une fusion, évidemment");
+        assert!(!fusionne(3, 20), "trois rescapés qui trouvent refuge : pas une fusion");
+    }
+
     /// Le cœur du volet « identité » : un peuple qui **grandit** reste lui-même.
     /// L'ancienne règle (majorité des deux côtés) lui retirait son nom dès qu'il
     /// avait doublé — c'est ce qui empêchait tout clan d'avoir une histoire.
@@ -1515,6 +1740,7 @@ mod tests {
             stock: 0.0,
             chief: AgentId(0),
             desired: None,
+            rivalry: 0.0,
         });
         sim.clans.push(Clan {
             id: ClanId(2),
@@ -1524,6 +1750,7 @@ mod tests {
             stock: 0.0,
             chief: AgentId(100),
             desired: None,
+            rivalry: 0.0,
         });
         let midpoint = ((home_a.0 + home_b.0) / 2.0, (home_a.1 + home_b.1) / 2.0);
         sim.spawn_herd(midpoint.0, midpoint.1, herd_population);
@@ -1600,6 +1827,7 @@ mod tests {
             stock: 0.0,
             chief: AgentId(id * 1000),
             desired: None,
+            rivalry: 0.0,
         }
     }
 
@@ -1731,6 +1959,7 @@ mod tests {
             stock: 0.0,
             chief: low, // valeur de départ arbitraire : doit changer
             desired: None,
+            rivalry: 0.0,
         });
 
         elect_chiefs(&mut sim);
@@ -1756,6 +1985,7 @@ mod tests {
             stock: 0.0,
             chief: b,
             desired: None,
+            rivalry: 0.0,
         });
 
         elect_chiefs(&mut sim);

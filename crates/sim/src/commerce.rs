@@ -368,6 +368,7 @@ mod tests {
             stock: 20.0, // de quoi financer
             chief: m,
             desired: None,
+            rivalry: 0.0,
         };
         clan.home = (0.0, 0.0);
         sim.clans.push(clan);
@@ -396,6 +397,7 @@ mod tests {
             stock: 20.0,
             chief: m,
             desired: None,
+            rivalry: 0.0,
         });
         dispatch(&mut sim);
         assert!(sim.expeditions.is_empty(), "pas de cuivre, pas de quête d'étain");

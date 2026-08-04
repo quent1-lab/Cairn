@@ -719,6 +719,7 @@ mod tests {
             stock: 0.0,
             chief: a,
             desired: None,
+            rivalry: 0.0,
         });
         sim.clan_pressure.insert(ClanId(1), ClanPressure { cold, ..Default::default() });
         (sim, a, fire)

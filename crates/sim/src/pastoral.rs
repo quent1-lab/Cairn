@@ -135,6 +135,7 @@ mod tests {
             stock: 0.0,
             chief: AgentId(0),
             desired: None,
+            rivalry: 0.0,
         });
         let near = spawn_herd(&mut sim, Species::Aurochs, 100.0, 0.0); // ~200 m du foyer
         let far = spawn_herd(&mut sim, Species::Aurochs, 5000.0, 0.0); // 10 km
@@ -165,6 +166,7 @@ mod tests {
             stock: 0.0,
             chief: AgentId(0),
             desired: None,
+            rivalry: 0.0,
         });
         let cheptel = spawn_herd(&mut sim, Species::Aurochs, 100.0, 0.0);
         // Une meute nombreuse tout près : le troupeau est harcelé.
