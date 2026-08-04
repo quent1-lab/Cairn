@@ -61,7 +61,7 @@ pub use memory::Memory;
 pub use pressure::ClanPressure;
 pub use sim::{BirthRecord, DeathRecord, Sim};
 pub use skills::Skills;
-pub use social::{Clan, ClanEvent, ClanEventKind, ClanId, ClanMembership, ClanRelations, SocialGraph};
+pub use social::{Clan, ClanDiagnostics, ClanEvent, ClanEventKind, ClanId, ClanMembership, ClanRelations, SocialGraph};
 pub use structures::{Structure, StructureKind};
 pub use tech::{
     Age, EnvCond, Knowledge, Tech, TechEvent, TechEventKind, TechId, TechPressure, TechSkill,

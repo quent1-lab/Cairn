@@ -17,21 +17,45 @@
 //!    membres vivent proches les uns des autres). Ces groupes deviennent des
 //!    `Clan`. Rien d'autre ne les crée.
 //!
-//! ## Une limite de bande passante sociale, pas un seuil de taille
+//! ## Une ligne de faille, pas un seuil de taille
 //!
 //! Le brief demande aussi qu'« un clan trop nombreux fissionne ». Écrire
 //! « si taille > N, couper en deux » serait exactement l'anti-pattern à
-//! refuser (BRIEF §11). À la place, chaque agent ne retient qu'un nombre
-//! borné de liens forts (`MAX_BONDS_PER_AGENT` — l'hypothèse de Dunbar :
-//! l'attention sociale est une ressource finie). Comme la cohésion exigée
-//! est une **densité** (proportion de paires effectivement liées), et que le
-//! nombre de liens qu'un groupe de `n` membres peut porter est plafonné à
-//! `n · MAX_BONDS_PER_AGENT / 2`, la densité maximale atteignable décroît
-//! mécaniquement en `1/n` — un groupe qui grossit **ne peut plus, au-delà
-//! d'une certaine taille, satisfaire le seuil de cohésion**, quelle que soit
-//! la façon dont ses membres se lient. La borne de taille est donc une
-//! **conséquence arithmétique** de deux règles locales (attention bornée,
-//! cohésion exigée), pas un cas spécial.
+//! refuser (BRIEF §11).
+//!
+//! **Une première version a échoué à l'éviter**, et il vaut la peine de dire
+//! comment, parce que l'erreur était invisible. Elle exigeait une **densité**
+//! absolue (`COHESION_THRESHOLD`), en s'appuyant sur l'idée que le plafond de
+//! liens par agent (`MAX_BONDS_PER_AGENT` — l'hypothèse de Dunbar) ferait
+//! décroître la densité atteignable en `1/n`, si bien qu'un groupe trop gros
+//! ne pourrait plus la satisfaire : une borne de taille présentée comme une
+//! conséquence arithmétique. C'en était une — mais c'était **quand même une
+//! règle de taille**, simplement déguisée en arithmétique. Calibré à 0,28 sur
+//! une scène de 24 agents (où le maximum atteignable valait 0,65), le seuil
+//! devenait *mathématiquement* impossible au-delà de 54 membres. Mesuré sur un
+//! vrai run (`example diagnose`, 9 857 verdicts) : les groupes refusés pour
+//! cohésion faisaient **58 membres en moyenne**, et les clans vivaient
+//! **3,6 jours** en médiane — la population entière formait un seul groupe
+//! connexe, refusé chaque nuit, recoupé chaque nuit à un endroit différent.
+//!
+//! La question posée est donc désormais l'inverse : non pas « ce groupe est-il
+//! assez dense ? » (une question dont la réponse dépend de sa taille), mais
+//! **« ce groupe a-t-il une ligne de faille ? »** — mesurée par la
+//! **modularité** (Newman), qui teste si une partition explique la structure
+//! du graphe mieux que le hasard. Une ligne de faille nette : le groupe se
+//! scinde le long de cette ligne. Aucune : c'est un peuple, quelle que soit sa
+//! taille.
+//!
+//! C'est là que la borne de taille émerge **vraiment**, sans qu'aucun effectif
+//! ne soit lu nulle part : avec au plus `MAX_BONDS_PER_AGENT` relations par
+//! personne, un groupe de deux cents *ne peut pas* être sans structure interne
+//! — il porte forcément des communautés, donc il se scinde. Un groupe de
+//! quarante qui se connaît vraiment, lui, n'en porte aucune, et reste entier.
+//! La différence avec la version précédente est que la coupure suit maintenant
+//! **quelque chose de réel** : comme la parenté renforce les liens plus vite
+//! que la simple rencontre (`KIN_GAIN` > `ENCOUNTER_GAIN`), les communautés
+//! détectées sont les lignages — et une famille étendue est encore la même
+//! demain, là où une coupure arbitraire changeait toutes les nuits.
 //!
 //! ## Persistance de l'identité
 //!
@@ -285,14 +309,42 @@ pub const BOND_THRESHOLD: f32 = 0.5;
 /// Taille minimale d'un groupe pour compter comme clan : en dessous, c'est
 /// une famille, pas une structure sociale.
 const MIN_CLAN_SIZE: usize = 8;
-/// Densité minimale du sous-graphe interne (paires liées / paires possibles)
-/// pour qu'un groupe connecté soit reconnu comme un clan, et pas une simple
-/// chaîne de connaissances qui se prolonge de proche en proche. Calibré sur
-/// une scène de 24 agents (voir `sim::tests::un_clan_emerge_sans_regle_explicite`) :
-/// les groupes réels observés plafonnent autour de 0,2 à 0,45 — personne ne
-/// se lie fortement à tout le monde, la densité d'un vrai village reste
-/// modeste, pas proche de 1.
-const COHESION_THRESHOLD: f32 = 0.28;
+/// Modularité minimale pour qu'une partition compte comme une **ligne de
+/// faille** et scinde le groupe (voir [`modularity`] et l'en-tête de module).
+///
+/// 0,3 est la valeur conventionnelle en détection de communautés : en dessous,
+/// la partition n'explique guère mieux la structure du graphe qu'un tirage
+/// aléatoire de mêmes degrés — autrement dit, le groupe est **uni**, et le
+/// couper serait inventer une frontière qui n'existe pas. C'est ce qui arrivait
+/// avec le critère de densité qu'elle remplace : faute de pouvoir satisfaire un
+/// seuil devenu inatteignable, un peuple entier était recoupé chaque nuit à un
+/// endroit différent.
+///
+/// Contrairement à une densité, ce seuil est **adimensionnel** : il ne se
+/// dégrade pas quand la population grandit, et n'aura donc pas à être
+/// recalibré à chaque changement d'échelle.
+const MODULARITY_THRESHOLD: f64 = 0.3;
+
+/// Modularité exigée pour scinder un groupe qui **prolonge un clan existant**.
+///
+/// L'hystérésis, et la raison d'être de ce seuil : un critère unique comparé
+/// chaque nuit à une valeur qui fluctue fait **basculer** la décision d'un jour
+/// à l'autre. Mesuré (`example diagnose`, 5 ans) : 118 fissions produisaient
+/// 161 clans éteints, alors que la composition des groupes était stable à
+/// **96 %** d'un jour sur l'autre — le peuple ne changeait pas, seule la
+/// découpe changeait d'avis. Un peuple déjà reconnu demande donc une faille
+/// franche pour se briser, là où un groupe qui vient de se former se juge au
+/// seuil ordinaire.
+///
+/// C'est le même principe que le cadrage à hystérésis de la caméra du client :
+/// on ne réagit pas à un franchissement, on réagit à un franchissement **net**.
+const MODULARITY_ESTABLISHED: f64 = 0.42;
+
+/// Part d'un clan existant qu'un groupe doit contenir pour qu'on le considère
+/// comme **le prolongement** de ce clan (et non un rassemblement neuf) — la
+/// condition d'entrée de l'hystérésis ci-dessus.
+const CONTINUITY_NUM: usize = 1;
+const CONTINUITY_DEN: usize = 2;
 /// Rayon de résidence, depuis le centroïde du groupe (~4,5 km — un
 /// territoire de bande semi-nomade, pas une seule clairière : mesuré sur la
 /// scène de calibrage, voir `sim::tests::un_clan_emerge_sans_regle_explicite`
@@ -307,11 +359,24 @@ pub const RESIDENCE_RADIUS_TILES: f64 = km_to_tiles(4.5);
 /// chasseur ou un éclaireur temporairement loin reste du clan. En dessous de
 /// cette proportion, le groupe n'est plus « co-résident », il est dispersé.
 const RESIDENCE_FRACTION: f32 = 0.7;
-/// Un nouveau groupe hérite de l'identité d'un ancien clan s'ils partagent la
-/// **majorité** de leurs membres, dans les deux sens (le clan n'a pas trop
-/// changé, et il ne s'est pas noyé dans quelque chose de bien plus gros).
-const IDENTITY_OVERLAP_NUM: usize = 1;
-const IDENTITY_OVERLAP_DEN: usize = 2;
+/// Un nouveau groupe hérite de l'identité d'un ancien clan si son **noyau**
+/// survit : au moins cette fraction des anciens membres s'y retrouve. Un peuple
+/// qui perd la moitié des siens à la famine reste ce peuple.
+const IDENTITY_CORE_NUM: usize = 1;
+const IDENTITY_CORE_DEN: usize = 2;
+/// …et si les anciens membres pèsent encore au moins cette fraction du nouveau
+/// groupe, pour qu'une poignée de survivants ne s'empare pas du nom d'un
+/// ensemble bien plus vaste qui les a simplement absorbés.
+///
+/// **Asymétrique, et c'est le point** : la version précédente exigeait la
+/// majorité **des deux côtés**, si bien qu'un clan qui grandissait — en
+/// accueillant des isolés, ou simplement par ses propres naissances — cessait
+/// d'être lui-même dès qu'il avait doublé. Un quart laisse un peuple
+/// quadrupler sans changer de nom, ce qu'il faut pour que la Chronique puisse
+/// écrire « *An 389 — les Ashkar et les Orum se disputent le gué* » quarante-sept
+/// ans après leur première mention (BRIEF §6.4).
+const IDENTITY_SHARE_NUM: usize = 1;
+const IDENTITY_SHARE_DEN: usize = 4;
 
 // — Fission —
 
@@ -648,31 +713,95 @@ fn connected_components(members: &BTreeSet<u64>, edges: &[(u64, u64)]) -> Vec<BT
 /// territoire (centroïde) du groupe s'il passe tous les tests.
 fn validate_cluster(
     members: &BTreeSet<u64>,
-    edges: &[(u64, u64)],
     humans: &[crate::demography::HumanView],
-) -> Option<(f64, f64)> {
+) -> Result<(f64, f64), ClanReject> {
     if members.len() < MIN_CLAN_SIZE {
-        return None;
+        return Err(ClanReject::TooSmall { members: members.len() });
     }
-    let internal_edges = edges.iter().filter(|(a, b)| members.contains(a) && members.contains(b)).count();
-    let possible = members.len() * (members.len() - 1) / 2;
-    let density = internal_edges as f32 / possible as f32;
-    if density < COHESION_THRESHOLD {
-        return None;
-    }
+    // Aucun test de densité absolue ici : voir « Une ligne de faille, pas un
+    // seuil de taille » en tête de module. La cohésion se juge à l'**absence de
+    // ligne de faille** (`best_split`, appelée avant nous par `resolve_cluster`),
+    // ce qui est indépendant de l'effectif — une densité seuil, elle, devenait
+    // inatteignable au-delà de 54 membres et hachait les clans en trois jours.
     let positions: Vec<(f64, f64)> =
         members.iter().filter_map(|&id| find_human(humans, AgentId(id)).map(|h| h.pos)).collect();
     if positions.len() != members.len() {
-        return None; // sécurité : ne devrait pas arriver (agent introuvable)
+        return Err(ClanReject::Missing); // sécurité : ne devrait pas arriver (agent introuvable)
     }
     let (sx, sy) = positions.iter().fold((0.0, 0.0), |(sx, sy), &(x, y)| (sx + x, sy + y));
     let (cx, cy) = (sx / positions.len() as f64, sy / positions.len() as f64);
     let resident_count =
         positions.iter().filter(|&&(x, y)| (x - cx).hypot(y - cy) <= RESIDENCE_RADIUS_TILES).count();
-    if (resident_count as f32) < RESIDENCE_FRACTION * positions.len() as f32 {
-        return None;
+    let resident_fraction = resident_count as f32 / positions.len() as f32;
+    if resident_fraction < RESIDENCE_FRACTION {
+        return Err(ClanReject::Scattered { members: members.len(), resident_fraction });
     }
-    Some((cx, cy))
+    Ok((cx, cy))
+}
+
+/// Pourquoi un groupe connexe n'est **pas** un clan. Purement observationnel :
+/// la logique de décision est inchangée (les trois portes sont les mêmes, dans
+/// le même ordre) — seule la raison du refus est désormais dite au lieu d'être
+/// perdue dans un `None`. Sert à `ClanDiagnostics`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ClanReject {
+    /// Moins de `MIN_CLAN_SIZE` membres.
+    TooSmall { members: usize },
+    /// Densité du graphe interne sous `COHESION_THRESHOLD`.
+    LowCohesion { members: usize, density: f32 },
+    /// Moins de `RESIDENCE_FRACTION` des membres à portée du centroïde.
+    Scattered { members: usize, resident_fraction: f32 },
+    /// Un membre introuvable dans l'instantané (ne devrait pas arriver).
+    Missing,
+}
+
+/// Compteurs de diagnostic sur la détection de clan — **rien ne les lit dans la
+/// simulation**, ils n'existent que pour répondre à une question de calibrage :
+/// quand un groupe échoue à être un clan, quelle porte lui a-t-elle été fermée ?
+///
+/// Les moyennes sont accumulées en sommes pour rester incrémentales (on ne garde
+/// pas les échantillons). Cumulatifs sur toute la durée du monde.
+#[derive(Debug, Clone, Default)]
+pub struct ClanDiagnostics {
+    /// Groupes validés comme clans.
+    pub validated: u64,
+    /// Rejets par taille, avec la somme des effectifs concernés.
+    pub too_small: u64,
+    pub too_small_members: u64,
+    /// Rejets par cohésion, avec les sommes d'effectif et de densité mesurée.
+    pub low_cohesion: u64,
+    pub low_cohesion_members: u64,
+    pub low_cohesion_density: f64,
+    /// Rejets par dispersion, avec les sommes d'effectif et de fraction résidente.
+    pub scattered: u64,
+    pub scattered_members: u64,
+    pub scattered_fraction: f64,
+    /// Groupes trop petits ou trop lâches pour même tenter une fission.
+    pub unsplittable: u64,
+    /// Groupes coupés le long d.une ligne de faille (fission).
+    pub split: u64,
+}
+
+impl ClanDiagnostics {
+    fn note(&mut self, reject: &ClanReject) {
+        match *reject {
+            ClanReject::TooSmall { members } => {
+                self.too_small += 1;
+                self.too_small_members += members as u64;
+            }
+            ClanReject::LowCohesion { members, density } => {
+                self.low_cohesion += 1;
+                self.low_cohesion_members += members as u64;
+                self.low_cohesion_density += f64::from(density);
+            }
+            ClanReject::Scattered { members, resident_fraction } => {
+                self.scattered += 1;
+                self.scattered_members += members as u64;
+                self.scattered_fraction += f64::from(resident_fraction);
+            }
+            ClanReject::Missing => {}
+        }
+    }
 }
 
 /// Résout un groupe connexe candidat en zéro, un ou plusieurs clans (voir le
@@ -685,25 +814,136 @@ fn resolve_cluster(
     bonds: &BTreeMap<(u64, u64), f32>,
     edges: &[(u64, u64)],
     humans: &[crate::demography::HumanView],
-    search_threshold: f32,
+    established: &[BTreeSet<u64>],
+    diag: &mut ClanDiagnostics,
 ) -> Vec<(BTreeSet<AgentId>, (f64, f64))> {
-    if let Some(home) = validate_cluster(&members, edges, humans) {
-        return vec![(members.into_iter().map(AgentId).collect(), home)];
+    // 1. Ce groupe porte-t-il une ligne de faille ? La question vient **avant**
+    //    la validation : un groupe scindé n'a pas à être jugé comme un tout.
+    //    Un groupe qui prolonge un peuple déjà reconnu exige une faille plus
+    //    franche pour se briser — voir `MODULARITY_ESTABLISHED`.
+    let required = if continues_a_clan(&members, established) {
+        MODULARITY_ESTABLISHED
+    } else {
+        MODULARITY_THRESHOLD
+    };
+    if let Some(parts) = best_split(&members, bonds, edges, required) {
+        diag.split += 1;
+        // Chaque morceau est réévalué par exactement les mêmes règles — la
+        // fonction qui valide un clan ordinaire est celle qui valide les filles.
+        return parts
+            .into_iter()
+            .flat_map(|g| resolve_cluster(g, bonds, edges, humans, established, diag))
+            .collect();
     }
-    if members.len() < 2 * MIN_CLAN_SIZE || search_threshold > FISSION_MAX_THRESHOLD {
-        return Vec::new(); // trop petit ou trop lâche pour se scinder : s'efface, comme avant cet incrément.
+    // 2. Pas de ligne de faille : c'est un tout. Reste à savoir s'il est
+    //    assez nombreux et assez rassemblé pour être un peuple.
+    match validate_cluster(&members, humans) {
+        Ok(home) => {
+            diag.validated += 1;
+            vec![(members.into_iter().map(AgentId).collect(), home)]
+        }
+        Err(reject) => {
+            diag.note(&reject);
+            Vec::new()
+        }
     }
-    let stronger: Vec<(u64, u64)> = bonds
+}
+
+/// Cherche la **meilleure ligne de faille** d'un groupe, s'il en a une.
+///
+/// On explore les partitions obtenues en relevant progressivement le seuil
+/// d'intimité (`FISSION_THRESHOLD_STEP`) : à chaque cran, ne restent que les
+/// liens les plus forts, et le groupe se sépare peut-être en morceaux. C'est la
+/// coupure d'un dendrogramme à seuil (single-linkage) — une technique connue,
+/// pas une heuristique inventée pour l'occasion.
+///
+/// **Ce qui change tout, c'est le juge** : chaque partition candidate est notée
+/// par sa [`modularity`], calculée sur le graphe de référence (les liens à
+/// `BOND_THRESHOLD`, jamais ceux du seuil de recherche). On retient la
+/// meilleure, et on ne coupe que si elle dépasse `MODULARITY_THRESHOLD`. Un
+/// groupe uni n'a pas de partition modulaire : on ne le coupe pas, **quelle que
+/// soit sa taille**.
+///
+/// `None` s'il n'y a aucune ligne de faille — le cas le plus fréquent.
+fn best_split(
+    members: &BTreeSet<u64>,
+    bonds: &BTreeMap<(u64, u64), f32>,
+    edges: &[(u64, u64)],
+    required: f64,
+) -> Option<Vec<BTreeSet<u64>>> {
+    // Un groupe qui ne pourrait pas donner deux clans viables n'a pas à être
+    // coupé : ce n'est pas une lecture de taille pour *décider* d'un
+    // comportement, c'est l'arrêt d'une recherche qui n'a plus d'objet.
+    if members.len() < 2 * MIN_CLAN_SIZE {
+        return None;
+    }
+    let mut best: Option<(f64, Vec<BTreeSet<u64>>)> = None;
+    let mut threshold = BOND_THRESHOLD + FISSION_THRESHOLD_STEP;
+    while threshold <= FISSION_MAX_THRESHOLD {
+        let stronger: Vec<(u64, u64)> = bonds
+            .iter()
+            .filter(|&(&(a, b), &w)| {
+                w >= threshold && members.contains(&a) && members.contains(&b)
+            })
+            .map(|(&k, _)| k)
+            .collect();
+        let parts = connected_components(members, &stronger);
+        if parts.len() > 1 {
+            let q = modularity(&parts, edges, members);
+            if best.as_ref().is_none_or(|(bq, _)| q > *bq) {
+                best = Some((q, parts));
+            }
+        }
+        threshold += FISSION_THRESHOLD_STEP;
+    }
+    best.filter(|(q, _)| *q >= required).map(|(_, parts)| parts)
+}
+
+/// Ce groupe est-il **le prolongement** d'un clan déjà reconnu ? Vrai dès qu'il
+/// contient au moins la moitié des membres d'un clan existant : c'est le même
+/// peuple qui continue, avec des départs et des arrivées.
+fn continues_a_clan(members: &BTreeSet<u64>, established: &[BTreeSet<u64>]) -> bool {
+    established.iter().any(|clan| {
+        let kept = clan.iter().filter(|id| members.contains(id)).count();
+        !clan.is_empty() && kept * CONTINUITY_DEN >= clan.len() * CONTINUITY_NUM
+    })
+}
+
+/// La **modularité** d'une partition (Newman, 2004) : à quel point les arêtes
+/// tombent-elles à l'intérieur des communautés plutôt qu'entre elles, comparé à
+/// ce qu'un graphe aléatoire de mêmes degrés donnerait ?
+///
+/// `Q = Σ_c [ L_c/L − (d_c/2L)² ]`, où `L` est le nombre d'arêtes internes au
+/// groupe, `L_c` celles internes à la communauté `c`, et `d_c` la somme des
+/// degrés de ses membres. `Q ≈ 0` quand la partition n'explique rien de plus
+/// que le hasard ; `Q` monte vers 0,5 et au-delà quand les communautés sont
+/// nettes. C'est **adimensionnel** : contrairement à une densité, le seuil
+/// n'est pas à recalibrer quand la population grandit — la raison même pour
+/// laquelle on est passé à cette mesure.
+fn modularity(parts: &[BTreeSet<u64>], edges: &[(u64, u64)], members: &BTreeSet<u64>) -> f64 {
+    let internal: Vec<(u64, u64)> = edges
         .iter()
-        .filter(|&(&(a, b), &w)| w >= search_threshold && members.contains(&a) && members.contains(&b))
-        .map(|(&k, _)| k)
+        .filter(|(a, b)| members.contains(a) && members.contains(b))
+        .copied()
         .collect();
-    let sub_groups = connected_components(&members, &stronger);
-    if sub_groups.len() <= 1 {
-        // Encore un seul morceau à ce seuil : essayer un cran plus haut.
-        return resolve_cluster(members, bonds, edges, humans, search_threshold + FISSION_THRESHOLD_STEP);
+    let total = internal.len() as f64;
+    if total == 0.0 {
+        return 0.0; // aucun lien : aucune structure à trouver
     }
-    sub_groups.into_iter().flat_map(|g| resolve_cluster(g, bonds, edges, humans, search_threshold)).collect()
+    // Degré de chaque membre dans le sous-graphe.
+    let mut degree: BTreeMap<u64, f64> = BTreeMap::new();
+    for &(a, b) in &internal {
+        *degree.entry(a).or_default() += 1.0;
+        *degree.entry(b).or_default() += 1.0;
+    }
+    let mut q = 0.0;
+    for part in parts {
+        let inside =
+            internal.iter().filter(|(a, b)| part.contains(a) && part.contains(b)).count() as f64;
+        let d: f64 = part.iter().filter_map(|id| degree.get(id)).sum();
+        q += inside / total - (d / (2.0 * total)).powi(2);
+    }
+    q
 }
 
 /// La passe quotidienne : entretien du graphe, détection des clans, puis
@@ -872,6 +1112,14 @@ fn detect_clans(sim: &mut Sim) {
     // centroïde de chaque cluster retenu devient le **territoire** du clan
     // (`Clan::home`).
     let mut clusters: Vec<(BTreeSet<AgentId>, (f64, f64))> = Vec::new();
+    // Les compteurs de diagnostic sont sortis de `sim` le temps de la boucle :
+    // `resolve_cluster` les emprunte mutablement, or `sim.social.bonds` est
+    // emprunté immuablement au même moment.
+    let mut diag = std::mem::take(&mut sim.clan_diagnostics);
+    // Les peuples d'hier, pour l'hystérésis de fission : un groupe qui prolonge
+    // l'un d'eux ne se brise qu'à une faille franche (`MODULARITY_ESTABLISHED`).
+    let established: Vec<BTreeSet<u64>> =
+        sim.clans.iter().map(|c| c.members.iter().map(|a| a.0).collect()).collect();
     for members in groups.into_values() {
         let member_set: BTreeSet<u64> = members.into_iter().collect();
         clusters.extend(resolve_cluster(
@@ -879,9 +1127,11 @@ fn detect_clans(sim: &mut Sim) {
             &sim.social.bonds,
             &edges,
             &humans,
-            BOND_THRESHOLD + FISSION_THRESHOLD_STEP,
+            &established,
+            &mut diag,
         ));
     }
+    sim.clan_diagnostics = diag;
     // Ordre déterministe et stable pour l'attribution des nouveaux
     // identifiants : par plus petit membre.
     clusters.sort_by_key(|(c, _)| c.iter().next().copied());
@@ -903,8 +1153,8 @@ fn detect_clans(sim: &mut Sim) {
             .max_by_key(|&(_, overlap)| overlap);
         let kept = best.is_some_and(|(i, overlap)| {
             let (cluster, home) = &clusters[i];
-            let majority_old = overlap * IDENTITY_OVERLAP_DEN >= clan.members.len() * IDENTITY_OVERLAP_NUM;
-            let majority_new = overlap * IDENTITY_OVERLAP_DEN >= cluster.len() * IDENTITY_OVERLAP_NUM;
+            let majority_old = overlap * IDENTITY_CORE_DEN >= clan.members.len() * IDENTITY_CORE_NUM;
+            let majority_new = overlap * IDENTITY_SHARE_DEN >= cluster.len() * IDENTITY_SHARE_NUM;
             if majority_old && majority_new {
                 matched[i] = true;
                 next.push(Clan {
@@ -1145,11 +1395,11 @@ mod tests {
         let edges: Vec<(u64, u64)> = bonds.keys().copied().collect(); // tous ≥ BOND_THRESHOLD ici
 
         assert!(
-            validate_cluster(&members, &edges, &humans).is_none(),
+            validate_cluster(&members, &humans).is_err(),
             "les 20 pris en bloc ne doivent PAS passer le seuil de cohésion (c'est le point de départ du test)"
         );
 
-        let result = resolve_cluster(members, &bonds, &edges, &humans, BOND_THRESHOLD + FISSION_THRESHOLD_STEP);
+        let result = resolve_cluster(members, &bonds, &edges, &humans, &[], &mut ClanDiagnostics::default());
         assert_eq!(result.len(), 2, "doit se scinder en exactement deux clans filles");
         for (cluster, _) in &result {
             assert_eq!(cluster.len(), 10, "chaque fille doit retrouver sa moitié complète");
@@ -1171,7 +1421,7 @@ mod tests {
     /// se réduire à des paires/individus isolés, tous trop petits pour être
     /// un clan : le même sort qu'avant l'incrément fission.
     #[test]
-    fn un_groupe_sans_sous_structure_ne_fissionne_pas_et_s_efface() {
+    fn un_groupe_uni_reste_un_seul_peuple_quelle_que_soit_sa_densite() {
         let mut bonds: BTreeMap<(u64, u64), f32> = BTreeMap::new();
         let mut humans: Vec<HumanView> = Vec::new();
         for i in 0..20u64 {
@@ -1182,15 +1432,71 @@ mod tests {
         let members: BTreeSet<u64> = (0..20).collect();
         let edges: Vec<(u64, u64)> = bonds.keys().copied().collect();
 
+        // Un anneau n'a **aucune** ligne de faille : tous les liens s'y valent,
+        // aucune partition n'explique la structure mieux que le hasard.
         assert!(
-            validate_cluster(&members, &edges, &humans).is_none(),
-            "un anneau de 20 (densité ~0,1) ne doit pas passer le seuil de cohésion"
+            best_split(&members, &bonds, &edges, MODULARITY_THRESHOLD).is_none(),
+            "un anneau homogène n'a pas de ligne de faille : il ne doit pas être coupé"
         );
-        let result = resolve_cluster(members, &bonds, &edges, &humans, BOND_THRESHOLD + FISSION_THRESHOLD_STEP);
+        // Et sa densité (~0,1) ne lui est plus opposée : c'est un peuple uni,
+        // pas un groupe trop lâche. C'est le changement de conception mesuré à
+        // l'`example diagnose` — voir « Une ligne de faille, pas un seuil de
+        // taille » en tête de module.
+        let result =
+            resolve_cluster(members, &bonds, &edges, &humans, &[], &mut ClanDiagnostics::default());
+        assert_eq!(result.len(), 1, "l'anneau doit former un seul clan");
+        assert_eq!(result[0].0.len(), 20, "et n'y perdre personne");
+    }
+
+    /// La modularité fait ce qu'on attend d'elle : elle note haut une partition
+    /// qui suit une vraie frontière, et bas une coupure arbitraire.
+    #[test]
+    fn la_modularite_distingue_une_vraie_frontiere_d_une_coupure_arbitraire() {
+        // Deux cliques de 6, reliées par une seule arête.
+        let mut edges: Vec<(u64, u64)> = Vec::new();
+        for group in 0..2u64 {
+            let base = group * 6;
+            for a in base..base + 6 {
+                for b in (a + 1)..base + 6 {
+                    edges.push((a, b));
+                }
+            }
+        }
+        edges.push((5, 6)); // le pont
+        let members: BTreeSet<u64> = (0..12).collect();
+        let vraie: Vec<BTreeSet<u64>> = vec![(0..6).collect(), (6..12).collect()];
+        // Une coupure qui traverse les deux cliques au lieu de les séparer.
+        let arbitraire: Vec<BTreeSet<u64>> =
+            vec![[0, 1, 2, 6, 7, 8].into(), [3, 4, 5, 9, 10, 11].into()];
+
+        let q_vraie = modularity(&vraie, &edges, &members);
+        let q_arbitraire = modularity(&arbitraire, &edges, &members);
         assert!(
-            result.is_empty(),
-            "sans sous-groupe réellement plus dense, le groupe doit s'effacer, pas fissionner artificiellement"
+            q_vraie >= MODULARITY_THRESHOLD,
+            "deux cliques reliées par un pont sont une vraie frontière (Q = {q_vraie:.3})"
         );
+        assert!(
+            q_arbitraire < q_vraie,
+            "une coupure qui traverse les cliques doit noter moins ({q_arbitraire:.3} < {q_vraie:.3})"
+        );
+    }
+
+    /// Le cœur du volet « identité » : un peuple qui **grandit** reste lui-même.
+    /// L'ancienne règle (majorité des deux côtés) lui retirait son nom dès qu'il
+    /// avait doublé — c'est ce qui empêchait tout clan d'avoir une histoire.
+    #[test]
+    fn un_peuple_qui_grandit_garde_son_nom() {
+        // 10 anciens membres, tous retrouvés dans un groupe qui en compte 30.
+        let (overlap, old_size, new_size) = (10usize, 10usize, 30usize);
+        let core = overlap * IDENTITY_CORE_DEN >= old_size * IDENTITY_CORE_NUM;
+        let share = overlap * IDENTITY_SHARE_DEN >= new_size * IDENTITY_SHARE_NUM;
+        assert!(core && share, "un clan qui triple garde son identité");
+
+        // Mais une poignée de survivants ne s'empare pas du nom d'une foule.
+        let (overlap, old_size, new_size) = (5usize, 10usize, 100usize);
+        let core = overlap * IDENTITY_CORE_DEN >= old_size * IDENTITY_CORE_NUM;
+        let share = overlap * IDENTITY_SHARE_DEN >= new_size * IDENTITY_SHARE_NUM;
+        assert!(core && !share, "5 rescapés noyés dans 100 ne donnent pas leur nom au tout");
     }
 
     /// Deux clans synthétiques de 10 membres chacun, positionnés à distance

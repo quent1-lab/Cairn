@@ -200,6 +200,9 @@ pub struct Sim {
     /// registre clairsemé côté `Sim`, jamais un champ de `Tile` (voir
     /// `crate::structures`). Chaque clan en a au plus une par type.
     pub structures: Vec<Structure>,
+    /// Compteurs de diagnostic sur la detection de clan (voir `ClanDiagnostics`)
+    /// -- purement observationnels : aucun systeme ne les lit.
+    pub clan_diagnostics: social::ClanDiagnostics,
     /// L'arbre technologique, chargé une fois (BRIEF §5.2, Phase 5) : les techs
     /// et leurs prérequis, en données (`assets/techs.ron`). Immuable pendant la
     /// simulation ; lu par la passe d'insight.
@@ -275,6 +278,7 @@ impl Sim {
             clan_relations: ClanRelations::default(),
             clan_pressure: BTreeMap::new(),
             structures: Vec::new(),
+            clan_diagnostics: social::ClanDiagnostics::default(),
             tech_tree: TechTree::embedded(),
             tech_events: Vec::new(),
             known_techs: BTreeSet::new(),
