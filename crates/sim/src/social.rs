@@ -346,46 +346,74 @@ const MODULARITY_ESTABLISHED: f64 = 0.42;
 const CONTINUITY_NUM: usize = 1;
 const CONTINUITY_DEN: usize = 2;
 
-/// De combien le prestige d'autrui pèse dans l'attention qu'on lui accorde.
+/// De combien un écart de prestige pèse dans l'attention qu'on accorde.
 ///
-/// **La force centrifuge**, et la deuxième tentative : la première se contentait
-/// d'accélérer l'attachement *vers* un notable, sans que cela coûte rien aux
-/// autres relations. Résultat mesuré : le graphe s'était densifié (92-96 % des
-/// liens au-dessus du seuil, contre 79-87 %) au lieu de se structurer — une
-/// étoile là où l'on voulait deux constellations, et le clan géant intact.
+/// **La force centrifuge**, en trois tentatives dont deux ratées — elles valent
+/// d'être racontées, chacune ayant échoué pour une raison différente :
 ///
-/// Ce qui manquait est ici : **l'attention est finie**. Le plafond de Dunbar
-/// existait déjà (`MAX_BONDS_PER_AGENT`) mais n'agissait qu'après coup, en
-/// élaguant. Désormais chacun *répartit* son attention entre ceux qu'il croise :
-/// s'attacher à un notable en retire aux autres. C'est ce coût qui fait des
-/// factions — les voisins d'un personnage en vue gravitent vers lui, ceux d'un
-/// autre vers l'autre, et le lien entre les deux camps se dilue. La modularité
-/// y lit alors deux communautés, et le clan se scinde **le long de la ligne de
-/// rivalité** : la fission par rivalité de leadership, la plus documentée en
+/// 1. *Accélérer l'attachement vers un notable.* Le graphe s'est **densifié**
+///    (92-96 % des liens au-dessus du seuil, contre 79-87 %) au lieu de se
+///    structurer : s'attacher à quelqu'un ne coûtait rien aux autres relations.
+///    Une étoile là où l'on voulait deux constellations.
+/// 2. *Rendre l'attention finie* — chacun répartit une attention constante
+///    entre ceux qu'il croise, si bien que s'attacher à un notable en retire
+///    aux autres. Le défaut de densification a bien disparu (73-79 %), mais le
+///    clan a **grossi** (110 → 137) : le prestige passait par une saturation
+///    absolue `p/(p+K)`, qui écrasait les écarts là même où ils devaient
+///    discriminer (40 et 60 en ressortaient à 0,83 et 0,88). Comme le prestige
+///    ne décroît jamais, tous les anciens finissaient au plafond : une
+///    gérontocratie indifférenciée, sans rivalité.
+/// 3. *Comparer localement* (ici) : ce qui compte n'est pas le prestige en
+///    valeur absolue mais l'**écart au prestige ambiant de l'assemblée** — voir
+///    [`attention_weight`]. La comparaison étant refaite à chaque rencontre,
+///    donc à portée de voix, un chef unique n'écrase plus tout le clan : là où
+///    il n'est pas, quelqu'un d'autre domine.
+///
+/// Ce sont ces dominations **locales** qui font des factions spatialement
+/// distinctes, donc des lignes de faille que la modularité peut lire — et
+/// finalement la fission par rivalité de leadership, la plus documentée en
 /// ethnographie des bandes, sans qu'aucune taille ni aucun rôle ne soit lu.
-const PRESTIGE_PULL: f32 = 2.0;
+const PRESTIGE_PULL: f32 = 1.0;
 
-/// Prestige auquel l'attirance atteint la moitié de son maximum. Saturant :
-/// `p / (p + K)`, jamais de seuil — un notable un peu plus en vue attire un peu
-/// plus, sans effet de palier.
+/// Échelle de prestige qui borne l'effet d'un écart quand l'assemblée est
+/// modeste : sans elle, un seul point de prestige parmi des gens à zéro ferait
+/// un demi-dieu (voir [`attention_weight`]).
 const PRESTIGE_HALF: f32 = 8.0;
 
-/// L'attirance qu'exerce un prestige, dans `[0, 1)`.
-fn prestige_pull(prestige: f32) -> f32 {
-    let p = prestige.max(0.0);
-    p / (p + PRESTIGE_HALF)
-}
+/// Poids plancher : même écrasé par la présence de plus illustre que soi, on ne
+/// devient jamais tout à fait transparent.
+const MIN_ATTENTION_WEIGHT: f32 = 0.25;
 
 /// Ce qu'un interlocuteur pèse dans l'attention qu'on lui accorde : la parenté
 /// d'abord (elle prime, comme l'encodent déjà `KIN_GAIN` vs `ENCOUNTER_GAIN`),
-/// puis ce qu'il représente aux yeux de tous.
+/// puis **ce qu'il représente par rapport aux autres personnes présentes**.
 ///
-/// Ce poids n'est **jamais** un gain : il ne vaut que **relativement** à celui
-/// des autres personnes présentes (voir `encounter`). Quelqu'un d'illustre entouré
-/// de gens tout aussi illustres n'attire pas plus que sa part.
-fn attention_weight(kin: bool, prestige_of_other: f32) -> f32 {
+/// C'est ce dernier point qui a demandé une seconde version. La première passait
+/// le prestige dans une saturation absolue `p/(p+K)` — et cette saturation
+/// écrasait les écarts exactement là où ils auraient dû discriminer : un ancien
+/// à 40 et un autre à 60 en ressortaient à 0,83 et 0,88, indiscernables. Comme
+/// le prestige ne décroît jamais et s'accumule à vie, tous les anciens
+/// finissaient au plafond : une gérontocratie indifférenciée, aucune rivalité,
+/// et un clan **plus** soudé qu'avant (taille médiane 110 → 137).
+///
+/// On compare donc au **prestige moyen de l'assemblée** (`local_mean`), pas à
+/// une échelle absolue. Deux conséquences, toutes deux voulues :
+///
+/// - un notable entouré de ses pairs n'attire pas plus que sa part — et une
+///   assemblée où personne ne se distingue rend exactement le comportement
+///   d'avant ce mécanisme, écart nul, poids 1,0 (testé) ;
+/// - la comparaison étant **locale à chaque rencontre** (portée de voix), un
+///   chef unique n'écrase pas tout le clan : là où il n'est pas, quelqu'un
+///   d'autre domine. Ce sont ces dominations locales qui font des factions
+///   spatialement distinctes — donc des lignes de faille que la modularité peut
+///   lire, ce qui est tout l'objet de la manœuvre.
+fn attention_weight(kin: bool, prestige_of_other: f32, local_mean: f32) -> f32 {
     let base = if kin { KIN_GAIN / ENCOUNTER_GAIN } else { 1.0 };
-    base * (1.0 + PRESTIGE_PULL * prestige_pull(prestige_of_other))
+    // Écart au prestige ambiant, ramené à cette échelle-là. `PRESTIGE_HALF` au
+    // dénominateur borne l'effet quand l'assemblée est modeste (sans lui, un
+    // seul point de prestige parmi des gens à zéro ferait un demi-dieu).
+    let rel = (prestige_of_other - local_mean) / (local_mean + PRESTIGE_HALF);
+    (base * (1.0 + PRESTIGE_PULL * rel)).max(MIN_ATTENTION_WEIGHT)
 }
 
 /// Part des membres d'un clan disparu qu'il faut retrouver **sous une même
@@ -684,11 +712,11 @@ pub(crate) fn encounter(sim: &mut Sim) {
         .collect();
     views.sort_unstable_by_key(|v| v.id.0);
 
-    // — Passe 1 : qui croise qui, et **ce que chacun accorde** à l'autre. —
-    // On ne renforce rien encore : il faut d'abord savoir entre combien de
-    // personnes chaque agent a son attention à partager (voir `attention_weight`).
-    let mut pairs: Vec<(usize, usize, f32, f32)> = Vec::new();
-    let mut total: Vec<f32> = vec![0.0; views.len()];
+    // — Passe 1 : qui croise qui. On ne pondère rien encore : le poids d'un
+    // interlocuteur se juge **relativement à l'assemblée**, qu'il faut donc
+    // avoir recensée en entier (voir `attention_weight`). —
+    let mut met: Vec<(usize, usize)> = Vec::new();
+    let mut prestige_sum: Vec<f32> = vec![0.0; views.len()];
     let mut degree: Vec<u32> = vec![0; views.len()];
     for i in 0..views.len() {
         for j in (i + 1)..views.len() {
@@ -697,20 +725,34 @@ pub(crate) fn encounter(sim: &mut Sim) {
             if d2 > TALK_RADIUS_TILES * TALK_RADIUS_TILES {
                 continue;
             }
-            let kin = are_kin(a.id, &a.kin, b.id, &b.kin);
-            // Ce que `a` accorde à `b` dépend de ce que *b* pèse, et
-            // réciproquement — d'où deux poids par paire, jamais un seul.
-            let (w_ab, w_ba) =
-                (attention_weight(kin, b.prestige), attention_weight(kin, a.prestige));
-            pairs.push((i, j, w_ab, w_ba));
-            total[i] += w_ab;
-            total[j] += w_ba;
+            met.push((i, j));
+            prestige_sum[i] += b.prestige;
+            prestige_sum[j] += a.prestige;
             degree[i] += 1;
             degree[j] += 1;
         }
     }
 
-    // — Passe 2 : répartir. —
+    // — Passe 2 : ce que chacun accorde à l'autre, comparé au prestige ambiant
+    // de sa propre assemblée. —
+    let local_mean = |i: usize| {
+        if degree[i] == 0 { 0.0 } else { prestige_sum[i] / degree[i] as f32 }
+    };
+    let mut pairs: Vec<(usize, usize, f32, f32)> = Vec::with_capacity(met.len());
+    let mut total: Vec<f32> = vec![0.0; views.len()];
+    for &(i, j) in &met {
+        let (a, b) = (&views[i], &views[j]);
+        let kin = are_kin(a.id, &a.kin, b.id, &b.kin);
+        // Ce que `a` accorde à `b` dépend de ce que *b* pèse aux yeux de `a`, et
+        // réciproquement — d'où deux poids par paire, et deux moyennes locales.
+        let w_ab = attention_weight(kin, b.prestige, local_mean(i));
+        let w_ba = attention_weight(kin, a.prestige, local_mean(j));
+        pairs.push((i, j, w_ab, w_ba));
+        total[i] += w_ab;
+        total[j] += w_ba;
+    }
+
+    // — Passe 3 : répartir. —
     let mut spoke: BTreeSet<u64> = BTreeSet::new();
     for &(i, j, w_ab, w_ba) in &pairs {
         let (a, b) = (&views[i], &views[j]);
