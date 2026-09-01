@@ -552,6 +552,10 @@ pub struct ClanView {
     pub home: (f64, f64),
     pub stock: f32,
     pub desired: Option<StructureKind>,
+    /// Effectif — ce qui donne sa portée au territoire (`claim_from_views`) :
+    /// un peuple nombreux revendique plus loin, sans qu'aucun seuil de taille
+    /// ne soit lu (même arithmétique que `territory_strength`).
+    pub members: usize,
 }
 
 /// Le clan d'appartenance d'un agent, `None` s'il n'en a pas. Composant à
@@ -1227,6 +1231,36 @@ pub fn claim_at(point: (f64, f64), clans: &[Clan]) -> Option<ClanId> {
         .map(|(id, _)| id)
 }
 
+/// Le même champ de territoire que [`claim_at`], mais lu depuis les
+/// **instantanés** que la délibération a sous la main (`brain::decide` ne voit
+/// pas `sim.clans`). Même formule, même convention de départage.
+///
+/// C'est ce qui donne enfin un **consommateur comportemental** au territoire
+/// diffusé. Depuis la Phase 4 il était calculé, affiché par le client, consulté
+/// par les structures — mais rien ne le lisait pour se déplacer, et le projet le
+/// notait comme tel. Conséquence mesurée sur 15 ans : rien n'éloignait jamais
+/// deux peuples. Ils vivaient à 2,1 km les uns des autres (p90 : 3,5 km) quand
+/// leur rayon de rappel en fait 4,5 — donc des territoires presque confondus,
+/// des membres qui se croisent en permanence, et des liens qui se reformaient
+/// aussitôt coupés. D'où 554 fusions pour 423 fissions : un oscillateur, pas une
+/// société.
+pub fn claim_from_views(
+    point: (f64, f64),
+    clans: &BTreeMap<ClanId, crate::social::ClanView>,
+) -> Option<ClanId> {
+    clans
+        .iter()
+        .map(|(&id, v)| {
+            let dist = (point.0 - v.home.0).hypot(point.1 - v.home.1);
+            let strength =
+                v.members as f32 * (1.0 - (dist / RESIDENCE_RADIUS_TILES) as f32).max(0.0);
+            (id, strength)
+        })
+        .filter(|&(_, strength)| strength > 0.0)
+        .max_by(|(id_a, s_a), (id_b, s_b)| s_a.total_cmp(s_b).then(id_b.cmp(id_a)))
+        .map(|(id, _)| id)
+}
+
 /// Détecte les groupes du graphe d'affinités qui franchissent à la fois le
 /// seuil de cohésion et de co-résidence, puis réconcilie avec les clans
 /// existants (voir le commentaire de module sur la persistance d'identité).
@@ -1879,6 +1913,38 @@ mod tests {
     fn un_point_au_foyer_est_revendique_par_son_clan() {
         let clan = synthetic_clan(1, (100.0, 200.0), 10);
         assert_eq!(claim_at((100.0, 200.0), std::slice::from_ref(&clan)), Some(clan.id));
+    }
+
+    /// Le champ lu depuis les instantanés de la délibération doit rendre le
+    /// **même** verdict que celui lu depuis les clans : c'est la même frontière
+    /// des deux côtés, sans quoi un agent se croirait chez lui là où le reste du
+    /// modèle le dit chez autrui.
+    #[test]
+    fn le_territoire_vu_par_la_deliberation_est_le_meme_que_le_vrai() {
+        let clans =
+            vec![synthetic_clan(1, (0.0, 0.0), 10), synthetic_clan(2, (2000.0, 0.0), 10)];
+        let views: BTreeMap<ClanId, ClanView> = clans
+            .iter()
+            .map(|c| {
+                (
+                    c.id,
+                    ClanView {
+                        home: c.home,
+                        stock: c.stock,
+                        desired: None,
+                        members: c.members.len(),
+                    },
+                )
+            })
+            .collect();
+        // De part et d'autre de la frontière, et au-delà de toute portée.
+        for point in [(0.0, 0.0), (500.0, 0.0), (1500.0, 0.0), (2000.0, 0.0), (60_000.0, 0.0)] {
+            assert_eq!(
+                claim_from_views(point, &views),
+                claim_at(point, &clans),
+                "verdicts divergents en {point:?}"
+            );
+        }
     }
 
     /// Au-delà de `RESIDENCE_RADIUS_TILES`, la force de tout clan est nulle

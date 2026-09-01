@@ -26,7 +26,7 @@ use crate::demography::{Demographics, HumanView, Kinship, Traits, find_human};
 use crate::fauna::{HerdView, PackView};
 use crate::memory::{Memory, cell_of};
 use crate::salt;
-use crate::social::{ClanId, ClanRelations, ClanView, RESIDENCE_RADIUS_TILES};
+use crate::social::{self, ClanId, ClanRelations, ClanView, RESIDENCE_RADIUS_TILES};
 use crate::world::World;
 
 /// Un agent re-délibère toutes les 4 h (et dès qu'il n'a plus de tâche).
@@ -77,6 +77,11 @@ const MIN_STOCK_WORTH_TRIP: f32 = 0.1;
 /// En dessous de ce niveau, un surplus porté ne vaut pas le détour par le
 /// foyer (même idiome que `MIN_STOCK_WORTH_TRIP`).
 const MIN_CARRYING_WORTH_TRIP: f32 = 0.05;
+
+/// Force du rappel quand on se trouve sur le territoire d'un autre peuple.
+/// Assez pour peser dans le softmax sans écraser la soif ou la faim : on rentre
+/// chez soi, on ne fuit pas — et un besoin vital passe toujours avant.
+const INTRUSION_URGENCY: f32 = 0.55;
 /// Ce qu'une chasse au meilleur skill peut charger d'un coup (voir
 /// `HUNT_NUTRITION` dans `sim.rs`) : sert à normaliser l'urgence du retour,
 /// pas une limite dure — porter plus ne fait qu'accentuer le plafond.
@@ -402,8 +407,24 @@ fn build_candidates(
         && let Some(view) = clan_views.get(&clan_id)
     {
         let d = (pos.x - view.home.0).hypot(pos.y - view.home.1);
-        if d > RESIDENCE_RADIUS_TILES {
-            let score = ((d / RESIDENCE_RADIUS_TILES) as f32 - 1.0).clamp(0.3, 1.0);
+        // Deux raisons de rentrer, et la seconde manquait.
+        //
+        // 1. On s'est trop éloigné des siens (la distance au foyer).
+        // 2. **On est chez les autres.** Le territoire diffusé
+        //    (`social::claim_from_views`) dit à qui appartient le sol qu'on
+        //    foule ; s'il revient à un autre peuple, on n'a rien à y faire.
+        //
+        // Sans (2), rien n'éloignait jamais deux clans : mesuré sur 15 ans, ils
+        // vivaient à 2,1 km les uns des autres pour un rayon de rappel de 4,5 km
+        // — territoires confondus, membres mêlés en permanence, et un cycle sans
+        // fin de 423 fissions pour 554 refusions. Ce n'est pas une répulsion
+        // scriptée entre foyers : chacun préfère simplement être chez soi, et
+        // les frontières se dessinent d'elles-mêmes.
+        let intruding = social::claim_from_views((pos.x, pos.y), clan_views)
+            .is_some_and(|owner| owner != clan_id);
+        if d > RESIDENCE_RADIUS_TILES || intruding {
+            let far = ((d / RESIDENCE_RADIUS_TILES) as f32 - 1.0).clamp(0.0, 1.0);
+            let score = far.max(if intruding { INTRUSION_URGENCY } else { 0.0 }).max(0.3);
             let target = (view.home.0.floor() as i64, view.home.1.floor() as i64);
             candidates.push((TaskKind::ReturnToClan, target, score));
         }

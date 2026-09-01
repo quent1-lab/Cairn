@@ -547,7 +547,7 @@ impl Sim {
         let clan_views: BTreeMap<ClanId, ClanView> = self
             .clans
             .iter()
-            .map(|c| (c.id, ClanView { home: c.home, stock: c.stock, desired: c.desired }))
+            .map(|c| (c.id, ClanView { home: c.home, stock: c.stock, desired: c.desired, members: c.members.len() }))
             .collect();
         // On extrait les composants de l'agent (copies, plus un clone de la
         // mémoire) pour relâcher l'emprunt de `self.agents` avant d'appeler
@@ -635,7 +635,7 @@ impl Sim {
         let clan_views: BTreeMap<ClanId, ClanView> = self
             .clans
             .iter()
-            .map(|c| (c.id, ClanView { home: c.home, stock: c.stock, desired: c.desired }))
+            .map(|c| (c.id, ClanView { home: c.home, stock: c.stock, desired: c.desired, members: c.members.len() }))
             .collect();
 
         // L'id de l'agriculture, résolu une seule fois : sert à déballer un

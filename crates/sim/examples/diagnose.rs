@@ -58,6 +58,17 @@ fn main() {
     let mut jaccards: Vec<f64> = Vec::new();
     let mut jaccard_on_rename: Vec<f64> = Vec::new();
     let mut sizes: Vec<usize> = Vec::new();
+    // Le cycle fission/fusion : 554 fusions pour 423 fissions sur 15 ans. Un
+    // clan se coupe, les moitiés se recollent, se recoupent. L'hypothèse est
+    // qu'une fission **sociale** sans séparation **spatiale** n'en est pas une :
+    // deux moitiés au même endroit continuent de se croiser, donc de se relier.
+    // On mesure donc la distance qui séparait deux peuples la veille du jour où
+    // ils n'en font plus qu'un — et, en regard, la distance entre peuples qui
+    // coexistent sans fusionner.
+    let mut homes: BTreeMap<u64, (f64, f64)> = BTreeMap::new();
+    let mut merge_distances: Vec<f64> = Vec::new();
+    let mut coexist_distances: Vec<f64> = Vec::new();
+    let mut seen_events = 0usize;
 
     for _ in 0..years * TICKS_PER_YEAR {
         sim.step();
@@ -74,6 +85,24 @@ fn main() {
             let e = min_bearers.entry(tech).or_insert(usize::MAX);
             *e = (*e).min(count);
         }
+        // Les fusions du jour, jugées sur les foyers **de la veille** : au tick
+        // où l'on regarde, le clan absorbé n'existe déjà plus.
+        for e in &sim.clan_events[seen_events..] {
+            if let ClanEventKind::Merged { into } = e.kind
+                && let (Some(a), Some(b)) = (homes.get(&e.clan.0), homes.get(&into.0))
+            {
+                merge_distances.push(dist_km(*a, *b));
+            }
+        }
+        seen_events = sim.clan_events.len();
+        // Puis les foyers du jour, et l'écartement des peuples qui coexistent.
+        homes = sim.clans.iter().map(|c| (c.id.0, c.home)).collect();
+        for (i, a) in sim.clans.iter().enumerate() {
+            for b in &sim.clans[i + 1..] {
+                coexist_distances.push(dist_km(a.home, b.home));
+            }
+        }
+
         // Le plus gros clan du jour, comparé à celui d'hier.
         if let Some(big) = sim.clans.iter().max_by_key(|c| (c.members.len(), c.id.0)) {
             sizes.push(big.members.len());
@@ -98,7 +127,7 @@ fn main() {
         }
     }
 
-    report(&sim, seed, years, &min_bearers, &bond_samples);
+    report(&sim, seed, years, &min_bearers, &bond_samples, &merge_distances, &coexist_distances);
 
     println!("\n— 6. Le plus gros clan change-t-il de gens, ou seulement de nom ? —");
     let moyenne = |v: &[f64]| if v.is_empty() { 0.0 } else { v.iter().sum::<f64>() / v.len() as f64 };
@@ -139,6 +168,8 @@ fn report(
     years: u64,
     min_bearers: &BTreeMap<u16, usize>,
     bond_samples: &[(u64, usize, usize)],
+    merge_distances: &[f64],
+    coexist_distances: &[f64],
 ) {
     let d = &sim.clan_diagnostics;
     let rejects = d.too_small + d.low_cohesion + d.scattered;
@@ -244,6 +275,27 @@ fn report(
         );
     }
 
+    println!("\n— 7. Une fission sépare-t-elle vraiment ? —");
+    let mut merges = merge_distances.to_vec();
+    let mut coexist = coexist_distances.to_vec();
+    match quantiles(&mut merges) {
+        Some((p10, med, p90)) => println!(
+            "  distance la veille d'une fusion  : médiane {med:.2} km  (p10 {p10:.2}, p90 {p90:.2})  sur {} fusions",
+            merges.len()
+        ),
+        None => println!("  aucune fusion observée"),
+    }
+    match quantiles(&mut coexist) {
+        Some((p10, med, p90)) => println!(
+            "  distance entre peuples coexistants: médiane {med:.2} km  (p10 {p10:.2}, p90 {p90:.2})",
+            ),
+        None => println!("  jamais deux peuples à la fois"),
+    }
+    println!(
+        "  [rayon de résidence {:.1} km — en deçà, deux foyers se rappellent leurs membres au même endroit]",
+        RESIDENCE_RADIUS_TILES / 500.0
+    );
+
     println!("\n— 5. Redécouvertes (le même savoir trouvé plusieurs fois) —");
     let mut discoveries: BTreeMap<u16, Vec<(u64, Option<ClanId>, AgentId)>> = BTreeMap::new();
     for e in &sim.tech_events {
@@ -273,4 +325,20 @@ fn report(
 
 fn moy(sum: f64, n: u64) -> f64 {
     if n == 0 { 0.0 } else { sum / n as f64 }
+}
+
+/// Distance entre deux foyers, en kilomètres (1 tuile = 2 m).
+fn dist_km(a: (f64, f64), b: (f64, f64)) -> f64 {
+    (a.0 - b.0).hypot(a.1 - b.1) / 500.0
+}
+
+/// Médiane, p10 et p90 d'un échantillon — de quoi juger une distribution sans
+/// se laisser tromper par une moyenne.
+fn quantiles(v: &mut [f64]) -> Option<(f64, f64, f64)> {
+    if v.is_empty() {
+        return None;
+    }
+    v.sort_by(f64::total_cmp);
+    let at = |q: f64| v[((v.len() as f64 - 1.0) * q).round() as usize];
+    Some((at(0.1), at(0.5), at(0.9)))
 }
