@@ -43,11 +43,12 @@
 
 use cairn_core::km_to_tiles;
 
-use crate::agent::{DeathCause, Physiology, Position};
+use crate::agent::{AgentId, DeathCause, Physiology, Position};
 use crate::chronicle::EventKind;
 use crate::demography::Demographics;
 use crate::fire;
 use crate::sim::Sim;
+use crate::weather::WeatherKind;
 
 /// Rayon dans lequel la foudre tue net (~20 m). Court : c'est le prix d'un
 /// geste mal placé, pas une arme de zone.
@@ -62,7 +63,61 @@ pub enum Intervention {
     /// trouvait dessous. Les deux dans le même geste : « peut *donner le feu* à
     /// un clan… ou le brûler vif ».
     Lightning { pos: (i64, i64) },
+
+    /// La santé rendue à qui vit alentour (§6.2, « fertilité »).
+    ///
+    /// Aucune fécondité n'est touchée directement : c'est **la santé qui est le
+    /// levier**, puisque la conception exige déjà un corps en état
+    /// (`demography::daily`). Rendre la santé, c'est donc lever le frein
+    /// malthusien — et voilà l'ambivalence, qui n'a pas besoin d'être codée :
+    /// un peuple béni au mauvais moment fait des enfants que la terre ne peut
+    /// pas nourrir. Les nouveau-nés sont improductifs et coûteux ; si le
+    /// fourrage ne suit pas, la bénédiction se paie en famine l'hiver suivant.
+    Fertility { pos: (i64, i64) },
+
+    /// Le contraire, du même geste : la santé retirée. Ce qui descend à zéro
+    /// meurt (`DeathCause::Disease`).
+    ///
+    /// Son revers est plus cruel que la mort : une épidémie emporte des
+    /// **porteurs de savoir**. Si les derniers qui savaient cuire l'argile
+    /// tombent ensemble, la technique quitte le monde (`tech::forget`) — le
+    /// « l'humanité peut régresser » du §5.4, cette fois de la main du joueur.
+    Plague { pos: (i64, i64) },
+
+    /// Une averse (§6.2, « pluie »). Elle ne fait pas apparaître d'eau : elle
+    /// déclenche une **cellule météo** ordinaire (`crate::weather`), celle-là
+    /// même qui se forme d'elle-même dans un ciel sans dieu. Ce que le joueur
+    /// obtient, c'est une averse, pas un miracle d'un genre particulier.
+    ///
+    /// Ambivalence, qu'aucune ligne n'écrit : la pluie nourrit la végétation —
+    /// et **éteint la voie du feu**. Un peuple sans silex ne découvre la
+    /// maîtrise du feu qu'en voyant brûler ; bénir sa vallée d'une pluie
+    /// généreuse, c'est le condamner à ne jamais voir d'incendie.
+    Rain { pos: (i64, i64) },
+
+    /// La même chose, de l'autre signe. La sécheresse affame — et c'est le
+    /// moteur de l'invention (`pressure`), en même temps qu'elle rend la
+    /// brousse inflammable. La disette qui pousse à penser et le feu qui attend
+    /// d'être vu arrivent par le même geste.
+    Drought { pos: (i64, i64) },
+
+    /// **La révélation** : souffler un insight à un homme précis (§6.2, « très
+    /// coûteux »). Voir `tech::reveal` — elle n'offre pas un savoir, elle fait
+    /// comprendre ce qu'on avait déjà sous les yeux, et tous les prérequis
+    /// restent exigés.
+    ///
+    /// La seule intervention qui vise un **être** et non un lieu, donc la seule
+    /// qui puisse échouer faute de cible (`DivineError::NoSuchTarget`) : celui
+    /// qu'on inspirait a pu mourir entre-temps.
+    Revelation { agent: AgentId },
 }
+
+/// Rayon d'une bénédiction ou d'une épidémie (~500 m) : un campement, pas une
+/// région. Le joueur touche un peuple, pas une civilisation.
+const BLESSING_RADIUS_TILES: f64 = 250.0;
+/// Ce qu'un geste rend — ou retire — de santé. La moitié d'une vie : assez pour
+/// arracher un mourant, ou pour emporter un affaibli.
+const BLESSING_HEALTH: f32 = 0.5;
 
 /// Un miracle **accompli**, daté : le journal qui, avec la seed, rejoue le
 /// monde (voir l'en-tête). On garde l'issue à côté de l'intention, car c'est
@@ -81,6 +136,10 @@ pub struct Outcome {
     pub ignited: bool,
     /// Combien d'humains le geste a-t-il tués.
     pub killed: usize,
+    /// Combien d'humains il a touchés sans les tuer — soignés ou affligés.
+    /// C'est le nombre de **témoins** : ceux qui auront quelque chose à
+    /// raconter, et qui feront la théologie de leur peuple (§6.3).
+    pub touched: usize,
 }
 
 /// Pourquoi une intervention n'a pas pu être tentée. Distinct d'un
@@ -99,13 +158,76 @@ impl Sim {
     pub fn invoke(&mut self, intervention: Intervention) -> Result<Outcome, DivineError> {
         let outcome = match intervention {
             Intervention::Lightning { pos } => self.strike_lightning(pos),
+            // Un seul mécanisme, deux signes : le montant change, rien d'autre.
+            // Écrire deux fonctions symétriques aurait invité l'une à diverger
+            // de l'autre — la leçon des mécaniques à deux faces du projet.
+            Intervention::Fertility { pos } => self.touch_health(pos, BLESSING_HEALTH),
+            Intervention::Plague { pos } => self.touch_health(pos, -BLESSING_HEALTH),
+            Intervention::Rain { pos } => self.summon_weather(pos, WeatherKind::Rain),
+            Intervention::Drought { pos } => self.summon_weather(pos, WeatherKind::Drought),
+            Intervention::Revelation { agent } => {
+                let pos = self.agent_position(agent).ok_or(DivineError::NoSuchTarget)?;
+                // `touched` vaut 1 s'il a compris : c'est un témoin, et le seul.
+                let understood = crate::tech::reveal(self, agent).is_some();
+                let outcome =
+                    Outcome { ignited: false, killed: 0, touched: usize::from(understood) };
+                self.miracles.push(Miracle { tick: self.time.tick, intervention, outcome });
+                self.record(pos, EventKind::Miracle { intervention, outcome });
+                return Ok(outcome);
+            }
         };
         self.miracles.push(Miracle { tick: self.time.tick, intervention, outcome });
         let pos = match intervention {
-            Intervention::Lightning { pos } => pos,
+            Intervention::Lightning { pos }
+            | Intervention::Fertility { pos }
+            | Intervention::Plague { pos }
+            | Intervention::Rain { pos }
+            | Intervention::Drought { pos } => pos,
+            // La révélation a déjà tout fait plus haut (elle a besoin du lieu
+            // *avant* d'agir, l'homme pouvant mourir) : elle sort par `return`.
+            Intervention::Revelation { .. } => unreachable!(),
         };
         self.record(pos, EventKind::Miracle { intervention, outcome });
         Ok(outcome)
+    }
+
+    /// Où se tient un agent, s'il est encore de ce monde.
+    fn agent_position(&self, agent: AgentId) -> Option<(i64, i64)> {
+        self.agents
+            .query::<(&AgentId, &Position)>()
+            .iter()
+            .find(|(_, (id, _))| **id == agent)
+            .map(|(_, (_, p))| p.tile())
+    }
+
+    /// Appelle le ciel. Passe par `weather::start` — **le même chemin** que la
+    /// météo naturelle : rien ici ne distingue une averse divine d'une autre,
+    /// et c'est voulu. Un peuple ne pourra jamais savoir, en regardant le ciel,
+    /// si quelqu'un l'a voulu — toute la matière du culte est là.
+    fn summon_weather(&mut self, pos: (i64, i64), kind: WeatherKind) -> Outcome {
+        crate::weather::start(self, (pos.0 as f64 + 0.5, pos.1 as f64 + 0.5), kind);
+        Outcome { ignited: false, killed: 0, touched: 0 }
+    }
+
+    /// Rend (ou retire) de la santé alentour. `delta` positif bénit, négatif
+    /// afflige — c'est le **même geste**, au signe près.
+    fn touch_health(&mut self, pos: (i64, i64), delta: f32) -> Outcome {
+        let center = (pos.0 as f64 + 0.5, pos.1 as f64 + 0.5);
+        let (mut touched, mut killed) = (0usize, 0usize);
+        for (_, (agent_pos, phys)) in self.agents.query_mut::<(&Position, &mut Physiology)>() {
+            let d = (agent_pos.x - center.0).hypot(agent_pos.y - center.1);
+            if d > BLESSING_RADIUS_TILES || phys.is_dead() {
+                continue;
+            }
+            phys.health = (phys.health + delta).clamp(0.0, 1.0);
+            if phys.is_dead() {
+                phys.last_damage = Some(DeathCause::Disease);
+                killed += 1;
+            } else {
+                touched += 1;
+            }
+        }
+        Outcome { ignited: false, killed, touched }
     }
 
     /// La foudre : un feu si le sol s'y prête, des morts si quelqu'un était là.
@@ -132,7 +254,8 @@ impl Sim {
                 killed += 1;
             }
         }
-        Outcome { ignited, killed }
+        // La foudre ne « touche » personne : elle tue, ou elle passe.
+        Outcome { ignited, killed, touched: 0 }
     }
 
     /// Distance (en tuiles) à laquelle la foudre est mortelle — le client s'en
@@ -218,6 +341,237 @@ mod tests {
         let outcome = sim.invoke(Intervention::Lightning { pos }).unwrap();
         assert!(!outcome.ignited, "l'eau ne prend pas feu");
         assert_eq!(outcome.killed, 0, "personne n'était là");
+    }
+
+    /// Bénir et affliger sont **le même geste au signe près**, et tous deux
+    /// bornés par la distance. Le test les éprouve ensemble, précisément pour
+    /// qu'ils ne puissent pas diverger l'un de l'autre.
+    #[test]
+    fn benir_et_affliger_sont_le_meme_geste_et_ne_portent_pas_loin() {
+        let effet = |intervention: Intervention, sante_initiale: f32| {
+            let mut sim = Sim::new(WorldSeed(7), 64);
+            let proche = sim.spawn_agent(0.0, 0.0);
+            let _loin = sim.spawn_agent(BLESSING_RADIUS_TILES + 50.0, 0.0);
+            for (_, phys) in sim.agents.query_mut::<&mut Physiology>() {
+                phys.health = sante_initiale;
+            }
+            let outcome = sim.invoke(intervention).unwrap();
+            let sante = |id| {
+                sim.agents
+                    .query::<(&AgentId, &Physiology)>()
+                    .iter()
+                    .find(|(_, (a, _))| **a == id)
+                    .map(|(_, (_, p))| p.health)
+                    .unwrap()
+            };
+            (sante(proche), sante(_loin), outcome)
+        };
+
+        let (proche, loin, out) = effet(Intervention::Fertility { pos: (0, 0) }, 0.4);
+        assert!(proche > 0.4, "la grâce relève celui qui est là ({proche:.2})");
+        assert_eq!(loin, 0.4, "elle ne porte pas au-delà de son rayon");
+        assert_eq!((out.touched, out.killed), (1, 0));
+
+        let (proche, loin, out) = effet(Intervention::Plague { pos: (0, 0) }, 0.9);
+        assert!(proche < 0.9, "le mal saisit celui qui est là ({proche:.2})");
+        assert_eq!(loin, 0.9, "et pas les autres");
+        assert_eq!((out.touched, out.killed), (1, 0));
+    }
+
+    /// Une épidémie tue pour de bon — et par le pipeline de mort ordinaire, pas
+    /// par un chemin parallèle : c'est la leçon du bug où les plaies mortelles
+    /// ne tuaient personne (la santé était régénérée dans le tick même).
+    #[test]
+    fn une_epidemie_acheve_les_affaiblis() {
+        let mut sim = Sim::new(WorldSeed(7), 64);
+        sim.spawn_agent(0.0, 0.0);
+        for (_, phys) in sim.agents.query_mut::<&mut Physiology>() {
+            phys.health = 0.3; // déjà bien bas
+        }
+        let outcome = sim.invoke(Intervention::Plague { pos: (0, 0) }).unwrap();
+        assert_eq!(outcome.killed, 1, "un affaibli n'y survit pas");
+        assert_eq!(outcome.touched, 0);
+
+        // La cause est inscrite, donc la Chronique saura la dire.
+        let cause = sim
+            .agents
+            .query::<&Physiology>()
+            .iter()
+            .map(|(_, p)| p.last_damage)
+            .next()
+            .flatten();
+        assert_eq!(cause, Some(DeathCause::Disease));
+    }
+
+    /// **L'ambivalence de la fertilité, qui n'est écrite nulle part.** Rendre la
+    /// santé lève le frein que la démographie pose déjà à la conception : le
+    /// geste ne « donne » pas des enfants, il retire l'obstacle. Ce qui suit —
+    /// des bouches de plus dans un monde qui ne les nourrit peut-être pas — ne
+    /// dépend plus de la divinité.
+    #[test]
+    fn la_grace_leve_le_frein_a_la_conception_sans_le_dire() {
+        // Le seuil de santé qu'exige la conception (voir `demography::daily`).
+        const FECONDABLE: f32 = 0.6;
+        let mut sim = Sim::new(WorldSeed(7), 64);
+        sim.spawn_agent(0.0, 0.0);
+        for (_, phys) in sim.agents.query_mut::<&mut Physiology>() {
+            phys.health = 0.35; // trop faible pour concevoir
+        }
+        let sante = |sim: &Sim| sim.agents.query::<&Physiology>().iter().next().unwrap().1.health;
+        assert!(sante(&sim) < FECONDABLE, "au départ, le corps ne suit pas");
+
+        sim.invoke(Intervention::Fertility { pos: (0, 0) }).unwrap();
+        assert!(
+            sante(&sim) > FECONDABLE,
+            "après la grâce, plus rien ne s'y oppose ({:.2})",
+            sante(&sim)
+        );
+    }
+
+    /// **L'ambivalence de la pluie, qui n'est écrite nulle part.** Bénir une
+    /// vallée d'une averse, c'est y rendre le feu impossible — donc priver un
+    /// peuple sans silex de la seule voie qui lui restait vers sa maîtrise. La
+    /// sécheresse fait l'inverse : elle affame, et elle offre le feu.
+    ///
+    /// Aucune ligne ne relie la divinité à l'arbre technologique. Tout passe par
+    /// l'humidité du sol, que `fire::is_flammable` lit déjà.
+    #[test]
+    fn la_pluie_prive_du_feu_et_la_secheresse_le_donne() {
+        // Un sol qui brûle tout juste : c'est là que le ciel fait basculer.
+        let brulant = |sim: &mut Sim, pos: (i64, i64)| {
+            fire::ignite_at(sim, (pos.0 as f64 + 0.5, pos.1 as f64 + 0.5))
+        };
+        let mut sim = Sim::new(WorldSeed(42), 256);
+        sim.allow_weather = false; // aucun ciel parasite : on ne veut que le nôtre
+        let Some(site) = find_flammable(&mut sim) else { return };
+
+        // Sans intervention, ce sol prend feu.
+        assert!(brulant(&mut sim, site), "le site de référence doit brûler");
+        sim.fires.clear();
+
+        // Sous l'averse, il ne prend plus.
+        sim.invoke(Intervention::Rain { pos: site }).unwrap();
+        assert!(
+            !brulant(&mut sim, site),
+            "une pluie doit rendre le feu impossible — c'est le prix de la grâce"
+        );
+
+        // Et sur un sol trop humide pour brûler, la sécheresse ouvre la voie.
+        let mut sec = Sim::new(WorldSeed(42), 256);
+        sec.allow_weather = false;
+        let humide = (0..600i64)
+            .map(|r| (r * 300, 0i64))
+            .find(|&(x, y)| {
+                let t = sec.world.tile(x, y);
+                t.is_walkable() && t.biomass >= 60 && t.humidity > 120 && t.temperature >= 5.0
+            });
+        let Some(site_humide) = humide else { return };
+        assert!(!brulant(&mut sec, site_humide), "un sol détrempé ne prend pas");
+        sec.invoke(Intervention::Drought { pos: site_humide }).unwrap();
+        assert!(
+            brulant(&mut sec, site_humide),
+            "la sécheresse doit rendre inflammable ce qui ne l'était pas"
+        );
+    }
+
+    /// Une averse divine est **indistinguable** d'une averse ordinaire : elle
+    /// emprunte le même chemin et produit le même objet. C'est ce qui rendra la
+    /// théologie d'un peuple faillible — nul ne peut savoir, en regardant le
+    /// ciel, si quelqu'un l'a voulu.
+    #[test]
+    fn une_averse_divine_est_une_averse_comme_les_autres() {
+        let mut sim = Sim::new(WorldSeed(1), 64);
+        sim.allow_weather = false;
+        sim.invoke(Intervention::Rain { pos: (0, 0) }).unwrap();
+        assert_eq!(sim.weather.len(), 1, "elle produit une cellule météo ordinaire");
+        assert_eq!(sim.weather[0].kind, crate::weather::WeatherKind::Rain);
+        // Et elle se dissipe comme n'importe quelle autre : rien ne la distingue.
+        for _ in 0..20 {
+            crate::weather::daily(&mut sim);
+        }
+        assert!(sim.weather.is_empty(), "même une averse voulue finit par passer");
+    }
+
+    /// **La révélation ne crée rien.** Elle fait comprendre ce qu'on avait sous
+    /// les yeux : sans les matières, l'inspiration ne donne rien — et c'est ce
+    /// qui l'empêche d'être le « bouton bien » que le brief refuse.
+    #[test]
+    fn on_ne_revele_qu_a_qui_a_deja_tout_vu() {
+        use crate::exposure::{Exposure, Exposures};
+        use crate::tech::Knowledge;
+
+        let inspire = |expose: bool| {
+            let mut sim = Sim::new(WorldSeed(3), 64);
+            let agent = sim.spawn_agent(0.0, 0.0);
+            if expose {
+                // Le silex et le bois : de quoi comprendre le feu par friction.
+                for (_, (id, exposures)) in sim.agents.query_mut::<(&AgentId, &mut Exposures)>() {
+                    if *id == agent {
+                        exposures.expose(Exposure::Flint);
+                        exposures.expose(Exposure::Wood);
+                    }
+                }
+            }
+            let outcome = sim.invoke(Intervention::Revelation { agent }).unwrap();
+            let sait = sim
+                .agents
+                .query::<(&AgentId, &Knowledge)>()
+                .iter()
+                .find(|(_, (a, _))| **a == agent)
+                .map(|(_, (_, k))| k.iter().count())
+                .unwrap();
+            (outcome, sait)
+        };
+
+        let (sans, rien) = inspire(false);
+        assert_eq!(rien, 0, "sans avoir rien vu, l'inspiré ne comprend rien");
+        assert_eq!(sans.touched, 0);
+
+        let (avec, su) = inspire(true);
+        assert_eq!(su, 1, "avec le silex et le bois sous les yeux, il comprend");
+        assert_eq!(avec.touched, 1, "un témoin : lui-même");
+    }
+
+    /// La seule intervention qui vise un être plutôt qu'un lieu est aussi la
+    /// seule qui puisse échouer faute de cible — celui qu'on inspirait a pu
+    /// mourir entre-temps.
+    #[test]
+    fn inspirer_un_absent_echoue_proprement() {
+        let mut sim = Sim::new(WorldSeed(3), 64);
+        let fantome = AgentId(9999);
+        assert_eq!(
+            sim.invoke(Intervention::Revelation { agent: fantome }),
+            Err(DivineError::NoSuchTarget)
+        );
+        assert!(sim.miracles.is_empty(), "un geste sans cible n'entre pas au journal");
+    }
+
+    /// Une révélation produit **deux faits** : le geste du ciel, et la
+    /// découverte elle-même — laquelle est racontée comme n'importe quelle
+    /// autre, avec le nom de celui qui a compris.
+    #[test]
+    fn une_revelation_est_aussi_une_decouverte_ordinaire() {
+        use crate::exposure::{Exposure, Exposures};
+
+        let mut sim = Sim::new(WorldSeed(3), 64);
+        let agent = sim.spawn_agent(0.0, 0.0);
+        for (_, (id, exposures)) in sim.agents.query_mut::<(&AgentId, &mut Exposures)>() {
+            if *id == agent {
+                exposures.expose(Exposure::Flint);
+                exposures.expose(Exposure::Wood);
+            }
+        }
+        sim.invoke(Intervention::Revelation { agent }).unwrap();
+
+        assert!(
+            sim.chronicle.iter().any(|e| matches!(e.kind, EventKind::Miracle { .. })),
+            "le geste du ciel fait date"
+        );
+        assert!(
+            sim.chronicle.iter().any(|e| matches!(e.kind, EventKind::TechDiscovered { .. })),
+            "et la découverte aussi, séparément"
+        );
+        assert_eq!(sim.tech_events.len(), 1, "elle compte comme une vraie découverte");
     }
 
     /// Le journal est ce qui rend le monde rejouable (§8.2) : chaque geste y

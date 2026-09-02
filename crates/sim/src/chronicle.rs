@@ -301,6 +301,42 @@ pub fn tell_parts(
                     format!("le ciel se déchire et frappe la terre.{feu}{morts}")
                 }
             }
+            crate::divine::Intervention::Fertility { .. } => match outcome.touched {
+                0 => "une grâce passe sur une terre où il n'y a personne.".to_string(),
+                1 => "un mal quitte un corps sans raison ; l'homme se relève.".to_string(),
+                n => format!("les maux quittent les corps sans raison ; {n} se relèvent."),
+            },
+            crate::divine::Intervention::Plague { .. } => {
+                let morts = match outcome.killed {
+                    0 => String::new(),
+                    1 => " Un homme n'en réchappe pas.".to_string(),
+                    n => format!(" {n} n'en réchappent pas."),
+                };
+                match outcome.touched + outcome.killed {
+                    0 => "un mal court sur une terre déserte.".to_string(),
+                    _ => format!("un mal saisit les corps sans qu'on sache d'où.{morts}"),
+                }
+            }
+            // Le ciel change, voilà tout. Rien ne distingue une averse voulue
+            // d'une averse ordinaire — c'est précisément ce qui rendra la
+            // théologie d'un peuple faillible, et donc intéressante (§6.3).
+            crate::divine::Intervention::Rain { .. } => {
+                "la pluie vient, et ne s'arrête pas de sitôt.".to_string()
+            }
+            crate::divine::Intervention::Drought { .. } => {
+                "le ciel se ferme ; la terre commence à durcir.".to_string()
+            }
+            // Sobre à dessein : la découverte elle-même est racontée à part, par
+            // son propre fait (`TechDiscovered`, avec le nom de celui qui a
+            // compris). Ici on ne dit que ce qu'un tiers aurait perçu — un homme
+            // qui s'arrête, et qui a saisi quelque chose.
+            crate::divine::Intervention::Revelation { .. } => {
+                if outcome.touched > 0 {
+                    "un homme s'immobilise, et comprend.".to_string()
+                } else {
+                    "un homme s'immobilise, le regard vide. Rien ne lui vient.".to_string()
+                }
+            }
         },
         EventKind::Domesticated { clan: c, species } => format!(
             "les {} ne chassent plus le {} : ils le gardent.",
@@ -331,6 +367,7 @@ fn death_circumstance(cause: DeathCause) -> &'static str {
         DeathCause::Predation => "sous les crocs",
         DeathCause::Violence => "de la main d'un homme",
         DeathCause::Lightning => "frappé par la foudre",
+        DeathCause::Disease => "emporté par le mal",
     }
 }
 

@@ -807,8 +807,8 @@ impl App {
         }
 
         // Effectifs (grand total + puces par sexe/âge) et décès par cause.
-        let (mut starved, mut dehydrated, mut frozen, mut old_age, mut predated, mut killed, mut struck) =
-            (0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32);
+        let (mut starved, mut dehydrated, mut frozen, mut old_age, mut predated, mut killed, mut struck, mut sick) =
+            (0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32, 0u32);
         for d in &self.sim.deaths {
             match d.cause {
                 DeathCause::Starvation => starved += 1,
@@ -818,6 +818,7 @@ impl App {
                 DeathCause::Predation => predated += 1,
                 DeathCause::Violence => killed += 1,
                 DeathCause::Lightning => struck += 1,
+                DeathCause::Disease => sick += 1,
             }
         }
         set_html(
@@ -832,7 +833,7 @@ impl App {
                  <div class=\"deaths\">\
                    <span><b>{}</b> naissances</span>\
                    <span><b>{}</b> décès</span>\
-                   <span>faim {starved} · soif {dehydrated} · froid {frozen} · vieillesse {old_age} · prédation {predated} · violence {killed} · foudre {struck}</span>\
+                   <span>faim {starved} · soif {dehydrated} · froid {frozen} · vieillesse {old_age} · prédation {predated} · violence {killed} · foudre {struck} · mal {sick}</span>\
                  </div>",
                 self.sim.births.len(),
                 self.sim.deaths.len(),

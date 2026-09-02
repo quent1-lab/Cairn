@@ -127,7 +127,10 @@ impl Cumulative {
                 DeathCause::Hypothermia => self.d_hypo += 1,
                 DeathCause::OldAge => self.d_old += 1,
                 // Prédation et violence : non ventilées dans ce banc.
-                DeathCause::Predation | DeathCause::Violence => {}
+                DeathCause::Predation
+                | DeathCause::Violence
+                | DeathCause::Disease
+                | DeathCause::Lightning => {}
             }
         }
         self.seen_deaths = sim.deaths.len();

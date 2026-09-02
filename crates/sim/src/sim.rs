@@ -219,6 +219,10 @@ pub struct Sim {
     /// côté `Sim`, jamais un champ de `Tile` (voir `crate::fire`). Rare et
     /// localisé ; vide la plupart du temps.
     pub fires: Vec<Fire>,
+    /// Les cellules météo actives (Phase 6) — averses et sécheresses passagères.
+    /// Registre clairsemé, jamais un champ de `Tile` : une averse est
+    /// temporaire par nature. Voir `crate::weather`.
+    pub weather: Vec<crate::weather::WeatherCell>,
     /// **La Chronique** (Phase 6, BRIEF §6.4) : le journal narratif du monde,
     /// append-only et ordonné par tick (on n'y pousse qu'au tick courant).
     /// Ne reçoit que ce qui **fait date** — pas les naissances et les morts
@@ -238,6 +242,10 @@ pub struct Sim {
     /// contrôlées qui isolent une autre mécanique — même patron explicite que
     /// `allow_fauna_immigration`.
     pub allow_wildfires: bool,
+    /// La météo se forme-t-elle d'elle-même ? Vraie par défaut (le ciel vit) ;
+    /// les scènes de test contrôlées la coupent — même patron explicite que
+    /// `allow_wildfires`.
+    pub allow_weather: bool,
     /// L'immigration de gibier (`fauna::daily_immigration`) est-elle active
     /// pour cette simulation ? Vrai par défaut (le monde est censé être
     /// habité) ; les scènes de test qui veulent isoler une mécanique de
@@ -287,10 +295,12 @@ impl Sim {
             tech_events: Vec::new(),
             known_techs: BTreeSet::new(),
             fires: Vec::new(),
+            weather: Vec::new(),
             chronicle: Vec::new(),
             miracles: Vec::new(),
             expeditions: BTreeMap::new(),
             allow_wildfires: true,
+            allow_weather: true,
             allow_fauna_immigration: true,
             next_agent_id: 0,
             next_fauna_id: 0,
@@ -937,6 +947,10 @@ impl Sim {
             // fourrage, exposent au feu les agents proches) et tentent un
             // nouveau départ. Ambivalent : la biomasse détruite nourrit la
             // pression de famine de demain.
+            // La météo (Phase 6) : averses et sécheresses passagères. **Avant** le
+            // feu, qui lit son décalage d'humidité pour savoir si la brousse
+            // peut s'enflammer — un sol détrempé ne prend pas.
+            crate::weather::daily(self);
             fire::daily(self);
         }
 
@@ -1039,7 +1053,7 @@ impl Sim {
 
         // 5. Écologie quotidienne, à minuit.
         if time.tick.is_multiple_of(TICKS_PER_DAY) {
-            ecology::daily_regrowth(&mut self.world, &self.climate, time);
+            ecology::daily_regrowth(&mut self.world, &self.climate, time, &self.weather);
         }
 
         self.time.tick += 1;

@@ -95,10 +95,18 @@ pub struct Fire {
 
 /// Une tuile peut-elle s'enflammer ? Sèche, pourvue de combustible, tempérée,
 /// et sur la terre ferme.
-fn is_flammable(tile: &Tile) -> bool {
+///
+/// `humidity_shift` est le décalage météo du moment (`crate::weather`), dans
+/// `[-1, 1]` : une averse détrempe le sol et l'empêche de prendre, une
+/// sécheresse le rend inflammable alors qu'il ne l'était pas. C'est par ce seul
+/// paramètre que le ciel décide si le feu est possible — et donc, in fine, si un
+/// peuple sans silex pourra un jour voir brûler.
+fn is_flammable(tile: &Tile, humidity_shift: f32) -> bool {
+    let humidity =
+        (f32::from(tile.humidity) + humidity_shift * crate::weather::HUMIDITY_EFFECT).clamp(0.0, 255.0);
     tile.is_walkable()
         && tile.biomass >= FUEL_MIN_BIOMASS
-        && tile.humidity <= DRY_MAX_HUMIDITY
+        && humidity <= f32::from(DRY_MAX_HUMIDITY)
         && tile.temperature >= WARM_MIN_TEMP
 }
 
@@ -111,7 +119,8 @@ fn is_flammable(tile: &Tile) -> bool {
 /// offre le feu à un peuple, frapper une tourbière détrempée ne fait rien.
 pub(crate) fn ignite_at(sim: &mut Sim, pos: (f64, f64)) -> bool {
     let tile = sim.world.tile(pos.0.floor() as i64, pos.1.floor() as i64);
-    if !is_flammable(&tile) {
+    let shift = crate::weather::shift_at(pos, &sim.weather);
+    if !is_flammable(&tile, shift) {
         return false;
     }
     sim.fires.push(Fire { pos, radius: FIRE_START_RADIUS_TILES, age_days: 0 });
@@ -251,7 +260,7 @@ mod tests {
         for r in 0..300i64 {
             let d = r * step;
             for &(x, y) in &[(d, 0), (-d, 0), (0, d), (0, -d), (d, d), (-d, -d)] {
-                if is_flammable(&sim.world.tile(x, y)) {
+                if is_flammable(&sim.world.tile(x, y), 0.0) {
                     return Some((x, y));
                 }
             }
@@ -347,9 +356,16 @@ mod tests {
             biomass: 120,
             flags: crate::tile::TileFlags::default(),
         };
-        assert!(is_flammable(&dry_fuel), "savane sèche et fournie : inflammable");
-        assert!(!is_flammable(&Tile { humidity: 200, ..dry_fuel }), "trop humide");
-        assert!(!is_flammable(&Tile { biomass: 10, ..dry_fuel }), "pas assez de combustible");
-        assert!(!is_flammable(&Tile { temperature: -5.0, ..dry_fuel }), "trop froid");
+        assert!(is_flammable(&dry_fuel, 0.0), "savane sèche et fournie : inflammable");
+        assert!(!is_flammable(&Tile { humidity: 200, ..dry_fuel }, 0.0), "trop humide");
+        assert!(!is_flammable(&Tile { biomass: 10, ..dry_fuel }, 0.0), "pas assez de combustible");
+        assert!(!is_flammable(&Tile { temperature: -5.0, ..dry_fuel }, 0.0), "trop froid");
+        // Et le ciel du jour fait basculer ce même sol, dans les deux sens : une
+        // averse le détrempe, une sécheresse rend inflammable ce qui ne l'était
+        // pas. C'est par là, et seulement par là, que la météo touche le feu.
+        assert!(!is_flammable(&dry_fuel, 1.0), "sous l'averse, la savane ne prend plus");
+        let trop_humide = Tile { humidity: 150, ..dry_fuel };
+        assert!(!is_flammable(&trop_humide, 0.0), "sol humide : ne prend pas");
+        assert!(is_flammable(&trop_humide, -1.0), "la sécheresse le rend inflammable");
     }
 }

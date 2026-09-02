@@ -51,21 +51,36 @@ pub fn logistic_step(p: u8, k: u8, days: f64, rng: &mut Pcg32) -> u8 {
 /// Passe quotidienne de repousse sur les chunks sales. Appelée à heure fixe
 /// (minuit) ; l'ordre de parcours (BTreeSet) et les flux RNG par chunk sont
 /// déterministes.
-pub fn daily_regrowth(world: &mut World, climate: &Climate, time: SimTime) {
+/// `weather` : les cellules actives (`crate::weather`). Leur décalage est
+/// évalué **une fois par chunk**, à son centre, et non par tuile : une cellule
+/// météo fait ~1,5 km quand un chunk en fait 128 m, si bien que l'approximation
+/// est invisible — et le coût, nul, dans une boucle qui balaie 4096 tuiles.
+pub fn daily_regrowth(
+    world: &mut World,
+    climate: &Climate,
+    time: SimTime,
+    weather: &[crate::weather::WeatherCell],
+) {
     let eco_seed = world.seed().derive(salt::ECOLOGY) ^ splitmix64(time.tick);
     for coord in world.dirty_coords() {
         // Un flux RNG par (jour, chunk) : l'arrondi d'une tuile ne dépend pas
         // de ce que les autres chunks ont fait.
         let stream = (coord.x as u64) ^ (coord.y as u64).rotate_left(32);
         let mut rng = Pcg32::new(eco_seed, stream);
-        let (_, oy) = coord.origin();
+        let (ox, oy) = coord.origin();
+        // Le ciel du jour sur ce chunk : la pluie relève la capacité de charge,
+        // la sécheresse l'abaisse. C'est par là que le ciel affame — ou nourrit.
+        let half = crate::chunk::CHUNK_SIZE as f64 / 2.0;
+        let shift = crate::weather::shift_at((ox as f64 + half, oy as f64 + half), weather);
+        let weather_factor = 1.0 + crate::weather::CAPACITY_EFFECT * shift;
         let Some(chunk) = world.chunk_mut(coord) else { continue };
         for ly in 0..CHUNK_SIZE as usize {
             for lx in 0..CHUNK_SIZE as usize {
                 let tile = chunk.tile_mut(lx, ly);
                 // Le plafond effectif suit la fertilité : un sol dégradé
                 // portera moins que le K du biome (surexploitation, §2.4).
-                let cap = effective_capacity(tile);
+                let cap = ((f32::from(effective_capacity(tile)) * weather_factor).clamp(0.0, 255.0))
+                    as u8;
                 if tile.biomass >= cap {
                     continue;
                 }

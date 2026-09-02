@@ -38,7 +38,7 @@ use serde::Deserialize;
 
 use crate::agent::{AgentId, Physiology, Position};
 use crate::chronicle::EventKind;
-use crate::demography::{Demographics, Traits};
+use crate::demography::{Demographics, Sex, Traits};
 use crate::exposure::{Exposure, Exposures};
 use crate::memory::{Memory, TALK_RADIUS_TILES};
 use crate::pressure::ClanPressure;
@@ -438,6 +438,89 @@ pub struct TechEvent {
 
 /// La passe d'insight, appelée une fois par jour (voir le bloc de commentaires
 /// ci-dessus). Déterministe : le tirage dérive de (seed, tick, id agent).
+/// **La révélation** (BRIEF §6.2) : souffler un insight à un agent précis.
+///
+/// Renvoie la technologie comprise, ou `None` si rien ne l'était — et c'est là
+/// tout l'intérêt du mécanisme.
+///
+/// ## Ce que la révélation ne fait pas
+///
+/// Elle **n'offre pas un savoir**, elle fait comprendre ce qu'on avait déjà sous
+/// les yeux. Tous les prérequis restent exigés : les savoirs préalables, les
+/// matières **vues** (`Exposures`), l'accès environnemental. Un homme qui n'a
+/// jamais croisé d'argile n'inventera pas la poterie, fût-il inspiré par un
+/// dieu — et aucune inspiration ne saute un maillon de la chaîne.
+///
+/// Ce qu'elle lève, ce sont les deux conditions *humaines* de l'insight
+/// ordinaire : le confort (« du temps pour penser ») et la pression (« une
+/// raison de penser »). On peut donc révéler à un affamé au milieu d'un hiver,
+/// ce que le hasard n'aurait jamais permis. C'est puissant, et strictement borné
+/// par ce que cet homme-là a vécu.
+///
+/// La limite est aussi le revers : le savoir naît chez **un seul** porteur. S'il
+/// est vieux, isolé, ou meurt avant d'avoir parlé, la révélation se perd avec
+/// lui (`forget`). Choisir à qui l'on parle est tout le geste.
+pub(crate) fn reveal(sim: &mut Sim, agent: AgentId) -> Option<TechId> {
+    if sim.tech_tree.is_empty() {
+        return None;
+    }
+    let tick = sim.time.tick;
+    // Relevé d'abord : l'écriture dans la Chronique demande `&mut sim` entier,
+    // or la requête emprunte l'ECS (même patron que partout ailleurs).
+    let mut found: Option<(TechId, (i64, i64), Sex, Option<ClanId>)> = None;
+
+    for (_, (id, pos, demo, membership, exposures, mem, knowledge)) in sim
+        .agents
+        .query_mut::<(
+            &AgentId,
+            &Position,
+            &Demographics,
+            &ClanMembership,
+            &Exposures,
+            &Memory,
+            &mut Knowledge,
+        )>()
+    {
+        if *id != agent {
+            continue;
+        }
+        let (tx, ty) = pos.tile();
+        let tile = sim.world.tile(tx, ty);
+        for tech in sim.tech_tree.iter() {
+            // Exactement les portails de l'insight ordinaire — ni plus, ni
+            // moins. Seuls le confort et la pression sont levés.
+            if knowledge.has(tech.id)
+                || !tech.prereq_techs.iter().all(|&t| knowledge.has(t))
+                || !tech.prereq_exposure.iter().all(|&e| exposures.has(e))
+                || (!tech.prereq_exposure_any.is_empty()
+                    && !tech.prereq_exposure_any.iter().any(|&e| exposures.has(e)))
+                || !tech.prereq_environment.iter().all(|c| env_access(*c, &tile, mem, (pos.x, pos.y)))
+            {
+                continue;
+            }
+            knowledge.insert(tech.id);
+            found = Some((tech.id, (tx, ty), demo.sex, membership.0));
+            break; // une compréhension à la fois : le reste viendra
+        }
+        break;
+    }
+
+    let (tech, pos, sex, clan) = found?;
+    // Une révélation **est** une découverte : elle entre au journal des techs
+    // comme n'importe quelle autre, et la Chronique la raconte de la même façon.
+    // Le geste divin, lui, est consigné à part par `divine` — deux faits, parce
+    // que ce sont deux choses : quelqu'un a compris, et le ciel s'en est mêlé.
+    sim.tech_events.push(TechEvent {
+        tick,
+        kind: TechEventKind::Discovered,
+        tech,
+        agent: Some(agent),
+        clan,
+    });
+    sim.record(pos, EventKind::TechDiscovered { tech, agent, sex, clan });
+    Some(tech)
+}
+
 pub(crate) fn insight(sim: &mut Sim) {
     if sim.tech_tree.is_empty() {
         return;

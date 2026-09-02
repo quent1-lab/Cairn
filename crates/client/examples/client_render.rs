@@ -211,7 +211,7 @@ fn main() {
             sim.deaths.iter().filter(|d| d.cause == c).count()
         };
         println!(
-            "morts : {} au total — faim {}, soif {}, froid {}, vieillesse {}, prédation {}, violence {}",
+            "morts : {} au total — faim {}, soif {}, froid {}, vieillesse {}, prédation {}, violence {}, mal {}, foudre {}",
             sim.deaths.len(),
             count(Starvation),
             count(Dehydration),
@@ -219,6 +219,8 @@ fn main() {
             count(OldAge),
             count(Predation),
             count(Violence),
+            count(Disease),
+            count(Lightning),
         );
     }
 

@@ -43,6 +43,7 @@ pub mod skills;
 pub mod social;
 pub mod structures;
 pub mod tech;
+pub mod weather;
 pub mod tile;
 pub mod world;
 
@@ -69,6 +70,7 @@ pub use tech::{
     Age, EnvCond, Knowledge, Tech, TechEvent, TechEventKind, TechId, TechPressure, TechSkill,
     TechTree,
 };
+pub use weather::{WeatherCell, WeatherKind};
 pub use tile::{Tile, TileFlags};
 pub use world::World;
 
@@ -109,6 +111,10 @@ pub(crate) mod salt {
     pub const FIRE: u64 = 1014;
     /// Combat homme↔prédateur : la part d'incertitude de la riposte des meutes.
     pub const COMBAT: u64 = 1015;
+    /// Météo : formation des averses et sécheresses (Phase 6). Un flux propre,
+    /// sans quoi une cellule météo et un départ de feu du même jour seraient
+    /// corrélés — deux phénomènes qui doivent rester indépendants.
+    pub const WEATHER: u64 = 1017;
     /// Noms propres des humains et des clans (Phase 6, la Chronique). Ce flux
     /// ne pilote **aucun** comportement — un nom n'a pas d'effet — mais il a
     /// son salt comme les autres : deux consommateurs qui le partageraient

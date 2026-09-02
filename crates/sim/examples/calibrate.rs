@@ -132,7 +132,11 @@ fn death_counts(sim: &Sim) -> (usize, usize, usize) {
             DeathCause::Hypothermia => c.2 += 1,
             // Ni la vieillesse, ni la prédation, ni la violence ne sont un
             // signal de calibrage climatique.
-            DeathCause::OldAge | DeathCause::Predation | DeathCause::Violence => {}
+            DeathCause::OldAge
+            | DeathCause::Predation
+            | DeathCause::Violence
+            | DeathCause::Disease
+            | DeathCause::Lightning => {}
         }
     }
     c

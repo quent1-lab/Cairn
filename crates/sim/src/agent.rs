@@ -221,6 +221,9 @@ pub enum DeathCause {
     OldAge,
     /// Tué par une meute de prédateurs en la combattant (voir `crate::combat`).
     Predation,
+    /// Emporté par une maladie (§6.2, l'intervention « maladie » — et, un
+    /// jour, les épidémies naturelles du §3.1).
+    Disease,
     /// Foudroyé — la seule mort que le joueur-divinité peut donner (§6.2).
     /// Ambivalence assumée : le même geste qui offre le feu à un peuple peut
     /// le brûler vif.
