@@ -221,6 +221,10 @@ pub enum DeathCause {
     OldAge,
     /// Tué par une meute de prédateurs en la combattant (voir `crate::combat`).
     Predation,
+    /// Foudroyé — la seule mort que le joueur-divinité peut donner (§6.2).
+    /// Ambivalence assumée : le même geste qui offre le feu à un peuple peut
+    /// le brûler vif.
+    Lightning,
     /// Tué par un autre humain lors d'un raid inter-clans (`crate::combat`) :
     /// la tension entre clans voisins qui trouve sa conclusion dans le sang.
     Violence,

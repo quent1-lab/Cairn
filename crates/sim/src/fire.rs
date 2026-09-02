@@ -102,6 +102,22 @@ fn is_flammable(tile: &Tile) -> bool {
         && tile.temperature >= WARM_MIN_TEMP
 }
 
+/// Allume un foyer en un point donné, **si le site peut brûler**. La cause
+/// importe peu — friction, foudre naturelle, ou foudre divine (§6.2) : c'est le
+/// site qui décide, pas le déclencheur. Renvoie `true` si le feu a pris.
+///
+/// `pub(crate)` : `crate::divine` en a besoin pour la foudre, et c'est
+/// exactement l'ambivalence que le brief demande — frapper une savane sèche
+/// offre le feu à un peuple, frapper une tourbière détrempée ne fait rien.
+pub(crate) fn ignite_at(sim: &mut Sim, pos: (f64, f64)) -> bool {
+    let tile = sim.world.tile(pos.0.floor() as i64, pos.1.floor() as i64);
+    if !is_flammable(&tile) {
+        return false;
+    }
+    sim.fires.push(Fire { pos, radius: FIRE_START_RADIUS_TILES, age_days: 0 });
+    true
+}
+
 /// La passe quotidienne du feu : faire vivre les foyers existants (croître,
 /// brûler, exposer, vieillir, s'éteindre), puis tenter un nouveau départ.
 pub(crate) fn daily(sim: &mut Sim) {
@@ -215,14 +231,11 @@ fn try_ignite(sim: &mut Sim) {
     let angle = rng.next_f64() * std::f64::consts::TAU;
     let dist = FIRE_IGNITION_MIN_TILES + rng.next_f64() * (FIRE_IGNITION_MAX_TILES - FIRE_IGNITION_MIN_TILES);
     let pos = (anchor.0 + angle.cos() * dist, anchor.1 + angle.sin() * dist);
-    let tile = sim.world.tile(pos.0.floor() as i64, pos.1.floor() as i64);
-    if is_flammable(&tile) {
-        sim.fires.push(Fire { pos, radius: FIRE_START_RADIUS_TILES, age_days: 0 });
-        // Rien dans la Chronique ici : un départ de feu n'est pas un fait. Il en
-        // devient un le jour où un peuple le voit pour la première fois — c'est
-        // là que se joue la seconde voie d'accès au feu (§5.3), celle qui n'a
-        // besoin d'aucun silex. Voir `update_fires`.
-    }
+    // Rien dans la Chronique ici : un départ de feu n'est pas un fait. Il en
+    // devient un le jour où un peuple le voit pour la première fois — c'est là
+    // que se joue la seconde voie d'accès au feu (§5.3), celle qui n'a besoin
+    // d'aucun silex. Voir `update_fires`.
+    ignite_at(sim, pos);
 }
 
 #[cfg(test)]

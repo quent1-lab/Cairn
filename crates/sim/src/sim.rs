@@ -225,6 +225,10 @@ pub struct Sim {
     /// ordinaires, qui restent des statistiques dans `births`/`deaths`. Voir
     /// `crate::chronicle` pour la distinction journal / log.
     pub chronicle: Vec<crate::chronicle::Event>,
+    /// Le journal des **interventions divines** (BRIEF §6.2, §8.2) : avec la
+    /// seed, il suffit à rejouer une histoire entière, la simulation étant
+    /// déterministe. Voir `crate::divine`.
+    pub miracles: Vec<crate::divine::Miracle>,
     /// Les expéditions commerciales en cours (Phase 5, incrément 6b), par
     /// identifiant d'agent — une table à côté de l'ECS, comme `routes`,
     /// nettoyée à la mort de l'envoyé. Voir `crate::commerce`.
@@ -284,6 +288,7 @@ impl Sim {
             known_techs: BTreeSet::new(),
             fires: Vec::new(),
             chronicle: Vec::new(),
+            miracles: Vec::new(),
             expeditions: BTreeMap::new(),
             allow_wildfires: true,
             allow_fauna_immigration: true,

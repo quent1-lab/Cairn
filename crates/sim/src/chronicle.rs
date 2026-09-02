@@ -121,6 +121,11 @@ pub enum EventKind {
     ExpeditionDeparted { clan: ClanId, agent: AgentId, sex: Sex, distance_km: f32 },
     /// L'envoyé est rentré, l'étain avec lui.
     ExpeditionReturned { clan: ClanId, agent: AgentId, sex: Sex },
+    /// **Le joueur est intervenu** (§6.2). Le fait porte l'intention et
+    /// l'issue : c'est de leur écart que naîtra la théologie d'un peuple
+    /// (§6.3) — un dieu qui frappe et n'allume rien n'est pas le même qu'un dieu
+    /// qui embrase.
+    Miracle { intervention: crate::divine::Intervention, outcome: crate::divine::Outcome },
     /// Un troupeau a fini par s'apprivoiser : le premier cheptel d'un clan
     /// (`pastoral::daily`).
     Domesticated { clan: ClanId, species: Species },
@@ -278,6 +283,25 @@ pub fn tell_parts(
             clan(c),
             if sex == Sex::Female { "elle" } else { "lui" }
         ),
+        // Le récit ne dit **jamais** « le joueur a foudroyé » : il raconte ce
+        // qu'un témoin aurait vu. C'est de cette matière-là que les peuples
+        // tireront leur théologie (§6.3) — et un dieu se juge à ses effets, pas
+        // à ses intentions.
+        EventKind::Miracle { intervention, outcome } => match intervention {
+            crate::divine::Intervention::Lightning { .. } => {
+                let feu = if outcome.ignited { " La brousse s'embrase." } else { "" };
+                let morts = match outcome.killed {
+                    0 => String::new(),
+                    1 => " Un homme tombe, foudroyé.".to_string(),
+                    n => format!(" {n} hommes tombent, foudroyés."),
+                };
+                if feu.is_empty() && morts.is_empty() {
+                    "le ciel se déchire et frappe la terre. Rien n'en vient.".to_string()
+                } else {
+                    format!("le ciel se déchire et frappe la terre.{feu}{morts}")
+                }
+            }
+        },
         EventKind::Domesticated { clan: c, species } => format!(
             "les {} ne chassent plus le {} : ils le gardent.",
             clan(c),
@@ -306,6 +330,7 @@ fn death_circumstance(cause: DeathCause) -> &'static str {
         DeathCause::OldAge => "de vieillesse",
         DeathCause::Predation => "sous les crocs",
         DeathCause::Violence => "de la main d'un homme",
+        DeathCause::Lightning => "frappé par la foudre",
     }
 }
 

@@ -81,7 +81,7 @@ const MIN_CARRYING_WORTH_TRIP: f32 = 0.05;
 /// Force du rappel quand on se trouve sur le territoire d'un autre peuple.
 /// Assez pour peser dans le softmax sans écraser la soif ou la faim : on rentre
 /// chez soi, on ne fuit pas — et un besoin vital passe toujours avant.
-const INTRUSION_URGENCY: f32 = 0.55;
+const INTRUSION_URGENCY: f32 = 0.30;
 /// Ce qu'une chasse au meilleur skill peut charger d'un coup (voir
 /// `HUNT_NUTRITION` dans `sim.rs`) : sert à normaliser l'urgence du retour,
 /// pas une limite dure — porter plus ne fait qu'accentuer le plafond.
