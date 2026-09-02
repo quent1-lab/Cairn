@@ -30,6 +30,7 @@ pub mod demography;
 pub mod divine;
 pub mod ecology;
 pub mod exposure;
+pub mod faith;
 pub mod fauna;
 pub mod fire;
 pub mod memory;
@@ -58,6 +59,7 @@ pub use climate::Climate;
 pub use demography::{Demographics, HumanView, Kinship, Pregnancy, Sex, Traits};
 pub use divine::{DivineError, Intervention, Miracle, Outcome};
 pub use exposure::{Exposure, Exposures};
+pub use faith::Faith;
 pub use fire::Fire;
 pub use fauna::{FaunaId, Herd, HerdState, Pack, PackView, Species};
 pub use memory::Memory;
@@ -111,6 +113,8 @@ pub(crate) mod salt {
     pub const FIRE: u64 = 1014;
     /// Combat homme↔prédateur : la part d'incertitude de la riposte des meutes.
     pub const COMBAT: u64 = 1015;
+    /// Prédication : transmission de la croyance par la parole (Phase 6).
+    pub const FAITH: u64 = 1018;
     /// Météo : formation des averses et sécheresses (Phase 6). Un flux propre,
     /// sans quoi une cellule météo et un départ de feu du même jour seraient
     /// corrélés — deux phénomènes qui doivent rester indépendants.

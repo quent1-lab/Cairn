@@ -115,6 +115,52 @@ pub enum Intervention {
 /// Rayon d'une bénédiction ou d'une épidémie (~500 m) : un campement, pas une
 /// région. Le joueur touche un peuple, pas une civilisation.
 const BLESSING_RADIUS_TILES: f64 = 250.0;
+/// À quelle distance on voit tomber la foudre (~1 km) : de bien plus loin
+/// qu'elle ne tue, comme on voit un incendie de plus loin qu'il ne brûle.
+const LIGHTNING_SIGHT_TILES: f64 = 500.0;
+/// Étendue sous laquelle on ressent une averse ou une sécheresse : celle de la
+/// cellule météo elle-même (~1,5 km).
+const WEATHER_SIGHT_TILES: f64 = 750.0;
+
+/// Qui témoigne d'un prodige, et comment il le prend — ou `None` si le geste
+/// **ne fait aucun croyant**.
+///
+/// Deux règles, et elles portent tout l'équilibre du §6.1.
+///
+/// **Un dieu se juge à ses effets.** Un geste qui ne produit rien ne convainc
+/// personne : une foudre dans le vide, une grâce sur une lande déserte, une
+/// révélation qui n'éclaire pas. Le ciel a beau s'agiter, s'il ne se passe rien,
+/// il n'y a rien à croire.
+///
+/// **La météo se juge à part**, et pas ici : voir `faith::witness_weather`. Une
+/// averse est indiscernable du ciel ordinaire, mais ce n'est pas le phénomène
+/// qui fait le signe — c'est sa coïncidence avec le besoin. Le jugement y est
+/// donc individuel (l'assoiffé y voit une réponse, son voisin repu n'y voit
+/// rien), ce que cette fonction, qui décide pour tout le monde à la fois, ne
+/// saurait exprimer.
+fn witness_effect(intervention: Intervention, outcome: &Outcome) -> Option<(f64, bool)> {
+    match intervention {
+        Intervention::Lightning { .. } => {
+            if outcome.killed > 0 {
+                Some((LIGHTNING_SIGHT_TILES, false)) // le ciel a tué : on le craint
+            } else if outcome.ignited {
+                Some((LIGHTNING_SIGHT_TILES, true)) // il a donné le feu
+            } else {
+                None // un éclair, et puis rien
+            }
+        }
+        Intervention::Fertility { .. } => {
+            (outcome.touched > 0).then_some((BLESSING_RADIUS_TILES, true))
+        }
+        Intervention::Plague { .. } => {
+            (outcome.touched + outcome.killed > 0).then_some((BLESSING_RADIUS_TILES, false))
+        }
+        // Jugée par `faith::witness_weather`, agent par agent : voir plus haut.
+        Intervention::Rain { .. } | Intervention::Drought { .. } => None,
+        // L'inspiré est le seul témoin, et il n'a rien vu — il a compris.
+        Intervention::Revelation { .. } => (outcome.touched > 0).then_some((1.0, true)),
+    }
+}
 /// Ce qu'un geste rend — ou retire — de santé. La moitié d'une vie : assez pour
 /// arracher un mourant, ou pour emporter un affaibli.
 const BLESSING_HEALTH: f32 = 0.5;
@@ -156,37 +202,54 @@ impl Sim {
     ///
     /// Ne consomme aucune Foi pour l'instant — voir l'en-tête du module.
     pub fn invoke(&mut self, intervention: Intervention) -> Result<Outcome, DivineError> {
-        let outcome = match intervention {
-            Intervention::Lightning { pos } => self.strike_lightning(pos),
-            // Un seul mécanisme, deux signes : le montant change, rien d'autre.
-            // Écrire deux fonctions symétriques aurait invité l'une à diverger
-            // de l'autre — la leçon des mécaniques à deux faces du projet.
-            Intervention::Fertility { pos } => self.touch_health(pos, BLESSING_HEALTH),
-            Intervention::Plague { pos } => self.touch_health(pos, -BLESSING_HEALTH),
-            Intervention::Rain { pos } => self.summon_weather(pos, WeatherKind::Rain),
-            Intervention::Drought { pos } => self.summon_weather(pos, WeatherKind::Drought),
-            Intervention::Revelation { agent } => {
-                let pos = self.agent_position(agent).ok_or(DivineError::NoSuchTarget)?;
-                // `touched` vaut 1 s'il a compris : c'est un témoin, et le seul.
-                let understood = crate::tech::reveal(self, agent).is_some();
-                let outcome =
-                    Outcome { ignited: false, killed: 0, touched: usize::from(understood) };
-                self.miracles.push(Miracle { tick: self.time.tick, intervention, outcome });
-                self.record(pos, EventKind::Miracle { intervention, outcome });
-                return Ok(outcome);
-            }
-        };
-        self.miracles.push(Miracle { tick: self.time.tick, intervention, outcome });
+        // Le lieu d'abord. La révélation en a besoin **avant** d'agir (celui
+        // qu'on inspirait a pu mourir), et c'est la seule qui puisse échouer.
         let pos = match intervention {
             Intervention::Lightning { pos }
             | Intervention::Fertility { pos }
             | Intervention::Plague { pos }
             | Intervention::Rain { pos }
             | Intervention::Drought { pos } => pos,
-            // La révélation a déjà tout fait plus haut (elle a besoin du lieu
-            // *avant* d'agir, l'homme pouvant mourir) : elle sort par `return`.
-            Intervention::Revelation { .. } => unreachable!(),
+            Intervention::Revelation { agent } => {
+                self.agent_position(agent).ok_or(DivineError::NoSuchTarget)?
+            }
         };
+
+        let outcome = match intervention {
+            Intervention::Lightning { .. } => self.strike_lightning(pos),
+            // Un seul mécanisme, deux signes : le montant change, rien d'autre.
+            // Écrire deux fonctions symétriques aurait invité l'une à diverger
+            // de l'autre — la leçon des mécaniques à deux faces du projet.
+            Intervention::Fertility { .. } => self.touch_health(pos, BLESSING_HEALTH),
+            Intervention::Plague { .. } => self.touch_health(pos, -BLESSING_HEALTH),
+            Intervention::Rain { .. } => self.summon_weather(pos, WeatherKind::Rain),
+            Intervention::Drought { .. } => self.summon_weather(pos, WeatherKind::Drought),
+            Intervention::Revelation { agent } => {
+                let understood = crate::tech::reveal(self, agent).is_some();
+                Outcome { ignited: false, killed: 0, touched: usize::from(understood) }
+            }
+        };
+
+        // Qui a vu, et comment il l'a pris (§6.1). Un geste qui ne produit rien
+        // ne fait aucun croyant : **un dieu se juge à ses effets**.
+        let center = (pos.0 as f64 + 0.5, pos.1 as f64 + 0.5);
+        match intervention {
+            // La météo se juge au besoin de chacun, pas au geste : le même
+            // orage répond à l'assoiffé et laisse son voisin indifférent.
+            Intervention::Rain { .. } => {
+                crate::faith::witness_weather(self, center, WEATHER_SIGHT_TILES, true);
+            }
+            Intervention::Drought { .. } => {
+                crate::faith::witness_weather(self, center, WEATHER_SIGHT_TILES, false);
+            }
+            _ => {
+                if let Some((radius, boon)) = witness_effect(intervention, &outcome) {
+                    crate::faith::witness(self, center, radius, boon);
+                }
+            }
+        }
+
+        self.miracles.push(Miracle { tick: self.time.tick, intervention, outcome });
         self.record(pos, EventKind::Miracle { intervention, outcome });
         Ok(outcome)
     }
@@ -572,6 +635,115 @@ mod tests {
             "et la découverte aussi, séparément"
         );
         assert_eq!(sim.tech_events.len(), 1, "elle compte comme une vraie découverte");
+    }
+
+    /// **L'arbitrage central de la Foi (§6.1).** Un dieu se juge à ses effets,
+    /// et il faut être spectaculaire pour être cru : le geste discret est
+    /// puissant mais ne financera jamais le suivant.
+    #[test]
+    fn seuls_les_gestes_qui_se_voient_font_des_croyants() {
+        use crate::faith::Faith;
+        let croyants = |sim: &Sim| {
+            sim.agents.query::<&Faith>().iter().filter(|(_, f)| f.believes()).count()
+        };
+
+        // Une grâce qui relève quelqu'un : on y croit.
+        let mut sim = Sim::new(WorldSeed(5), 64);
+        sim.spawn_agent(0.0, 0.0);
+        for (_, phys) in sim.agents.query_mut::<&mut Physiology>() {
+            phys.health = 0.4;
+        }
+        sim.invoke(Intervention::Fertility { pos: (0, 0) }).unwrap();
+        assert_eq!(croyants(&sim), 1, "être guéri fait un fidèle");
+
+        // La même grâce sur une lande déserte : rien ne s'est produit.
+        let mut vide = Sim::new(WorldSeed(5), 64);
+        vide.spawn_agent(10_000.0, 0.0); // trop loin pour être touché
+        vide.invoke(Intervention::Fertility { pos: (0, 0) }).unwrap();
+        assert_eq!(croyants(&vide), 0, "un geste sans effet ne convainc personne");
+
+        // Et la pluie sur un peuple qui n'a besoin de rien : il pleut, voilà tout.
+        let mut ciel = Sim::new(WorldSeed(5), 64);
+        ciel.allow_weather = false;
+        ciel.spawn_agent(0.0, 0.0);
+        for (_, phys) in ciel.agents.query_mut::<&mut Physiology>() {
+            phys.thirst = 0.1; // il ne manque de rien
+        }
+        ciel.invoke(Intervention::Rain { pos: (0, 0) }).unwrap();
+        assert_eq!(croyants(&ciel), 0, "sur un homme comblé, une averse n'est que la météo");
+    }
+
+    /// **La nuance qui distingue une averse d'une réponse.** Ce n'est pas le
+    /// phénomène qui fait le signe — il est indiscernable du ciel ordinaire —
+    /// c'est sa coïncidence avec le besoin. La même pluie, au même instant, est
+    /// un miracle pour l'assoiffé et un jour comme un autre pour son voisin.
+    #[test]
+    fn la_pluie_qui_arrive_quand_on_en_a_besoin_est_une_reponse() {
+        use crate::faith::Faith;
+        let mut sim = Sim::new(WorldSeed(5), 64);
+        sim.allow_weather = false;
+        let assoiffe = sim.spawn_agent(0.0, 0.0);
+        let repu = sim.spawn_agent(20.0, 0.0); // à deux pas, sous la même averse
+        for (_, (id, phys)) in sim.agents.query_mut::<(&AgentId, &mut Physiology)>() {
+            phys.thirst = if *id == assoiffe { 0.8 } else { 0.1 };
+        }
+
+        sim.invoke(Intervention::Rain { pos: (0, 0) }).unwrap();
+
+        let foi = |who| {
+            sim.agents
+                .query::<(&AgentId, &Faith)>()
+                .iter()
+                .find(|(_, (id, _))| **id == who)
+                .map(|(_, (_, f))| *f)
+                .unwrap()
+        };
+        assert!(foi(assoiffe).believes(), "celui qui mourait de soif y voit une réponse");
+        assert_eq!(foi(assoiffe).boons, 1, "et il la porte au crédit du ciel");
+        assert!(!foi(repu).believes(), "son voisin, lui, a seulement vu qu'il pleuvait");
+
+        // Et le châtiment se lit pareil : la sécheresse ne frappe que qui a faim.
+        let mut sec = Sim::new(WorldSeed(5), 64);
+        sec.allow_weather = false;
+        let affame = sec.spawn_agent(0.0, 0.0);
+        for (_, phys) in sec.agents.query_mut::<&mut Physiology>() {
+            phys.hunger = 0.8;
+        }
+        sec.invoke(Intervention::Drought { pos: (0, 0) }).unwrap();
+        let f = sec
+            .agents
+            .query::<(&AgentId, &Faith)>()
+            .iter()
+            .find(|(_, (id, _))| **id == affame)
+            .map(|(_, (_, f))| *f)
+            .unwrap();
+        assert_eq!(f.banes, 1, "une sécheresse sur un affamé est un châtiment");
+        assert!(f.benevolence() < 0.0);
+    }
+
+    /// La foudre fait des croyants **des deux façons** — et ce qu'ils retiennent
+    /// n'est pas le même. C'est de cet écart que naîtra la théologie (§6.3).
+    #[test]
+    fn le_ciel_est_cru_qu_il_donne_ou_qu_il_frappe() {
+        use crate::faith::Faith;
+        let mut sim = Sim::new(WorldSeed(42), 256);
+        let Some((fx, fy)) = find_flammable(&mut sim) else { return };
+        sim.spawn_agent(fx as f64 + 0.5, fy as f64 + 0.5); // sous le coup
+        sim.spawn_agent(fx as f64 + 200.0, fy as f64); // à l'écart, mais il voit
+
+        sim.invoke(Intervention::Lightning { pos: (fx, fy) }).unwrap();
+
+        // Le mort ne croit plus rien ; le survivant, lui, a vu le ciel tuer.
+        let temoin = sim
+            .agents
+            .query::<(&Physiology, &Faith)>()
+            .iter()
+            .find(|(_, (p, _))| !p.is_dead())
+            .map(|(_, (_, f))| *f)
+            .expect("un survivant");
+        assert!(temoin.believes(), "voir la foudre tuer fait croire");
+        assert_eq!(temoin.banes, 1, "et il en garde un mauvais souvenir");
+        assert!(temoin.benevolence() < 0.0, "son dieu est un dieu de colère");
     }
 
     /// Le journal est ce qui rend le monde rejouable (§8.2) : chaque geste y

@@ -233,6 +233,10 @@ pub struct Sim {
     /// seed, il suffit à rejouer une histoire entière, la simulation étant
     /// déterministe. Voir `crate::divine`.
     pub miracles: Vec<crate::divine::Miracle>,
+    /// **La Foi** (BRIEF §6.1) : la ressource du joueur, produite chaque jour
+    /// par ses croyants et dépensée par ses miracles. Nulle au départ — « aucun
+    /// croyant → la divinité est quasi impuissante ». Voir `crate::faith`.
+    pub faith: f32,
     /// Les expéditions commerciales en cours (Phase 5, incrément 6b), par
     /// identifiant d'agent — une table à côté de l'ECS, comme `routes`,
     /// nettoyée à la mort de l'envoyé. Voir `crate::commerce`.
@@ -298,6 +302,7 @@ impl Sim {
             weather: Vec::new(),
             chronicle: Vec::new(),
             miracles: Vec::new(),
+            faith: 0.0,
             expeditions: BTreeMap::new(),
             allow_wildfires: true,
             allow_weather: true,
@@ -315,7 +320,7 @@ impl Sim {
         let id = AgentId(self.next_agent_id);
         self.next_agent_id += 1;
         let (demo, traits) = demography::founder(self.world.seed(), id.0, self.time.tick);
-        self.agents.spawn((
+        let entity = self.agents.spawn((
             id,
             Position { x, y },
             Physiology::default(),
@@ -337,6 +342,10 @@ impl Sim {
             // Vierge de toute blessure : les plaies s'acquièrent en combattant.
             Wound::default(),
         ));
+        // Et incroyant : on ne croit que pour avoir vu (voir `crate::faith`).
+        // Ajouté après coup, `hecs` plafonnant un bundle à 15 composants — un
+        // agent en porte désormais seize.
+        let _ = self.agents.insert_one(entity, crate::faith::Faith::default());
         id
     }
 
@@ -352,7 +361,7 @@ impl Sim {
     ) -> AgentId {
         let id = AgentId(self.next_agent_id);
         self.next_agent_id += 1;
-        self.agents.spawn((
+        let entity = self.agents.spawn((
             id,
             Position { x, y },
             Physiology {
@@ -385,6 +394,8 @@ impl Sim {
             // Vierge de toute blessure : les plaies s'acquièrent en combattant.
             Wound::default(),
         ));
+        // Un nouveau-né naît incroyant : le monde ne se souvient pas pour lui.
+        let _ = self.agents.insert_one(entity, crate::faith::Faith::default());
         id
     }
 
@@ -950,6 +961,9 @@ impl Sim {
             // La météo (Phase 6) : averses et sécheresses passagères. **Avant** le
             // feu, qui lit son décalage d'humidité pour savoir si la brousse
             // peut s'enflammer — un sol détrempé ne prend pas.
+            // La Foi (Phase 6) : la ferveur s'émousse, et ce qu'il en reste produit
+            // la ressource du joueur. Cesser d'agir, c'est être oublié.
+            crate::faith::daily(self);
             crate::weather::daily(self);
             fire::daily(self);
         }
@@ -966,6 +980,9 @@ impl Sim {
             // voisin à portée, quel que soit son clan — même passe de
             // rencontre que les liens sociaux et l'échange de sources.
             tech::diffuse(self);
+            // Et la croyance se transmet dans la même passe de rencontre que les
+            // savoirs — pour la même raison : on convainc un voisin, parfois.
+            crate::faith::preach(self);
         }
 
         // 4. Faune. Les meutes chassent d'abord (sur l'instantané), puis
