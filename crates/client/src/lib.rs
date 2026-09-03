@@ -188,6 +188,10 @@ struct App {
     seed: u64,
     /// Mode « poser des humains au clic » armé.
     placing: bool,
+    /// Le geste divin armé, s'il en est un : le prochain clic sur la carte le
+    /// portera là (BRIEF §6.2). Exclusif avec `placing` — on ne peut pas à la
+    /// fois peupler et foudroyer.
+    armed: Option<ArmedMiracle>,
     /// Agent inspecté (son `AgentId`), sélectionné au clic. `None` = aucun.
     /// Purement d'affichage — la simulation l'ignore.
     selected: Option<u64>,
@@ -266,6 +270,7 @@ impl App {
             elapsed_ms: 0.0,
             seed,
             placing: false,
+            armed: None,
             selected: None,
             follow: true,
             color_mode: ColorMode::Activity,
@@ -619,6 +624,46 @@ impl App {
             self.ctx.arc(fx, fy, r, 0.0, std::f64::consts::TAU).expect("arc");
             self.ctx.fill();
         }
+        // Cellules météo (Phase 6) : un voile bleu pour l'averse, ocre pour la
+        // sécheresse. Très translucide — c'est du temps qu'il fait, pas un
+        // objet du monde ; et le joueur doit pouvoir juger d'un coup d'œil où
+        // le sol peut encore prendre feu.
+        for cell in &self.sim.weather {
+            let (cx, cy) = to_screen(cell.pos.0, cell.pos.1);
+            let r = (cell.radius * scale).max(3.0);
+            let rain = cell.kind == cairn_sim::WeatherKind::Rain;
+            self.ctx.set_global_alpha(0.14);
+            self.ctx.set_fill_style_str(if rain { "#5aa9ff" } else { "#d8a24a" });
+            self.ctx.begin_path();
+            self.ctx.arc(cx, cy, r, 0.0, std::f64::consts::TAU).expect("arc");
+            self.ctx.fill();
+        }
+        self.ctx.set_global_alpha(1.0);
+
+        // Lieux sacrés (Phase 6, « le Signe ») : un losange clair, et l'anneau
+        // d'appel qui montre jusqu'où les fidèles l'entendent — c'est cette
+        // portée qui décide si deux peuples vont converger, donc se disputer.
+        for shrine in &self.sim.shrines {
+            let (sx, sy) = to_screen(shrine.pos.0, shrine.pos.1);
+            let pull = cairn_sim::cult::SHRINE_PULL_TILES * scale;
+            self.ctx.set_global_alpha(0.30);
+            self.ctx.set_stroke_style_str("#c9b6ff");
+            self.ctx.set_line_width(1.0);
+            self.ctx.begin_path();
+            self.ctx.arc(sx, sy, pull.max(3.0), 0.0, std::f64::consts::TAU).expect("arc");
+            self.ctx.stroke();
+            // Le losange : un repère qui ne ressemble à rien d'autre sur la carte.
+            self.ctx.set_global_alpha(0.95);
+            self.ctx.set_fill_style_str("#ded0ff");
+            let h = 5.0;
+            self.ctx.begin_path();
+            self.ctx.move_to(sx, sy - h);
+            self.ctx.line_to(sx + h, sy);
+            self.ctx.line_to(sx, sy + h);
+            self.ctx.line_to(sx - h, sy);
+            self.ctx.close_path();
+            self.ctx.fill();
+        }
         self.ctx.set_global_alpha(1.0);
 
         // Routes d'expédition (Phase 5, incrément 6) : « le bronze force la
@@ -734,6 +779,8 @@ impl App {
         let t = self.sim.time;
         // Le dock de temps : la date de jeu compacte.
         set_html("dock-date", &format!("An <b>{}</b> · jour <b>{}</b>", t.year(), t.day_of_year()));
+        // La Foi : ce que les croyants ont produit et que les miracles dépensent.
+        set_text("faith-value", &format!("{:.0}", self.sim.faith));
         // Readout de cadrage (panneau Carte).
         set_text(
             "readout",
@@ -942,6 +989,28 @@ impl App {
                 format!("<div class=\"c-line\">structures : <b>{}</b></div>", owned.join(", "))
             };
 
+            // Le panthéon (BRIEF §6.3) : ce que ce peuple croit de la divinité,
+            // **dérivé** de ce que ses membres ont vécu d'elle. On ne l'affiche
+            // que s'il y a une religion à montrer — un peuple sans croyants n'a
+            // pas de théologie, il a une absence.
+            let theo = self.sim.clan_theology(clan.id);
+            let creed_line = if theo.is_shared() {
+                format!(
+                    "<div class=\"c-line creed\">croit en <b>{}</b> · {} fidèles sur {} · ferveur {:.0} %</div>",
+                    theo.creed().label(),
+                    theo.believers,
+                    theo.members,
+                    theo.fervor * 100.0,
+                )
+            } else if theo.believers > 0 {
+                format!(
+                    "<div class=\"c-line creed\">{} croyant(s) isolé(s) — pas encore un culte</div>",
+                    theo.believers,
+                )
+            } else {
+                String::new()
+            };
+
             html.push_str(&format!(
                 "<div class=\"clan\">\
                    <div class=\"c-top\">\
@@ -951,7 +1020,7 @@ impl App {
                      <span class=\"c-meta\">{n} membres</span>\
                    </div>\
                    <div class=\"stockline\"><span class=\"s-l\">stock</span>{bar}<span class=\"s-v\">{stock:.0}/{cap:.0}</span></div>\
-                   <div class=\"c-line\">{line}</div>{structs_line}\
+                   <div class=\"c-line\">{line}</div>{structs_line}{creed_line}\
                  </div>",
                 color = clan_color(clan.id),
                 name = self.sim.clan_name(clan.id),
@@ -1276,7 +1345,11 @@ impl App {
         if let Some((dx, dy)) = self.press {
             let moved = (px - dx).hypot(py - dy);
             if moved < 5.0 {
-                if self.placing {
+                if let Some(miracle) = self.armed {
+                    // Un geste armé : le clic dit où. On le désarme aussitôt —
+                    // un miracle se veut, il ne se répète pas par inadvertance.
+                    self.invoke_at(miracle, px, py);
+                } else if self.placing {
                     // Mode placement : le clic pose une bande d'humains.
                     self.place_at(px, py);
                 } else {
@@ -1341,6 +1414,88 @@ impl App {
                 self.camera.scale = fit;
                 self.invalidate_terrain();
             }
+        }
+    }
+
+    /// Arme (ou désarme) un geste divin. Exclusif avec le mode placement.
+    fn arm_miracle(&mut self, key: &str) {
+        let wanted = ArmedMiracle::from_key(key);
+        // Recliquer le même bouton désarme : le joueur peut changer d'avis.
+        self.armed = if self.armed == wanted { None } else { wanted };
+        if self.armed.is_some() && self.placing {
+            self.toggle_placing();
+        }
+        self.refresh_miracle_ui(key);
+    }
+
+    /// Accomplit le geste armé à l'endroit cliqué, puis désarme.
+    fn invoke_at(&mut self, miracle: ArmedMiracle, px: f64, py: f64) {
+        let (wx, wy) = self.tile_at(px, py);
+        let pos = (wx.floor() as i64, wy.floor() as i64);
+        // `invoke` est la porte unique de la simulation (BRIEF §6.2) : le client
+        // ne touche à rien d'autre, et deviendra un appel réseau tel quel.
+        let outcome = self.sim.invoke(miracle.at(pos));
+        self.armed = None;
+        self.refresh_miracle_ui("");
+        // On dit ce que le monde a répondu — pas ce qu'on espérait.
+        let msg = match outcome {
+            Ok(o) => {
+                let mut parts: Vec<String> = Vec::new();
+                if o.ignited {
+                    parts.push("le feu prend".into());
+                }
+                if o.killed > 0 {
+                    parts.push(format!("{} mort(s)", o.killed));
+                }
+                if o.touched > 0 {
+                    parts.push(format!("{} témoin(s)", o.touched));
+                }
+                if parts.is_empty() {
+                    "Rien n'en est venu.".to_string()
+                } else {
+                    parts.join(", ")
+                }
+            }
+            Err(_) => "Personne à inspirer là.".to_string(),
+        };
+        set_text("miracle-hint", &msg);
+    }
+
+    /// La Révélation : elle vise l'humain sélectionné, pas un lieu.
+    fn invoke_revelation(&mut self) {
+        let Some(id) = self.selected else {
+            set_text("miracle-hint", "Choisissez d'abord un humain sur la carte.");
+            return;
+        };
+        let msg = match self.sim.invoke(cairn_sim::Intervention::Revelation {
+            agent: cairn_sim::AgentId(id),
+        }) {
+            Ok(o) if o.touched > 0 => "Il a compris quelque chose.".to_string(),
+            // La limite du §6.2 : la révélation ne crée rien, elle éclaire ce
+            // qu'on a déjà sous les yeux.
+            Ok(_) => "Rien ne lui vient : il n'a pas encore vu ce qu'il faudrait.".to_string(),
+            Err(_) => "Cet humain n'est plus.".to_string(),
+        };
+        set_text("miracle-hint", &msg);
+    }
+
+    /// Reflète l'état armé sur les boutons et le curseur.
+    fn refresh_miracle_ui(&self, key: &str) {
+        if let Ok(list) = document().query_selector_all(".miracle-btn") {
+            for i in 0..list.length() {
+                if let Some(el) = list.item(i).and_then(|n| n.dyn_into::<web_sys::Element>().ok()) {
+                    let armed = self.armed.is_some()
+                        && el.get_attribute("data-miracle").as_deref() == Some(key);
+                    let _ = el.class_list().toggle_with_force("armed", armed);
+                }
+            }
+        }
+        let _ = self.canvas.style().set_property(
+            "cursor",
+            if self.armed.is_some() { "crosshair" } else { "grab" },
+        );
+        if self.armed.is_some() {
+            set_text("miracle-hint", "Cliquez la carte pour porter le geste.");
         }
     }
 
@@ -1783,6 +1938,27 @@ fn install_event_handlers() -> Result<(), JsValue> {
     }
     set_active_button(".speed-btn", "data-speed", &format!("{}", SPEEDS[1]));
 
+    // Les interventions divines (BRIEF §6.2) : chaque bouton arme un geste, le
+    // clic suivant sur la carte le porte. Même patron que « Poser des humains ».
+    let miracles = document().query_selector_all(".miracle-btn")?;
+    for i in 0..miracles.length() {
+        let Some(btn) = miracles.item(i).and_then(|n| n.dyn_into::<web_sys::Element>().ok())
+        else {
+            continue;
+        };
+        let key = btn.get_attribute("data-miracle").unwrap_or_default();
+        listen!(btn, "click", web_sys::MouseEvent, move |_e: web_sys::MouseEvent| {
+            let k = key.clone();
+            with_app(move |a| a.arm_miracle(&k));
+        });
+    }
+    // La Révélation vise un être, pas un lieu : pas d'armement, effet immédiat.
+    if let Some(btn) = document().get_element_by_id("revelation-btn") {
+        listen!(btn, "click", web_sys::MouseEvent, move |_e: web_sys::MouseEvent| {
+            with_app(App::invoke_revelation);
+        });
+    }
+
     // Paramètres : régénérer le monde.
     if let Some(btn) = document().get_element_by_id("cfg-apply") {
         listen!(btn, "click", web_sys::MouseEvent, move |_e: web_sys::MouseEvent| {
@@ -1826,4 +2002,48 @@ fn window() -> web_sys::Window {
 
 fn document() -> web_sys::Document {
     window().document().expect("pas de document")
+}
+
+/// Un geste divin **armé mais pas encore situé** : le joueur a choisi quoi
+/// faire, le clic suivant dira où. La position manquante est exactement ce qui
+/// distingue ce type de `cairn_sim::Intervention`.
+///
+/// La Révélation n'y figure pas : elle vise un **être**, pas un lieu, et part
+/// donc directement sur l'humain sélectionné.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ArmedMiracle {
+    Lightning,
+    Fertility,
+    Plague,
+    Rain,
+    Drought,
+    Sign,
+}
+
+impl ArmedMiracle {
+    /// L'identifiant que porte le bouton HTML (`data-miracle`).
+    fn from_key(key: &str) -> Option<Self> {
+        Some(match key {
+            "lightning" => ArmedMiracle::Lightning,
+            "fertility" => ArmedMiracle::Fertility,
+            "plague" => ArmedMiracle::Plague,
+            "rain" => ArmedMiracle::Rain,
+            "drought" => ArmedMiracle::Drought,
+            "sign" => ArmedMiracle::Sign,
+            _ => return None,
+        })
+    }
+
+    /// Le geste, une fois qu'on sait où.
+    fn at(self, pos: (i64, i64)) -> cairn_sim::Intervention {
+        use cairn_sim::Intervention as I;
+        match self {
+            ArmedMiracle::Lightning => I::Lightning { pos },
+            ArmedMiracle::Fertility => I::Fertility { pos },
+            ArmedMiracle::Plague => I::Plague { pos },
+            ArmedMiracle::Rain => I::Rain { pos },
+            ArmedMiracle::Drought => I::Drought { pos },
+            ArmedMiracle::Sign => I::Sign { pos },
+        }
+    }
 }

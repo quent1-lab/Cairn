@@ -185,6 +185,18 @@
     /* Le récit se lit du plus récent au plus ancien, comme un fil : la date en
        exergue, la phrase en dessous. Hauteur bornée + défilement propre — le
        journal grandit sans fin, le panneau non. */
+    /* Palette d'interventions et jauge de Foi (Phase 6). */
+    .miracles { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-bottom: 7px; }
+    .miracle-btn { font: inherit; font-size: 11px; padding: 6px 7px; cursor: pointer;
+      background: rgba(255,255,255,0.03); color: var(--dim); text-align: left;
+      border: 1px solid var(--line-soft); border-radius: 5px; transition: all .12s; }
+    .miracle-btn:hover { color: var(--text); background: rgba(255,255,255,0.07); }
+    .miracle-btn.armed { color: #ffd9a0; border-color: rgba(255,190,110,0.55);
+      background: rgba(255,170,80,0.14); }
+    .faith { display: flex; align-items: center; gap: 6px; font-size: 12px;
+      color: #cbd8ff; letter-spacing: 0.02em; }
+    .faith-icon { color: #9fb8ff; font-size: 13px; }
+    .creed { font-size: 10.5px; color: #b9a6d8; }
     .chronicle { display: flex; flex-direction: column; gap: 9px;
                  max-height: 232px; overflow-y: auto; padding-right: 4px; }
     .chronicle .entry { border-left: 2px solid var(--line-soft); padding-left: 9px; }
@@ -334,6 +346,22 @@
         <div id="clan-panel" class="rows">…</div>
       </div>
 
+      <!-- Les interventions (Phase 6, BRIEF §6.2) : le seul pouvoir du joueur.
+           Aucune n'est un « bouton bien » — les infobulles disent le revers. -->
+      <div class="sect">
+        <div class="eyebrow">Interventions</div>
+        <div class="miracles">
+          <button class="miracle-btn" data-miracle="lightning" title="Allume un feu si le sol peut brûler — et tue net qui se tient dessous">⚡ Foudre</button>
+          <button class="miracle-btn" data-miracle="fertility" title="Rend la santé, donc lève le frein à la conception : des bouches que la terre ne nourrira peut-être pas">✚ Fertilité</button>
+          <button class="miracle-btn" data-miracle="plague" title="Retire la santé — et emporte des porteurs de savoir, qui peut disparaître avec eux">☠ Maladie</button>
+          <button class="miracle-btn" data-miracle="rain" title="Une averse ordinaire : un signe pour qui a soif, la météo pour les autres. Éteint la voie du feu.">☂ Pluie</button>
+          <button class="miracle-btn" data-miracle="drought" title="Affame — donc pousse à inventer — et rend la brousse inflammable">☀ Sécheresse</button>
+          <button class="miracle-btn" data-miracle="sign" title="Désigne un lieu sacré : les fidèles de tous les peuples y viennent… et s'y disputent">◈ Signe</button>
+        </div>
+        <button class="action-btn" id="revelation-btn" title="Fait comprendre à l'humain sélectionné ce qu'il avait déjà sous les yeux — aucun prérequis n'est sauté">☼ Révélation sur l'humain choisi</button>
+        <p class="hint" id="miracle-hint">Choisissez un geste, puis cliquez la carte.</p>
+      </div>
+
       <!-- La Chronique (Phase 6, BRIEF §6.4) : ce qu'on lit en revenant. -->
       <div class="sect">
         <div class="eyebrow">Chronique</div>
@@ -399,6 +427,11 @@
       <button class="speed-btn" data-speed="24">4×</button>
       <button class="speed-btn" data-speed="96">16×</button>
     </div>
+    <div class="sep"></div>
+    <div class="faith" id="dock-faith" title="La Foi : produite par vos croyants, dépensée par vos miracles">
+      <span class="faith-icon">✦</span><span id="faith-value">0</span>
+    </div>
+    <div class="sep"></div>
     <div class="sep"></div>
     <div class="date" id="dock-date">…</div>
   </div>
