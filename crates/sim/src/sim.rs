@@ -237,6 +237,9 @@ pub struct Sim {
     /// par ses croyants et dépensée par ses miracles. Nulle au départ — « aucun
     /// croyant → la divinité est quasi impuissante ». Voir `crate::faith`.
     pub faith: f32,
+    /// Les lieux tenus pour sacrés (BRIEF §6.2, « le Signe ») — registre
+    /// clairsemé, comme les feux. Voir `crate::cult::Shrine`.
+    pub shrines: Vec<crate::cult::Shrine>,
     /// Les expéditions commerciales en cours (Phase 5, incrément 6b), par
     /// identifiant d'agent — une table à côté de l'ECS, comme `routes`,
     /// nettoyée à la mort de l'envoyé. Voir `crate::commerce`.
@@ -303,6 +306,7 @@ impl Sim {
             chronicle: Vec::new(),
             miracles: Vec::new(),
             faith: 0.0,
+            shrines: Vec::new(),
             expeditions: BTreeMap::new(),
             allow_wildfires: true,
             allow_weather: true,
@@ -579,7 +583,8 @@ impl Sim {
         // mémoire) pour relâcher l'emprunt de `self.agents` avant d'appeler
         // `brain::inspect`, qui veut `&mut self.world`.
         let agriculture = self.tech_tree.id_of("agriculture");
-        let (pos, phys, traits, demo, kin, clan, carrying, current, knows_agriculture, mem) = self
+
+        let (pos, phys, traits, demo, kin, clan, carrying, current, knows_agriculture, mem, fervor) = self
             .agents
             .query::<(
                 &AgentId,
@@ -593,10 +598,11 @@ impl Sim {
                 &Behavior,
                 &Knowledge,
                 &Memory,
+                &crate::faith::Faith,
             )>()
             .iter()
             .find(|(_, (aid, ..))| aid.0 == id.0)
-            .map(|(_, (_, pos, phys, traits, demo, kin, membership, carrying, behavior, knowledge, mem))| {
+            .map(|(_, (_, pos, phys, traits, demo, kin, membership, carrying, behavior, knowledge, mem, faith))| {
                 (
                     *pos,
                     *phys,
@@ -608,6 +614,7 @@ impl Sim {
                     behavior.task.map(|t| t.kind),
                     agriculture.is_some_and(|a| knowledge.has(a)),
                     mem.clone(),
+                    faith.fervor,
                 )
             })?;
         if demo.is_infant(time.tick) {
@@ -623,10 +630,12 @@ impl Sim {
             clan,
             carrying,
             knows_agriculture,
+            fervor,
         };
         Some(brain::inspect(
             &mut self.world, time, &ctx, &mem, current, &herds, &packs, &humans, &clan_views,
             &self.clan_relations,
+            &self.shrines,
         ))
     }
 
@@ -669,10 +678,14 @@ impl Sim {
         // reste ainsi découplé de l'arbre technologique).
         let agriculture = self.tech_tree.id_of("agriculture");
 
+        // Les lieux sacrés, copiés avant la boucle : `query_mut` emprunte `self`
+        // mutablement, et un sanctuaire est un point — le clone est négligeable.
+        let shrines = self.shrines.clone();
+
         // 1. Délibération — bucketée : l'agent i ne repense sa tâche qu'aux
         // ticks (tick + i) % période == 0, ou dès qu'il n'a plus de tâche.
         // Les nourrissons ne délibèrent pas : ils sont portés.
-        for (_, (id, pos, phys, traits, demo, kin, membership, carrying, knowledge, behavior, mem)) in self
+        for (_, (id, pos, phys, traits, demo, kin, membership, carrying, knowledge, faith, behavior, mem)) in self
             .agents
             .query_mut::<(
                 &AgentId,
@@ -684,6 +697,7 @@ impl Sim {
                 &ClanMembership,
                 &Carrying,
                 &Knowledge,
+                &crate::faith::Faith,
                 &mut Behavior,
                 &mut Memory,
             )>()
@@ -720,6 +734,7 @@ impl Sim {
                         clan: membership.0,
                         carrying: carrying.0,
                         knows_agriculture: agriculture.is_some_and(|a| knowledge.has(a)),
+                        fervor: faith.fervor,
                     };
                     behavior.task = brain::decide(
                         &mut self.world,
@@ -732,6 +747,7 @@ impl Sim {
                         &humans,
                         &clan_views,
                         &self.clan_relations,
+                        &shrines,
                     );
                 }
             }
@@ -1373,6 +1389,10 @@ fn execute(
         | TaskKind::Socialize
         | TaskKind::Explore
         | TaskKind::ReturnToClan
+        // Le pèlerinage n'a d'effet que d'avoir eu lieu : on est venu, on est là.
+        // Ce que ça produit — des peuples qui convergent et se disputent le lieu —
+        // tombe de la géométrie, pas d'un effet écrit ici.
+        | TaskKind::Pilgrimage
         | TaskKind::Expedition => {
             behavior.activity = Activity::Idle;
             behavior.task = None; // arrivé — on re-délibérera aussitôt

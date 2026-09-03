@@ -125,6 +125,12 @@ pub enum TaskKind {
     /// Marcher vers une cellule jamais visitée : le drive « comprendre »,
     /// réservé aux curieux dont les besoins sont contenus (voir `brain`).
     Explore,
+    /// Se rendre au lieu que la divinité a désigné (BRIEF §6.2, « le Signe »).
+    /// Réservé à ceux qui ont assez de ferveur pour se déranger — et c'est tout
+    /// ce que le Signe fait : il n'a aucun effet propre, il attire. Ce qui suit
+    /// (des peuples qui convergent, se touchent et finissent par se disputer le
+    /// lieu) tombe de mécanismes qui existaient déjà.
+    Pilgrimage,
     /// Rejoindre le territoire de son clan (voir `crate::social::Clan::home`)
     /// quand on s'en est trop éloigné. La rétroaction qui donne un sens à la
     /// co-résidence : sans elle, la population diffuse sans jamais revenir

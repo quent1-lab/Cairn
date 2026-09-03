@@ -326,6 +326,12 @@ pub fn tell_parts(
             crate::divine::Intervention::Drought { .. } => {
                 "le ciel se ferme ; la terre commence à durcir.".to_string()
             }
+            // Un signe ne fait rien : il désigne. Tout ce qui suivra viendra des
+            // hommes qui s'y rendront.
+            crate::divine::Intervention::Sign { .. } => {
+                "quelque chose marque ce lieu, et l'on n'ose plus le fouler comme avant."
+                    .to_string()
+            }
             // Sobre à dessein : la découverte elle-même est racontée à part, par
             // son propre fait (`TechDiscovered`, avec le nom de celui qui a
             // compris). Ici on ne dit que ce qu'un tiers aurait perçu — un homme

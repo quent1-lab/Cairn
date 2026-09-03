@@ -110,6 +110,18 @@ pub enum Intervention {
     /// qui puisse échouer faute de cible (`DivineError::NoSuchTarget`) : celui
     /// qu'on inspirait a pu mourir entre-temps.
     Revelation { agent: AgentId },
+
+    /// **Le Signe** : désigner un lieu comme sacré (§6.2). La seule intervention
+    /// **sans effet direct** — elle ne brûle rien, ne soigne personne. Elle
+    /// n'agit que parce que des hommes y croient, ce qui explique qu'elle ait
+    /// attendu qu'il y en ait.
+    ///
+    /// Son ambivalence est la plus belle du lot, et elle est entièrement
+    /// empruntée : le sanctuaire attire les fidèles de **tous** les peuples qui
+    /// y croient, donc rapproche leurs foyers, donc fait monter la tension que
+    /// `social::update_relations` mesure déjà à cette distance-là. « Les clans y
+    /// bâtissent, s'y rassemblent… **et s'y battent**. » Pas une ligne pour ça.
+    Sign { pos: (i64, i64) },
 }
 
 /// Rayon d'une bénédiction ou d'une épidémie (~500 m) : un campement, pas une
@@ -159,6 +171,9 @@ fn witness_effect(intervention: Intervention, outcome: &Outcome) -> Option<(f64,
         Intervention::Rain { .. } | Intervention::Drought { .. } => None,
         // L'inspiré est le seul témoin, et il n'a rien vu — il a compris.
         Intervention::Revelation { .. } => (outcome.touched > 0).then_some((1.0, true)),
+        // Un signe se **voit** : il marque ceux qui étaient là, et pour eux
+        // c'est une faveur — le ciel a choisi leur terre.
+        Intervention::Sign { .. } => Some((LIGHTNING_SIGHT_TILES, true)),
     }
 }
 /// Ce qu'un geste rend — ou retire — de santé. La moitié d'une vie : assez pour
@@ -209,7 +224,8 @@ impl Sim {
             | Intervention::Fertility { pos }
             | Intervention::Plague { pos }
             | Intervention::Rain { pos }
-            | Intervention::Drought { pos } => pos,
+            | Intervention::Drought { pos }
+            | Intervention::Sign { pos } => pos,
             Intervention::Revelation { agent } => {
                 self.agent_position(agent).ok_or(DivineError::NoSuchTarget)?
             }
@@ -224,6 +240,13 @@ impl Sim {
             Intervention::Plague { .. } => self.touch_health(pos, -BLESSING_HEALTH),
             Intervention::Rain { .. } => self.summon_weather(pos, WeatherKind::Rain),
             Intervention::Drought { .. } => self.summon_weather(pos, WeatherKind::Drought),
+            Intervention::Sign { .. } => {
+                self.shrines.push(crate::cult::Shrine {
+                    pos: (pos.0 as f64 + 0.5, pos.1 as f64 + 0.5),
+                    since: self.time.tick,
+                });
+                Outcome { ignited: false, killed: 0, touched: 0 }
+            }
             Intervention::Revelation { agent } => {
                 let understood = crate::tech::reveal(self, agent).is_some();
                 Outcome { ignited: false, killed: 0, touched: usize::from(understood) }

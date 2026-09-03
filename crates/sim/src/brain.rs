@@ -111,6 +111,9 @@ const RAID_RADIUS_TILES: f64 = km_to_tiles(1.0);
 /// Poussée du drive de raid : forte, mais modulée par l'agressivité et la
 /// tension — qui décident qui razzie qui, et quand.
 const RAID_DRIVE: f32 = 0.9;
+/// Poussée du drive de pèlerinage : modeste, et de toute façon multipliée par
+/// la ferveur — un tiède ne bouge pas, un fervent traverse la contrée.
+const PILGRIMAGE_DRIVE: f32 = 0.5;
 
 /// L'agent vu par la délibération : son identité et ses composants, groupés
 /// pour ne pas trimballer sept paramètres.
@@ -129,6 +132,10 @@ pub struct AgentCtx<'a> {
     /// simulation (`knowledge.has(agriculture)`) et déballé en `bool` ici, pour
     /// que `brain` reste découplé de l'arbre technologique.
     pub knows_agriculture: bool,
+    /// La ferveur de cet agent (`crate::faith::Faith`), déballée en `f32` — même
+    /// traitement que `clan` et `carrying`, pour que `brain` reste découplé du
+    /// système de croyance.
+    pub fervor: f32,
 }
 
 /// Choisit la prochaine tâche de l'agent. Déterministe : le tirage dérive de
@@ -147,6 +154,8 @@ pub fn decide(
     humans: &[HumanView],
     clan_views: &BTreeMap<ClanId, ClanView>,
     relations: &ClanRelations,
+    // Les lieux sacrés, si la divinité en a désigné (BRIEF §6.2).
+    shrines: &[crate::cult::Shrine],
 ) -> Option<Task> {
     // La perception de l'eau est **mémorisée** — délibérer, c'est déjà
     // mémoriser. C'est le seul effet de bord de la délibération : il reste ici,
@@ -158,7 +167,7 @@ pub fn decide(
         mem.remember_spring(seen, (agent.pos.x, agent.pos.y));
     }
     let candidates =
-        build_candidates(world, time, &agent, mem, spring, current, herds, packs, humans, clan_views, relations);
+        build_candidates(world, time, &agent, mem, spring, current, herds, packs, humans, clan_views, relations, shrines);
 
     let scores: Vec<f32> = candidates.iter().map(|c| c.2).collect();
     let mut rng =
@@ -186,6 +195,7 @@ fn build_candidates(
     humans: &[HumanView],
     clan_views: &BTreeMap<ClanId, ClanView>,
     relations: &ClanRelations,
+    shrines: &[crate::cult::Shrine],
 ) -> Vec<(TaskKind, (i64, i64), f32)> {
     let (id, pos, phys, traits, demo, kin, clan, carrying, knows_agriculture) = (
         agent.id, agent.pos, agent.phys, agent.traits, agent.demo, agent.kin, agent.clan,
@@ -430,6 +440,23 @@ fn build_candidates(
         }
     }
 
+    // — Le pèlerinage : se rendre au lieu que le ciel a désigné. Un candidat
+    //   de plus dans le softmax, jamais une contrainte — la faim et la soif
+    //   passent devant, on ne meurt pas de piété. Seule la ferveur décide qui
+    //   se dérange, et c'est **tout** ce que le Signe fait : il attire. Que des
+    //   peuples convergent, se touchent et finissent par se disputer le lieu
+    //   tombe ensuite de mécanismes qui existaient déjà (§6.2).
+    if let Some(shrine) = nearest_shrine(shrines, (pos.x, pos.y), agent.fervor) {
+        let d = (pos.x - shrine.0).hypot(pos.y - shrine.1);
+        // Plus on croit, plus on marche ; et l'appel faiblit avec la distance.
+        let score = agent.fervor * PILGRIMAGE_DRIVE * travel_discount(d);
+        candidates.push((
+            TaskKind::Pilgrimage,
+            (shrine.0.floor() as i64, shrine.1.floor() as i64),
+            score,
+        ));
+    }
+
     // — Bâtir (BRIEF §5.1) : le clan a mesuré qu'il désire une structure
     //   (`structures::plan`) et son stock peut la payer. On ne bâtit que
     //   repu (comme on explore repu) et le chantier est au foyer — le coût
@@ -630,11 +657,12 @@ pub fn inspect(
     humans: &[HumanView],
     clan_views: &BTreeMap<ClanId, ClanView>,
     relations: &ClanRelations,
+    shrines: &[crate::cult::Shrine],
 ) -> Vec<Motivation> {
     let here = agent.pos.tile();
     let spring = world.nearest_spring(here, SPRING_RADIUS_CHUNKS); // lue, jamais mémorisée
     let candidates =
-        build_candidates(world, time, agent, mem, spring, current, herds, packs, humans, clan_views, relations);
+        build_candidates(world, time, agent, mem, spring, current, herds, packs, humans, clan_views, relations, shrines);
     let scores: Vec<f32> = candidates.iter().map(|c| c.2).collect();
     let probs = softmax_weights(&scores, SOFTMAX_TAU);
     let mut out: Vec<Motivation> = candidates
@@ -715,4 +743,35 @@ fn nearest_forest(world: &mut World, from: (i64, i64)) -> Option<(i64, i64)> {
         dy += SHELTER_STRIDE;
     }
     best.map(|(_, p)| p)
+}
+
+/// Le lieu sacré le plus proche à portée d'appel, pour qui a la ferveur d'y
+/// aller. Duplique volontairement la géométrie de `Sim::shrine_call` : la
+/// délibération ne voit pas `Sim`, seulement des instantanés — même situation
+/// que `social::claim_from_views`, et un test garde les deux d'accord.
+fn nearest_shrine(
+    shrines: &[crate::cult::Shrine],
+    from: (f64, f64),
+    fervor: f32,
+) -> Option<(f64, f64)> {
+    if fervor < crate::cult::PILGRIM_FERVOR {
+        return None;
+    }
+    shrines
+        .iter()
+        .map(|s| (s.pos, (from.0 - s.pos.0).hypot(from.1 - s.pos.1)))
+        .filter(|&(_, d)| d <= crate::cult::SHRINE_PULL_TILES)
+        .min_by(|(_, a), (_, b)| a.total_cmp(b))
+        .map(|(pos, _)| pos)
+}
+
+/// Expose [`nearest_shrine`] au test qui garde les deux lectures du lieu sacré
+/// cohérentes (voir `cult`) — la fonction elle-même reste privée.
+#[cfg(test)]
+pub(crate) fn nearest_shrine_for_test(
+    shrines: &[crate::cult::Shrine],
+    from: (f64, f64),
+    fervor: f32,
+) -> Option<(f64, f64)> {
+    nearest_shrine(shrines, from, fervor)
 }
