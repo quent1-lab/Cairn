@@ -501,7 +501,7 @@ const TENSION_DECAY_RATE: f32 = 0.08;
 const TENSION_FORGET_THRESHOLD: f32 = 0.02;
 
 /// Identifiant stable d'un clan, monotone — comme `AgentId`/`FaunaId`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
 pub struct ClanId(pub u64);
 
 /// Un clan détecté : identité, membres, **territoire** (BRIEF §5.1) et

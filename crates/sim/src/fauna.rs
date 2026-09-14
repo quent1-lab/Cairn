@@ -112,7 +112,7 @@ pub const PACK_HUNT_RADIUS_TILES: f64 = km_to_tiles(0.5);
 /// place sur la carte), sa vigilance, et — pour les prédateurs — sa
 /// **dangerosité** (le risque qu'il y aura à le chasser, quand les humains s'y
 /// mettront pour protéger leur gibier : incrément « éleveur » à venir).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Species {
     // — Herbivores (proies) —
     /// Cerf — forêts, vif et farouche.

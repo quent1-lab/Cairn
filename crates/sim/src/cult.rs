@@ -89,7 +89,7 @@ impl Theology {
 }
 
 /// Ce qu'un peuple dit de son dieu. Étiquette d'affichage et de récit.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Creed {
     /// Personne n'y croit assez pour qu'on en parle.
     Absent,
@@ -198,9 +198,11 @@ mod tests {
         for _ in 0..n {
             sim.spawn_agent(0.0, 0.0);
         }
-        let mut i = 0;
-        for (_, (_, membership, faith)) in
-            sim.agents.query_mut::<(&AgentId, &mut ClanMembership, &mut Faith)>()
+        for (i, (_, (_, membership, faith))) in sim
+            .agents
+            .query_mut::<(&AgentId, &mut ClanMembership, &mut Faith)>()
+            .into_iter()
+            .enumerate()
         {
             membership.0 = Some(ClanId(1));
             if i < croyants {
@@ -208,7 +210,6 @@ mod tests {
                 faith.boons = boons;
                 faith.banes = banes;
             }
-            i += 1;
         }
         sim
     }

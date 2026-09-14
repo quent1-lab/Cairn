@@ -61,7 +61,7 @@ use cairn_core::km_to_tiles;
 
 /// Les structures qu'un clan peut bâtir. `repr(u8)` implicite via l'ordre :
 /// `Ord` sert au tri déterministe du registre.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
 pub enum StructureKind {
     Hut,
     Granary,

@@ -73,7 +73,7 @@ pub const PREGNANCY_HUNGER_PER_TICK: f32 = HUNGER_PER_TICK * 0.2;
 /// Écart-type de la mutation gaussienne à l'hérédité d'un trait.
 pub const MUTATION_SIGMA: f64 = 0.06;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Sex {
     Female,
     Male,

@@ -17,7 +17,7 @@ use cairn_core::km_to_tiles;
 /// `hecs` (qui recyclent les slots). C'est lui qui nourrit les flux RNG par
 /// agent — le déterminisme ne doit pas dépendre des détails de l'ECS — et,
 /// plus tard, la Chronique.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
 pub struct AgentId(pub u64);
 
 /// Position **continue** en coordonnées de tuiles (1 tuile = 2 m). Continue :
@@ -76,7 +76,7 @@ pub const HEALTH_REGEN: f32 = 1.0 / 240.0;
 
 /// Ce que l'agent fait de son heure. Posé par l'exécution des tâches, lu par
 /// la dérive physiologique (dormir récupère, s'abriter réchauffe).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum Activity {
     #[default]
     Idle,
@@ -218,7 +218,7 @@ pub struct Prestige(pub f32);
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Wound(pub f32);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum DeathCause {
     Starvation,
     Dehydration,

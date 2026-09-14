@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/worldgen", "crates/sim", "crates/client"]
+members = ["crates/core", "crates/worldgen", "crates/sim", "crates/protocol", "crates/client"]
 
 [workspace.package]
 version = "0.1.0"
@@ -10,6 +10,7 @@ edition = "2024"
 cairn-core = { path = "crates/core" }
 cairn-worldgen = { path = "crates/worldgen" }
 cairn-sim = { path = "crates/sim" }
+cairn-protocol = { path = "crates/protocol" }
 noise = "0.9"
 image = { version = "0.25", default-features = false, features = ["png"] }
 rayon = "1"
@@ -24,3 +25,10 @@ ron = "0.8"
 # maison — sans scheduler imposé : l'ordre des systèmes reste écrit par nous,
 # ce qui garantit le déterminisme.
 hecs = "0.10"
+# Format binaire du protocole (Phase 6, BRIEF §8.4 « postcard ou bincode ») :
+# sérialiser une trentaine de types imbriqués à la main est très au-delà des
+# ~50 lignes que la règle n°2 met en balance. postcard plutôt que bincode :
+# encodage varint (un `u64` de petite valeur tient sur un octet, or le monde
+# est en coordonnées i64) et `no_std` — donc le même code sur le fil et dans
+# le wasm.
+postcard = { version = "1", features = ["use-std"] }

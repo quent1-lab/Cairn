@@ -56,7 +56,7 @@ pub fn agent_name(seed: WorldSeed, id: AgentId, sex: Sex) -> String {
     // Flux propre à l'agent : `stream = id` sur la seed des noms. Deux agents
     // consécutifs ne se ressemblent donc pas (PCG décorrèle les flux).
     let mut rng = Pcg32::new(seed.derive(salt::NAMES), id.0);
-    let syllables = if rng.next_u32() % 4 == 0 { 3 } else { 2 };
+    let syllables = if rng.next_u32().is_multiple_of(4) { 3 } else { 2 };
     let mut name = String::new();
     for _ in 0..syllables {
         name.push_str(pick(ONSETS, &mut rng));
@@ -77,7 +77,7 @@ pub fn clan_name(seed: WorldSeed, id: ClanId) -> String {
     let mut rng = Pcg32::new(seed.derive(salt::NAMES), id.0 ^ CLAN_STREAM_MIX);
     let mut name = String::new();
     // Une chance sur trois de commencer par une voyelle nue (Ashkar, Orum).
-    if rng.next_u32() % 3 > 0 {
+    if !rng.next_u32().is_multiple_of(3) {
         name.push_str(pick(ONSETS, &mut rng));
     }
     name.push_str(pick(VOWELS, &mut rng));

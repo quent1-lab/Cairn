@@ -82,9 +82,9 @@ fn main() {
         home.0, home.1, tile.biome, tile.temperature,
     );
     println!(
-        "{:>4} {:>4} {:>4}  {:>8}  {:>3}  {:>5} {:>5}  {:>4} {:>4} {:>4} {:>4} {:>4} {:>4}  {:>3}  {}",
+        "{:>4} {:>4} {:>4}  {:>8}  {:>3}  {:>5} {:>5}  {:>4} {:>4} {:>4} {:>4} {:>4} {:>4}  {:>3}  savoirs",
         "an", "pop", "clan", "P/N/B", "sav", "froid", "faim",
-        "bois", "silx", "argl", "cuiv", "étn", "feu", "exp", "savoirs"
+        "bois", "silx", "argl", "cuiv", "étn", "feu", "exp"
     );
 
     let total_ticks = years * TICKS_PER_YEAR;
@@ -162,7 +162,7 @@ fn report(sim: &Sim, day: u64) {
             }
         }
     }
-    let pct = |x: u32| if adults > 0 { 100 * x / adults } else { 0 };
+    let pct = |x: u32| (100 * x).checked_div(adults).unwrap_or(0);
     let cold_max = sim.clan_pressure.values().map(|p| p.cold).fold(0.0_f32, f32::max);
     let famine_max = sim.clan_pressure.values().map(|p| p.famine).fold(0.0_f32, f32::max);
 

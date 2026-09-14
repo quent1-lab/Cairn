@@ -7,9 +7,8 @@
 #
 # Usage :  scripts/verify.sh [ticks_bench]     (défaut 600)
 #
-# À lancer via Git Bash (le git/rg/awk du projet y sont). Ne dépend que de
-# cargo + grep + awk. Ne lance PAS la suite complète (~40 min) : seulement le
-# test de déterminisme, qui est la garde qui compte.
+# Ne dépend que de cargo + grep + awk. Ne lance PAS la suite complète
+# (~40 min) : seulement le test de déterminisme, qui est la garde qui compte.
 # ─────────────────────────────────────────────────────────────────────────────
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -71,7 +70,10 @@ sec "Débit — micro-banc client_render ($TICKS ticks, seed 42)"
 cargo build --release -p cairn-client --example client_render >/dev/null 2>&1 \
   || bad "build client_render échoué"
 t0=$(date +%s.%N)
-./target/release/examples/client_render.exe 42 "$TICKS" 0.6 0 >/dev/null 2>&1 || true
+# Le suffixe `.exe` n'existe que sur Windows : on prend celui qui est là.
+BENCH=target/release/examples/client_render
+[ -x "$BENCH" ] || BENCH="$BENCH.exe"
+"./$BENCH" 42 "$TICKS" 0.6 0 >/dev/null 2>&1 || true
 t1=$(date +%s.%N)
 tps=$(awk -v t="$TICKS" -v a="$t0" -v b="$t1" 'BEGIN{ e=b-a; if(e<=0)e=1; printf "%.2f", t/e }')
 elapsed=$(awk -v a="$t0" -v b="$t1" 'BEGIN{ printf "%.0f", b-a }')

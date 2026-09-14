@@ -62,7 +62,7 @@ pub const CAPACITY_EFFECT: f32 = 0.4;
 pub const HUMIDITY_EFFECT: f32 = 70.0;
 
 /// Averse ou sécheresse.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum WeatherKind {
     Rain,
     Drought,

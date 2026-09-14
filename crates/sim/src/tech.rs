@@ -125,7 +125,7 @@ impl EnvCond {
 /// L'ordre de déclaration est l'ordre chronologique (`Ord` dérivé) : l'âge d'un
 /// clan est le plus avancé des marqueurs de ses techs. En données : chaque tech
 /// porte un marqueur `age` optionnel dans le RON.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, serde::Serialize)]
 pub enum Age {
     Paleolithic,
     Neolithic,
@@ -152,7 +152,7 @@ pub fn age_of(corpus: &BTreeSet<TechId>, tree: &TechTree) -> Age {
 
 /// Identifiant dense d'une technologie : un index dans [`TechTree`]. Stable
 /// pour une version donnée du RON (l'ordre de déclaration fixe les index).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
 pub struct TechId(pub u16);
 
 /// Une technologie telle qu'**écrite** dans le RON : prérequis par nom. Forme
@@ -460,6 +460,11 @@ pub struct TechEvent {
 /// La limite est aussi le revers : le savoir naît chez **un seul** porteur. S'il
 /// est vieux, isolé, ou meurt avant d'avoir parlé, la révélation se perd avec
 /// lui (`forget`). Choisir à qui l'on parle est tout le geste.
+/// Ce qu'il faut avoir relevé sur l'inspiré **avant** de lâcher l'emprunt de
+/// l'ECS pour écrire dans la Chronique : la tech comprise, et les attributs
+/// que le journal fige au moment des faits (§6.4).
+type Revealed = (TechId, (i64, i64), Sex, Option<ClanId>);
+
 pub(crate) fn reveal(sim: &mut Sim, agent: AgentId) -> Option<TechId> {
     if sim.tech_tree.is_empty() {
         return None;
@@ -467,7 +472,7 @@ pub(crate) fn reveal(sim: &mut Sim, agent: AgentId) -> Option<TechId> {
     let tick = sim.time.tick;
     // Relevé d'abord : l'écriture dans la Chronique demande `&mut sim` entier,
     // or la requête emprunte l'ECS (même patron que partout ailleurs).
-    let mut found: Option<(TechId, (i64, i64), Sex, Option<ClanId>)> = None;
+    let mut found: Option<Revealed> = None;
 
     for (_, (id, pos, demo, membership, exposures, mem, knowledge)) in sim
         .agents

@@ -56,7 +56,7 @@ const LIGHTNING_LETHAL_TILES: f64 = 10.0;
 
 /// Ce que le joueur peut demander au monde. Chaque variante porte sa cible :
 /// une intervention est un geste **situé**, jamais global.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Intervention {
     /// La foudre frappe une tuile. Elle allume un feu **si le site peut
     /// brûler** — c'est le sol qui décide, pas la divinité — et tue net qui se
@@ -191,7 +191,7 @@ pub struct Miracle {
 }
 
 /// Ce que le geste a **réellement** produit. Le joueur vise ; le monde répond.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Outcome {
     /// Un feu a-t-il pris ? (Non si le sol était détrempé, nu ou gelé.)
     pub ignited: bool,

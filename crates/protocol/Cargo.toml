@@ -1,0 +1,13 @@
+[package]
+name = "cairn-protocol"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+cairn-core.workspace = true
+# Le protocole **réutilise** les types de la simulation plutôt que de les
+# recopier (BRIEF §8.1) : c'est ce qui rend une désynchronisation
+# serveur↔client structurellement impossible.
+cairn-sim.workspace = true
+serde.workspace = true
+postcard.workspace = true

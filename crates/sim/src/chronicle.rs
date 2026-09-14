@@ -73,7 +73,7 @@ pub const CLAN_NOTABLE_DAYS: u64 = 90;
 /// centrer la caméra d'un clic (« montrer sur la carte »), et la saison du
 /// récit s'en déduit — un hiver n'a pas lieu au même moment aux deux
 /// hémisphères (voir [`Climate::season`]).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Event {
     pub tick: u64,
     pub pos: (i64, i64),
@@ -83,7 +83,7 @@ pub struct Event {
 /// Ce qui peut faire date. Chaque variante est autonome : elle porte les
 /// attributs volatils (sexe, effectif, cause) que l'on ne pourra plus
 /// retrouver au moment de la lecture — voir l'en-tête « un fait est figé ».
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum EventKind {
     /// Un groupe a franchi les seuils de cohésion et de co-résidence : un clan
     /// existe (`social::detect_clans`).

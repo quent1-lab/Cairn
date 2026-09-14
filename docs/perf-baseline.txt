@@ -2,6 +2,13 @@
 # récente en bas. Mesure : cargo run --release -p cairn-client --example
 # client_render -- <seed> <ticks>  → imprime « perf : tps=… ».
 # Une chute nette entre deux lignes = régression à investiguer.
+#
+# ATTENTION — les deux lignes ci-dessous ont été mesurées sur l'ANCIENNE machine
+# de développement (Windows, poste de travail). Depuis le 2026-09-14 le projet
+# vit sur le serveur de déploiement (2 vCPU / 2,9 Go, la cible du BRIEF §8.3) :
+# ces chiffres n'y sont PAS comparables et `verify.sh` criera une régression
+# qui n'en est pas. Première mesure sur la nouvelle machine à prendre, et à
+# noter comme nouvelle référence.
 
 tps=8.58  # 2026-07-27 seed42 400ticks client_render (machine dev)
 tps=9.44  # 2026-07-30 seed42 400ticks — Phase 6 incr. 1 (Chronique) + correctif
