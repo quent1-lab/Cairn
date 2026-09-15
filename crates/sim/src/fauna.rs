@@ -291,13 +291,35 @@ pub struct Pack {
     pub last_kills: f32,
     /// L'espèce de prédateur (loup, lion des cavernes…) : porte sa dangerosité.
     pub species: Species,
+    /// **La proie choisie**, tant qu'elle vit et reste atteignable.
+    ///
+    /// Sans elle, la meute reciblait le troupeau le plus proche **à chaque
+    /// tick**. Or la proie fuit à 2 km/tick quand la meute poursuit à 1,5 : on
+    /// ne rattrape jamais par la vitesse, seulement en épuisant le gibier
+    /// (`FLEE_COOLDOWN`). Une meute qui change d'avis toutes les heures
+    /// n'épuise personne — et plus il y a de troupeaux, plus elle change
+    /// d'avis. L'abondance protégeait donc la proie au lieu de nourrir le
+    /// prédateur.
+    ///
+    /// Mesuré avant ce choix (banc `derive`, scénario naturel sur 6 ans) : le
+    /// rendement de chasse plafonnait à 17-35 % du potentiel, et la prédation
+    /// totale restait entre 0 et 10 proies/jour pendant que le gibier passait
+    /// de 59 à 4 650 têtes.
+    pub quarry: Option<hecs::Entity>,
 }
 
 impl Pack {
     pub fn new(population: f32, species: Species) -> Self {
-        Self { population, last_kills: 0.0, species }
+        Self { population, last_kills: 0.0, species, quarry: None }
     }
 }
+
+/// Au-delà de cette distance, la meute abandonne sa proie et en cherche une
+/// autre. Assez large pour qu'une poursuite tienne malgré les zigzags de la
+/// fuite (le gibier galope 2 km par tick), assez courte pour qu'une meute ne
+/// s'obstine pas à traverser la carte derrière un troupeau qu'elle ne
+/// rejoindra pas.
+const PACK_GIVE_UP_TILES: f64 = km_to_tiles(6.0);
 
 /// Instantané d'un troupeau, pris avant les systèmes : c'est ce que lisent
 /// les chasseurs humains, les meutes et les autres troupeaux. Travailler sur
@@ -603,15 +625,30 @@ pub fn update_packs(
     let mut doomed = Vec::new();
 
     for (entity, (pack, pos)) in fauna.query_mut::<(&mut Pack, &mut Position)>() {
-        // Gibier le plus proche : départage par distance puis ordre de la
-        // liste (elle-même construite dans l'ordre d'itération) → déterministe.
-        let mut nearest: Option<(f64, &HerdView)> = None;
-        for h in herds {
-            let d2 = (pos.x - h.pos.0).powi(2) + (pos.y - h.pos.1).powi(2);
-            if nearest.is_none_or(|(bd, _)| d2 < bd) {
-                nearest = Some((d2, h));
+        // — La proie choisie d'abord : on la garde tant qu'elle vit et qu'elle
+        //   reste à portée d'obstination. C'est ce qui permet d'épuiser un
+        //   gibier plus rapide que soi. —
+        let held = pack.quarry.and_then(|q| {
+            herds.iter().find(|h| h.entity == q).and_then(|h| {
+                let d2 = (pos.x - h.pos.0).powi(2) + (pos.y - h.pos.1).powi(2);
+                (d2 <= PACK_GIVE_UP_TILES * PACK_GIVE_UP_TILES).then_some((d2, h))
+            })
+        });
+
+        // Sinon seulement, le gibier le plus proche : départage par distance
+        // puis ordre de la liste (construite dans l'ordre d'itération) →
+        // déterministe.
+        let nearest = held.or_else(|| {
+            let mut best: Option<(f64, &HerdView)> = None;
+            for h in herds {
+                let d2 = (pos.x - h.pos.0).powi(2) + (pos.y - h.pos.1).powi(2);
+                if best.is_none_or(|(bd, _)| d2 < bd) {
+                    best = Some((d2, h));
+                }
             }
-        }
+            best
+        });
+        pack.quarry = nearest.map(|(_, h)| h.entity);
 
         pack.last_kills = 0.0;
         if let Some((d2, herd)) = nearest {
