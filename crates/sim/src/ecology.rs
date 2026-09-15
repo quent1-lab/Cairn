@@ -73,10 +73,17 @@ pub fn daily_regrowth(
         let half = crate::chunk::CHUNK_SIZE as f64 / 2.0;
         let shift = crate::weather::shift_at((ox as f64 + half, oy as f64 + half), weather);
         let weather_factor = 1.0 + crate::weather::CAPACITY_EFFECT * shift;
-        let Some(chunk) = world.chunk_mut(coord) else { continue };
+        // Emprunts disjoints : la repousse mute les tuiles du chunk pendant que
+        // le worldgen les calcule (génération paresseuse). C'est cette passe
+        // qui borne le gain de la génération paresseuse — elle balaie les 4 096
+        // tuiles, donc les force toutes à exister. Elle ne porte que sur les
+        // chunks **sales**, soit 24 % des chunks générés (mesure M1) ; rendre
+        // ce balayage épars est un incrément à part, qui changerait un
+        // comportement (les tuiles jamais touchées cesseraient de repousser).
+        let Some((chunk, worldgen)) = world.chunk_mut_with_gen(coord) else { continue };
         for ly in 0..CHUNK_SIZE as usize {
             for lx in 0..CHUNK_SIZE as usize {
-                let tile = chunk.tile_mut(lx, ly);
+                let tile = chunk.tile_mut(lx, ly, worldgen);
                 // Le plafond effectif suit la fertilité : un sol dégradé
                 // portera moins que le K du biome (surexploitation, §2.4).
                 let cap = ((f32::from(effective_capacity(tile)) * weather_factor).clamp(0.0, 255.0))

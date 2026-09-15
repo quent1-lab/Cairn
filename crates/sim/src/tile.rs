@@ -56,6 +56,27 @@ pub struct Tile {
 }
 
 impl Tile {
+    /// Valeur de remplissage d'une tuile **pas encore calculée**.
+    ///
+    /// Depuis la génération paresseuse (`Chunk`), un chunk neuf alloue ses
+    /// 4 096 tuiles sans les calculer : la mesure M1 a établi qu'on n'en lit
+    /// que 18,9 en moyenne, soit 0,46 %. Le masque `ready` du chunk garantit
+    /// qu'aucune de ces valeurs n'est jamais observée — elle est remplacée par
+    /// la vraie tuile avant toute lecture. Si l'une venait à l'être, `Ocean`
+    /// et une altitude négative la rendraient **infranchissable**, donc
+    /// visible plutôt que silencieusement plausible.
+    pub const UNCOMPUTED: Tile = Tile {
+        biome: Biome::Ocean,
+        rock: RockType::Sedimentary,
+        deposit: Deposit::None,
+        elevation: -1.0,
+        temperature: 0.0,
+        humidity: 0,
+        soil_fertility: 0,
+        biomass: 0,
+        flags: TileFlags(0),
+    };
+
     pub fn is_water(self) -> bool {
         self.flags.has(TileFlags::WATER)
     }

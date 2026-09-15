@@ -91,6 +91,44 @@ pub struct World {
     /// Statistiques cumulées (observabilité de la mémoire).
     pub generated: u64,
     pub evicted: u64,
+    /// Instrumentation du **taux d'utilisation** des chunks (mesure M1), sous
+    /// la feature `chunk-stats` — absente du binaire autrement.
+    #[cfg(feature = "chunk-stats")]
+    stats: ChunkStats,
+}
+
+/// Combien de tuiles d'un chunk sont **réellement lues ou écrites** entre sa
+/// génération et son éviction ?
+///
+/// La question qui arbitre tout le chantier de performance. Générer un chunk
+/// coûte le bruit du worldgen sur ses 4 096 tuiles ; si l'accès n'en touche
+/// qu'une poignée, le coût n'est pas dans la génération mais dans sa
+/// **granularité**, et le correctif est de générer à la tuile plutôt que de
+/// générer moins cher.
+///
+/// Mesuré et non supposé, parce que les deux correctifs sont incompatibles :
+/// rendre la génération moins chère ne sert à rien si l'on génère 4 096 fois
+/// trop, et générer paresseusement ne sert à rien si l'on lit tout le chunk.
+#[cfg(feature = "chunk-stats")]
+#[derive(Default)]
+struct ChunkStats {
+    /// Un bit par tuile touchée, pour chaque chunk résident.
+    masks: BTreeMap<ChunkCoord, Box<[u64; 64]>>,
+    /// Chunks ayant subi au moins une **écriture** pendant leur vie, et qui
+    /// sont donc balayés en entier par l'écologie chaque jour. La génération
+    /// paresseuse ne peut rien pour eux : c'est la fraction qui décide si C1
+    /// suffit ou s'il faut aussi rendre l'écologie éparse.
+    written: BTreeSet<ChunkCoord>,
+    dirty_lives: u64,
+    /// Vies de chunk achevées (générations suivies d'une éviction).
+    lives: u64,
+    /// Somme des tuiles distinctes touchées sur ces vies.
+    touched_total: u64,
+    /// Répartition par puissance de deux : `hist[k]` compte les vies dont le
+    /// nombre de tuiles touchées tombe dans `[2^k, 2^(k+1))`. La moyenne seule
+    /// mentirait — une poignée de chunks intensément lus la tirerait vers le
+    /// haut en masquant la masse des chunks à peine effleurés.
+    hist: [u64; 14],
 }
 
 impl World {
@@ -112,7 +150,56 @@ impl World {
             capacity: capacity.max(1),
             generated: 0,
             evicted: 0,
+            #[cfg(feature = "chunk-stats")]
+            stats: ChunkStats::default(),
         }
+    }
+
+    /// Note qu'une tuile de ce chunk a été touchée (mesure M1).
+    #[cfg(feature = "chunk-stats")]
+    fn note_access(&mut self, coord: ChunkCoord, lx: usize, ly: usize, write: bool) {
+        let bit = ly * crate::chunk::CHUNK_SIZE as usize + lx;
+        let mask = self.stats.masks.entry(coord).or_insert_with(|| Box::new([0u64; 64]));
+        mask[bit / 64] |= 1 << (bit % 64);
+        if write {
+            self.stats.written.insert(coord);
+        }
+    }
+
+    #[cfg(not(feature = "chunk-stats"))]
+    #[inline(always)]
+    fn note_access(&mut self, _coord: ChunkCoord, _lx: usize, _ly: usize, _write: bool) {}
+
+    /// Clôt la vie d'un chunk : range son nombre de tuiles touchées dans la
+    /// répartition (mesure M1).
+    #[cfg(feature = "chunk-stats")]
+    fn close_life(&mut self, coord: ChunkCoord) {
+        let Some(mask) = self.stats.masks.remove(&coord) else { return };
+        let touched: u32 = mask.iter().map(|w| w.count_ones()).sum();
+        if self.stats.written.remove(&coord) {
+            self.stats.dirty_lives += 1;
+        }
+        self.stats.lives += 1;
+        self.stats.touched_total += touched as u64;
+        let bucket = (u32::BITS - touched.leading_zeros()) as usize;
+        self.stats.hist[bucket.min(13)] += 1;
+    }
+
+    #[cfg(not(feature = "chunk-stats"))]
+    #[inline(always)]
+    fn close_life(&mut self, _coord: ChunkCoord) {}
+
+    /// Le rapport d'utilisation (mesure M1) : `(vies, tuiles touchées en
+    /// moyenne, répartition par puissance de deux)`. Les chunks encore
+    /// résidents n'y sont pas — leur vie n'est pas finie.
+    #[cfg(feature = "chunk-stats")]
+    pub fn utilization(&self) -> (u64, f64, [u64; 14], u64) {
+        let mean = if self.stats.lives == 0 {
+            0.0
+        } else {
+            self.stats.touched_total as f64 / self.stats.lives as f64
+        };
+        (self.stats.lives, mean, self.stats.hist, self.stats.dirty_lives)
     }
 
     /// Nombre de chunks actuellement en mémoire.
@@ -151,12 +238,24 @@ impl World {
     /// revenu au baseline), il est réappliqué sur le baseline frais : la
     /// consommation simulée reprend exactement où elle en était.
     pub fn chunk(&mut self, coord: ChunkCoord) -> &Chunk {
+        self.ensure_resident(coord);
+        &self.chunks[&coord]
+    }
+
+    /// Charge le chunk s'il est absent, note l'accès pour le LRU, évince au
+    /// besoin. Séparé de [`chunk`](Self::chunk) parce que la génération
+    /// paresseuse oblige les lectures de tuile à emprunter `chunks` en mutable :
+    /// elles ne peuvent pas passer par une méthode qui rend déjà un `&Chunk`.
+    fn ensure_resident(&mut self, coord: ChunkCoord) {
         self.clock += 1;
         if !self.chunks.contains_key(&coord) {
             let mut chunk = Chunk::generate(coord, &self.worldgen);
             if let Some(delta) = self.deltas.remove(&coord) {
                 for (lx, ly, biomass, soil_fertility) in delta.tiles {
-                    let t = chunk.tile_mut(lx as usize, ly as usize);
+                    // Réappliquer un delta **calcule** ces tuiles-là : il n'y
+                    // en a que quelques dizaines, et ce sont exactement celles
+                    // que la simulation avait déjà touchées.
+                    let t = chunk.tile_mut(lx as usize, ly as usize, &self.worldgen);
                     t.biomass = biomass;
                     t.soil_fertility = soil_fertility;
                 }
@@ -169,7 +268,6 @@ impl World {
             self.evict_down_to_capacity(coord);
         }
         self.last_access.insert(coord, self.clock);
-        &self.chunks[&coord]
     }
 
     /// Tuile à la coordonnée de tuile (x, y) — charge le chunk au besoin.
@@ -177,7 +275,15 @@ impl World {
     /// emprunté.
     pub fn tile(&mut self, x: i64, y: i64) -> Tile {
         let (coord, lx, ly) = split(x, y);
-        *self.chunk(coord).tile(lx, ly)
+        self.ensure_resident(coord);
+        // Emprunts disjoints : le chunk est muté (génération paresseuse de la
+        // tuile) pendant que le worldgen est lu. Passer par `self` entier
+        // heurterait le borrow checker ; déstructurer nomme les deux champs
+        // séparément et lui montre qu'ils ne se recouvrent pas.
+        let Self { chunks, worldgen, .. } = self;
+        let t = *chunks.get_mut(&coord).expect("résident").tile(lx, ly, worldgen);
+        self.note_access(coord, lx, ly, false);
+        t
     }
 
     /// Accès **mutable** à une tuile : marque le chunk sale (une éviction
@@ -187,13 +293,15 @@ impl World {
     pub fn tile_mut(&mut self, x: i64, y: i64) -> &mut Tile {
         let (coord, lx, ly) = split(x, y);
         // S'assure que le chunk est résident (et paie l'éviction éventuelle)…
-        self.chunk(coord);
+        self.ensure_resident(coord);
         self.dirty.insert(coord);
         // …puis le remprunte en mutable. `get_mut` ne peut pas échouer :
         // le chunk vient d'être chargé et `keep` interdit son éviction.
-        let chunk = self.chunks.get_mut(&coord).unwrap();
+        self.note_access(coord, lx, ly, true);
+        let Self { chunks, worldgen, .. } = self;
+        let chunk = chunks.get_mut(&coord).expect("résident");
         chunk.mark_touched(lx, ly);
-        chunk.tile_mut(lx, ly)
+        chunk.tile_mut(lx, ly, worldgen)
     }
 
     /// Les chunks **résidents** actuellement sales, dans l'ordre déterministe
@@ -211,8 +319,16 @@ impl World {
     /// Réservé aux systèmes du crate ; ne marque pas sale. En pratique,
     /// toujours `Some` pour un coord venu de `dirty_coords()` — celle-ci ne
     /// renvoie que des résidents.
-    pub(crate) fn chunk_mut(&mut self, coord: ChunkCoord) -> Option<&mut Chunk> {
-        self.chunks.get_mut(&coord)
+    /// Le chunk **et** le baseline, empruntés séparément : depuis la génération
+    /// paresseuse, muter une tuile exige de pouvoir la calculer, donc de tenir
+    /// les deux à la fois. Déstructurer `self` est ce qui prouve au compilateur
+    /// que les deux champs ne se recouvrent pas.
+    pub(crate) fn chunk_mut_with_gen(
+        &mut self,
+        coord: ChunkCoord,
+    ) -> Option<(&mut Chunk, &WorldGen)> {
+        let Self { chunks, worldgen, .. } = self;
+        chunks.get_mut(&coord).map(|c| (c, &*worldgen))
     }
 
     /// Si le chunk est revenu exactement au baseline (repousse complète), il
@@ -223,7 +339,7 @@ impl World {
     pub(crate) fn clear_dirty_if_pristine(&mut self, coord: ChunkCoord) {
         let Some(chunk) = self.chunks.get(&coord) else { return };
         let pristine = chunk.touched().iter().all(|&(lx, ly)| {
-            let t = chunk.tile(lx as usize, ly as usize);
+            let t = chunk.tile_ready(lx as usize, ly as usize);
             t.biomass == baseline_biomass(t.biome) && t.soil_fertility == baseline_fertility(t.biome)
         });
         if pristine {
@@ -276,6 +392,7 @@ impl World {
         self.chunks.remove(&coord);
         self.last_access.remove(&coord);
         self.evicted += 1;
+        self.close_life(coord);
     }
 
     /// Les sources d'eau du chunk, via le cache — sans générer le chunk.
@@ -330,7 +447,7 @@ impl World {
 fn snapshot_delta(chunk: &Chunk) -> ChunkDelta {
     let mut tiles = Vec::new();
     for &(lx, ly) in chunk.touched() {
-        let t = chunk.tile(lx as usize, ly as usize);
+        let t = chunk.tile_ready(lx as usize, ly as usize);
         let (base_biomass, base_fertility) =
             (baseline_biomass(t.biome), baseline_fertility(t.biome));
         if t.biomass != base_biomass || t.soil_fertility != base_fertility {

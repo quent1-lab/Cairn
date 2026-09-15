@@ -135,8 +135,8 @@ mod tests {
     fn setup() -> (Climate, Tile) {
         let wg = WorldGen::new(WorldSeed(42));
         let climate = Climate::new(wg.temperature.latitude());
-        let chunk = crate::Chunk::generate(crate::ChunkCoord { x: 0, y: 0 }, &wg);
-        (climate, *chunk.tile(0, 0))
+        let mut chunk = crate::Chunk::generate(crate::ChunkCoord { x: 0, y: 0 }, &wg);
+        (climate, *chunk.tile(0, 0, &wg))
     }
 
     #[test]

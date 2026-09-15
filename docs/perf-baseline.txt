@@ -1,16 +1,94 @@
-# Référence de débit (axe D de docs/AUDIT.md). Une ligne par mesure, la plus
-# récente en bas. Mesure : cargo run --release -p cairn-client --example
-# client_render -- <seed> <ticks>  → imprime « perf : tps=… ».
-# Une chute nette entre deux lignes = régression à investiguer.
+# Référence de débit (axe D de docs/AUDIT.md).
 #
-# ATTENTION — les deux lignes ci-dessous ont été mesurées sur l'ANCIENNE machine
-# de développement (Windows, poste de travail). Depuis le 2026-09-14 le projet
-# vit sur le serveur de déploiement (2 vCPU / 2,9 Go, la cible du BRIEF §8.3) :
-# ces chiffres n'y sont PAS comparables et `verify.sh` criera une régression
-# qui n'en est pas. Première mesure sur la nouvelle machine à prendre, et à
-# noter comme nouvelle référence.
+# ─────────────────────────────────────────────────────────────────────────────
+# UNE RÉFÉRENCE DE DÉBIT EST UNE *COURBE*, PAS UN NOMBRE.
+#
+# Ce fichier a contenu un seul tps par mesure, relevé sur 400 ticks — soit la
+# fin de la première année de jeu. Le run long du 2026-09-15 (8 h 18, seed 42,
+# 15,6 années) a montré ce que ce format laisse passer :
+#
+#     an  1 → 63,6 tps        an 12 → 21,5 tps
+#     an  9 → 48,1 tps        an 14 →  2,8 tps
+#                             an 15,6 → 0,1 tps      (facteur 636)
+#
+# Mesuré à 400 ticks, ce même monde aurait annoncé « gain de 570 % sur la
+# référence » et `verify.sh` aurait déclaré victoire — pendant que la
+# simulation s'effondrait cinq cents jours plus tard. Le garde-fou était
+# structurellement aveugle à toute dérive.
+#
+# Deux mesures cohabitent donc désormais, et elles ne répondent pas à la même
+# question :
+#
+#   [A] DÉBIT NOMINAL — `client_render`, scène du client, horizon court.
+#       « Est-ce qu'un changement a rendu le tick plus cher ? »
+#       Sensible aux régressions d'implémentation. Aveugle aux dérives.
+#
+#   [B] COURBE DE DÉRIVE — `example derive`, scène dense, horizon long.
+#       « Est-ce qu'un effectif croît sans borne, et le débit avec lui ? »
+#       C'est la seule qui puisse attraper ce qu'on vient de découvrir.
+#
+# Une entrée [A] seule ne vaut plus validation d'un changement qui touche à la
+# faune, à l'écologie ou au déplacement des agents.
+# ─────────────────────────────────────────────────────────────────────────────
 
-tps=8.58  # 2026-07-27 seed42 400ticks client_render (machine dev)
+## [A] Débit nominal — client_render
+# cargo run --release -p cairn-client --example client_render -- <seed> <ticks>
+# → imprime « perf : tps=… ». Une chute nette entre deux lignes = régression.
+#
+# ATTENTION : les deux lignes ci-dessous viennent de l'ANCIENNE machine
+# (Windows, poste de travail). Depuis le 2026-09-14 le projet vit sur le
+# serveur de déploiement (2 vCPU / 2,9 Go, la cible du BRIEF §8.3) — elles n'y
+# sont pas comparables. Première mesure sur la nouvelle machine à prendre.
+
+tps=8.58  # 2026-07-27 seed42 400ticks client_render (ancienne machine)
 tps=9.44  # 2026-07-30 seed42 400ticks — Phase 6 incr. 1 (Chronique) + correctif
           #   de résurrection au combat. Pas de régression : le journal ne
           #   coûte rien (quelques dizaines d'entrées par an de jeu).
+
+## [B] Courbe de dérive — example derive
+# cargo run --release -p cairn-sim --example derive -- 42 240 150 12 20 4096
+# → imprime une ligne « # courbe tps » à coller ici, et un verdict
+#   convergence/divergence par effectif.
+#
+# Format : une ligne d'en-tête datée, puis la courbe « jour:tps », puis le
+# verdict. Ce qu'on compare d'une version à l'autre, ce n'est pas le tps de
+# départ (la scène est dense, il est bas par construction) — c'est la **pente**
+# et la liste des effectifs qui divergent.
+
+
+## [C] Balayage de capacité — l'étalon du chantier chunk
+#
+# LA mesure du chantier de performance. Même graine, même scène, mêmes
+# effectifs, mêmes tirages : SEULE la capacité du store change. La simulation a
+# donc rigoureusement le même travail à faire dans les quatre cas — tout écart
+# de tps vient du store, de rien d'autre.
+#
+#   for cap in 4096 2048 1024 512; do
+#     cargo run --release -p cairn-sim --example derive -- 42 40 60 4 20 $cap 200 0
+#   done
+#
+# Lire DEUX choses : le tps à chaque capacité, et surtout **l'écart entre les
+# extrêmes** — c'est la « pénalité de dispersion », le prix que paie un monde
+# dont l'ensemble de travail déborde le store. C'est elle qui décide si borner
+# la dispersion des agents relève de la performance ou seulement du design.
+
+# 2026-09-15 · AVANT génération paresseuse (état de départ du chantier)
+#   cap 4096 → 4.4 tps     cap 1024 → 2.0 tps
+#   cap 2048 → 3.4 tps     cap  512 → 0.5 tps
+#   pénalité de dispersion : 8.8×
+#
+# 2026-09-15 · APRÈS génération paresseuse (C1) — trajectoire de simulation
+#   BIT-IDENTIQUE (vérifiée colonne par colonne), seul le temps change.
+#   cap 4096 → 7.2 tps (1.64×)   cap 1024 → 5.2 tps (2.60×)
+#   cap 2048 → 6.0 tps (1.76×)   cap  512 → 2.5 tps (5.00×)
+#   pénalité de dispersion : 8.8× → 2.9×
+#   Le gain croît quand le store se serre : c'est la signature attendue d'un
+#   correctif qui s'attaque à la régénération, et non au travail de simulation.
+#   Et la pénalité divisée par trois change un arbitrage de design : « borner
+#   la dispersion des agents » ne se justifie plus par la performance.
+#
+# Mesure M1 qui a motivé C1 (feature `chunk-stats`, 63 591 vies de chunk) :
+#   18,9 tuiles distinctes touchées sur 4096 = 0,46 %  ⇒ ~216 tuiles générées
+#   par tuile utile. 22,8 % des chunks n'en voient qu'UNE. 75,6 % ne sont
+#   jamais écrits — c'est la portée de C1 ; les 24,4 % restants sont balayés
+#   en entier par l'écologie, qui borne le gain.

@@ -32,6 +32,21 @@ impl ChunkCoord {
 pub struct Chunk {
     pub coord: ChunkCoord,
     tiles: Vec<Tile>,
+    /// Un bit par tuile **déjà calculée**. 512 octets pour 64 Kio de tuiles,
+    /// soit 0,8 % de surcoût mémoire.
+    ///
+    /// Génération paresseuse : calculer les 4 096 tuiles d'un chunk à sa
+    /// naissance coûtait le bruit du worldgen sur chacune, alors que la mesure
+    /// M1 (63 591 vies de chunk) en compte **18,9 réellement lues en moyenne,
+    /// soit 0,46 %** — et près d'un chunk sur quatre n'en voit qu'**une seule**.
+    /// On payait donc environ 216 tuiles générées par tuile utile.
+    ready: Box<[u64; 64]>,
+    /// Les quatre coins d'humidité, calculés une fois à la naissance du chunk.
+    /// Ils sont **partagés avec les chunks voisins** (d'où l'absence de couture)
+    /// et l'humidité varie sur ~256 km : les garder ici est ce qui permet de
+    /// calculer une tuile isolée sans rien recalculer d'autre.
+    humidity_corners: [f64; 4],
+    spring_seed: u64,
     /// Positions locales des sources d'eau douce du chunk. Redondant avec les
     /// drapeaux des tuiles, mais permet à un agent de chercher « la source la
     /// plus proche » en parcourant quelques listes courtes au lieu de dizaines
@@ -56,59 +71,98 @@ impl Chunk {
     /// à l'autre — aucune couture.
     pub fn generate(coord: ChunkCoord, world: &WorldGen) -> Self {
         let (x0, y0) = coord.origin();
-        let h = [
+        let humidity_corners = [
             world.humidity(x0, y0),
             world.humidity(x0 + CHUNK_SIZE, y0),
             world.humidity(x0, y0 + CHUNK_SIZE),
             world.humidity(x0 + CHUNK_SIZE, y0 + CHUNK_SIZE),
         ];
-        let spring_seed = world.seed().derive(salt::SPRINGS);
-
-        let mut tiles = Vec::with_capacity(CHUNK_AREA);
-        let mut springs = Vec::new();
-        for ly in 0..CHUNK_SIZE {
-            for lx in 0..CHUNK_SIZE {
-                let (x, y) = (x0 + lx, y0 + ly);
-                let fx = lx as f64 / CHUNK_SIZE as f64;
-                let fy = ly as f64 / CHUNK_SIZE as f64;
-                let humidity = bilerp(h, fx, fy);
-
-                let elevation = world.elevation(x, y);
-                let temperature = world.mean_temperature(x, y, elevation);
-                let biome = Biome::classify(elevation, temperature, humidity);
-
-                let mut flags = TileFlags::default();
-                if elevation <= 0.0 {
-                    flags.set(TileFlags::WATER);
-                    if matches!(biome, Biome::Coast) {
-                        flags.set(TileFlags::COAST);
-                    }
-                    if temperature < cairn_worldgen::FREEZE_STILL_C {
-                        flags.set(TileFlags::FROZEN);
-                    }
-                } else if is_spring(spring_seed, x, y, humidity) {
-                    flags.set(TileFlags::FRESH_WATER);
-                    springs.push((lx as u8, ly as u8));
-                }
-
-                tiles.push(Tile {
-                    biome,
-                    rock: world.rock_type(x, y),
-                    deposit: world.deposit(x, y, elevation),
-                    elevation: elevation as f32,
-                    temperature: temperature as f32,
-                    humidity: (humidity.clamp(0.0, 1.0) * 255.0) as u8,
-                    soil_fertility: baseline_fertility(biome),
-                    biomass: baseline_biomass(biome),
-                    flags,
-                });
-            }
+        // Les sources par le chemin rapide (préfiltre par hachage) plutôt qu'en
+        // sous-produit de la génération complète : `springs_for` est garanti
+        // bit-identique par un test, et c'est ce qui permet de ne plus calculer
+        // les 4 096 tuiles ici.
+        let springs = springs_for(world, coord);
+        Self {
+            coord,
+            tiles: vec![Tile::UNCOMPUTED; CHUNK_AREA],
+            ready: Box::new([0u64; 64]),
+            humidity_corners,
+            spring_seed: world.seed().derive(salt::SPRINGS),
+            springs,
+            touched: BTreeSet::new(),
         }
-        Self { coord, tiles, springs, touched: BTreeSet::new() }
     }
 
-    /// Tuile locale (lx, ly), avec 0 ≤ lx, ly < 64.
-    pub fn tile(&self, lx: usize, ly: usize) -> &Tile {
+    /// Calcule la tuile locale (lx, ly) depuis le baseline — fonction **pure**
+    /// de sa coordonnée, donc indépendante de l'ordre dans lequel les tuiles
+    /// sont demandées. C'est cette pureté qui rend la génération paresseuse
+    /// sûre vis-à-vis du déterminisme bit-à-bit.
+    fn compute_tile(&self, lx: usize, ly: usize, world: &WorldGen) -> Tile {
+        let (x0, y0) = self.coord.origin();
+        let (x, y) = (x0 + lx as i64, y0 + ly as i64);
+        let fx = lx as f64 / CHUNK_SIZE as f64;
+        let fy = ly as f64 / CHUNK_SIZE as f64;
+        let humidity = bilerp(self.humidity_corners, fx, fy);
+
+        let elevation = world.elevation(x, y);
+        let temperature = world.mean_temperature(x, y, elevation);
+        let biome = Biome::classify(elevation, temperature, humidity);
+
+        let mut flags = TileFlags::default();
+        if elevation <= 0.0 {
+            flags.set(TileFlags::WATER);
+            if matches!(biome, Biome::Coast) {
+                flags.set(TileFlags::COAST);
+            }
+            if temperature < cairn_worldgen::FREEZE_STILL_C {
+                flags.set(TileFlags::FROZEN);
+            }
+        } else if is_spring(self.spring_seed, x, y, humidity) {
+            flags.set(TileFlags::FRESH_WATER);
+        }
+
+        Tile {
+            biome,
+            rock: world.rock_type(x, y),
+            deposit: world.deposit(x, y, elevation),
+            elevation: elevation as f32,
+            temperature: temperature as f32,
+            humidity: (humidity.clamp(0.0, 1.0) * 255.0) as u8,
+            soil_fertility: baseline_fertility(biome),
+            biomass: baseline_biomass(biome),
+            flags,
+        }
+    }
+
+    /// Garantit que la tuile locale est calculée.
+    fn ensure(&mut self, lx: usize, ly: usize, world: &WorldGen) {
+        let bit = ly * CHUNK_SIZE as usize + lx;
+        let (word, mask) = (bit / 64, 1u64 << (bit % 64));
+        if self.ready[word] & mask != 0 {
+            return;
+        }
+        self.tiles[bit] = self.compute_tile(lx, ly, world);
+        self.ready[word] |= mask;
+    }
+
+    /// Tuile locale (lx, ly), avec 0 ≤ lx, ly < 64 — calculée à la demande.
+    pub fn tile(&mut self, lx: usize, ly: usize, world: &WorldGen) -> &Tile {
+        self.ensure(lx, ly, world);
+        &self.tiles[ly * CHUNK_SIZE as usize + lx]
+    }
+
+    /// Tuile locale **sans la calculer** : réservé aux lectures dont on sait
+    /// déjà qu'elles portent sur une tuile générée — celles de `touched`, qui
+    /// n'y entre que par `tile_mut`. Évite de traîner un `&WorldGen` dans
+    /// l'instantané d'éviction, qui ne fait que relire ce qu'il a lui-même
+    /// modifié.
+    pub(crate) fn tile_ready(&self, lx: usize, ly: usize) -> &Tile {
+        debug_assert!(
+            self.ready[(ly * CHUNK_SIZE as usize + lx) / 64]
+                & (1u64 << ((ly * CHUNK_SIZE as usize + lx) % 64))
+                != 0,
+            "tile_ready sur une tuile jamais calculée"
+        );
         &self.tiles[ly * CHUNK_SIZE as usize + lx]
     }
 
@@ -125,7 +179,8 @@ impl Chunk {
 
     /// Accès mutable à la tuile locale. Réservé au [`World`](crate::World),
     /// qui doit marquer le chunk sale — passer par `World::tile_mut`.
-    pub(crate) fn tile_mut(&mut self, lx: usize, ly: usize) -> &mut Tile {
+    pub(crate) fn tile_mut(&mut self, lx: usize, ly: usize, world: &WorldGen) -> &mut Tile {
+        self.ensure(lx, ly, world);
         &mut self.tiles[ly * CHUNK_SIZE as usize + lx]
     }
 }
@@ -258,18 +313,19 @@ mod tests {
         // tuile FRESH_WATER, et le compte total doit correspondre.
         for cy in -2..2 {
             for cx in -2..2 {
-                let chunk = Chunk::generate(ChunkCoord { x: cx, y: cy }, &wg);
+                let mut chunk = Chunk::generate(ChunkCoord { x: cx, y: cy }, &wg);
                 let mut par_drapeau = 0;
                 for ly in 0..CHUNK_SIZE as usize {
                     for lx in 0..CHUNK_SIZE as usize {
-                        if chunk.tile(lx, ly).has_fresh_water() {
+                        if chunk.tile(lx, ly, &wg).has_fresh_water() {
                             par_drapeau += 1;
                         }
                     }
                 }
                 assert_eq!(par_drapeau, chunk.springs.len());
-                for &(lx, ly) in &chunk.springs {
-                    assert!(chunk.tile(lx as usize, ly as usize).has_fresh_water());
+                let sources = chunk.springs.clone();
+                for (lx, ly) in sources {
+                    assert!(chunk.tile(lx as usize, ly as usize, &wg).has_fresh_water());
                 }
             }
         }
@@ -282,11 +338,11 @@ mod tests {
         // « aucune couture »).
         let wg = WorldGen::new(WorldSeed(42));
         let coord = ChunkCoord { x: -2, y: 5 };
-        let chunk = Chunk::generate(coord, &wg);
+        let mut chunk = Chunk::generate(coord, &wg);
         let (x0, y0) = coord.origin();
         for &(lx, ly) in &[(0usize, 0usize), (63, 63), (17, 40)] {
             let (x, y) = (x0 + lx as i64, y0 + ly as i64);
-            assert_eq!(chunk.tile(lx, ly).elevation, wg.elevation(x, y) as f32);
+            assert_eq!(chunk.tile(lx, ly, &wg).elevation, wg.elevation(x, y) as f32);
         }
     }
 }

@@ -1,0 +1,456 @@
+//! Banc de **dérive** : rend visible en minutes ce que le banc long met huit
+//! heures à montrer.
+//!
+//! Le run de référence du 2026-09-15 (8 h 18, seed 42, 15,6 années de jeu) a
+//! établi que le débit s'effondre d'un facteur 636 **sans la moindre fuite
+//! mémoire** — l'empreinte plafonne à 1,13 Go et le processus ne swappe jamais.
+//! Ce qui diverge, ce sont des **effectifs** : le nombre de troupeaux (22 → 919)
+//! et, plus tôt, la dispersion de la population (2 → 59 km). Le coût suit.
+//!
+//! ## Pourquoi un banc de plus
+//!
+//! Le problème ne se déclenche qu'au-delà de la centaine de troupeaux, que la
+//! scène de référence met **quatorze années de jeu** à atteindre naturellement.
+//! Or ce qu'on veut corriger n'est pas la mise en place, c'est la **dynamique du
+//! nombre** : un système qui diverge à 150 troupeaux diverge aussi si on le
+//! *démarre* à 150. On paie donc la densité en condition initiale (via le
+//! `herd_grid` de `scenario::populate`, qui existe déjà) au lieu de la payer en
+//! heures de calcul.
+//!
+//! Ce n'est pas une entorse à l'émergence stricte : c'est une **condition
+//! initiale** de scène, au même titre que `find_home_where` choisit où lâcher
+//! la population. Aucune règle du cœur de simulation n'est touchée.
+//!
+//! ## Ce qu'il mesure, et ce qu'il ne mesure pas
+//!
+//! Il ne mesure **pas** le débit absolu — la scène est volontairement dense et
+//! le chiffre n'est pas comparable à celui de `client_render`. Il mesure des
+//! **tendances** : sur la seconde moitié du run, chaque effectif converge-t-il
+//! ou diverge-t-il ? Le verdict compare la moyenne du 3ᵉ quart à celle du 4ᵉ,
+//! ce qui est robuste au bruit saisonnier sans demander d'ajustement de courbe.
+//!
+//! ## Densité sans étalement — la contrainte qui a dicté la scène
+//!
+//! Première version de ce banc : `scenario::populate` avec un `herd_grid` large,
+//! qui pose le gibier sur une grille de pas 1,5 km. Pour 164 troupeaux, cela
+//! étale la scène sur **18 km** — or 4096 chunks résidents ne couvrent que
+//! 8,2 km de côté (un chunk fait 128 m). Le store passait alors son temps à
+//! évincer puis régénérer : on mesurait du **thrashing de LRU**, pas la faune.
+//! Mesuré : moins de 0,7 tps, contre 2,8 sur la scène de référence à densité
+//! comparable.
+//!
+//! D'où la scène actuelle : les troupeaux sont posés **à la main sur un pas
+//! serré** (`HERD_SPACING_TILES`, ~400 m), ce qui donne la densité voulue sur
+//! ~5 km — un ensemble de travail qui tient largement dans le store. La densité
+//! est le sujet ; l'étalement est un parasite qu'on écarte.
+//!
+//! *(À noter pour l'analyse du run long : avec 59 km de dispersion pour 16 384
+//! chunks — soit 16,4 km de couverture — la scène de référence thrashait
+//! certainement elle aussi. C'est une cause candidate distincte du balayage
+//! écologique, et elle reste à départager par un profil.)*
+//!
+//! Usage :
+//!   cargo run --release -p cairn-sim --example derive -- \
+//!       [seed] [jours] [troupeaux] [meutes] [agents] [capacité]
+//!
+//! Défauts : seed 42, 240 jours, 150 troupeaux, 12 meutes, 20 agents,
+//! 4096 chunks.
+
+use std::io::Write;
+use std::time::Instant;
+
+use cairn_core::{TICKS_PER_DAY, WorldSeed, km_to_tiles, tiles_to_km};
+use cairn_sim::{Herd, Pack, Position, Sim, fauna, scenario};
+
+/// Un relevé, pris tous les `SAMPLE_DAYS` jours de jeu.
+struct Sample {
+    day: u64,
+    herds: usize,
+    packs: usize,
+    head: f32,
+    predators: f32,
+    dirty: usize,
+    spread_km: f64,
+    pop: usize,
+    tps: f64,
+    /// Chunks **régénérés** depuis le relevé précédent, ramenés au jour de jeu.
+    ///
+    /// Le discriminateur qui manquait. Un chunk évincé puis redemandé se
+    /// regénère intégralement — le bruit fBm du worldgen sur 4 096 tuiles. Tant
+    /// que l'ensemble de travail tient dans le store, ce nombre reste proche de
+    /// zéro une fois la scène chargée ; dès qu'il le dépasse, le store entre en
+    /// thrashing et ce compteur s'envole pendant que le débit s'effondre.
+    /// Distinguer « la simulation a plus de travail » de « le store rame » sans
+    /// ce chiffre relevait de la divination.
+    regen_per_day: f64,
+}
+
+const SAMPLE_DAYS: u64 = 5;
+
+/// Pas par défaut de la grille de troupeaux, en tuiles (~400 m). Assez serré
+/// pour que 150 troupeaux tiennent sur 5 km — donc dans le store de chunks — et
+/// assez lâche pour qu'ils ne démarrent pas tous sur la même touffe d'herbe.
+///
+/// **C'est la variable de l'expérience** : à pas serré la prédation atteint
+/// tout le monde, à pas large elle ne couvre plus le territoire (rayon de chasse
+/// d'une meute : 500 m). Réglable en ligne de commande, parce que départager
+/// « la faune diverge d'elle-même » de « la faune diverge quand le monde
+/// s'étire » demande de ne bouger que ça.
+const HERD_SPACING_TILES: i64 = 200;
+
+fn main() {
+    let mut args = std::env::args().skip(1);
+    let seed: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(42);
+    let days: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(240).max(40);
+    let n_herds: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(150);
+    let n_packs: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(12);
+    let n_agents: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(20);
+    let capacity: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(4096);
+    let spacing: i64 =
+        args.next().and_then(|s| s.parse().ok()).unwrap_or(HERD_SPACING_TILES).max(1);
+    // Pas de la grille humaine, en tuiles. 0 = les humains restent groupés
+    // comme les pose `scenario::populate`.
+    let human_spread: i64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(0).max(0);
+
+    // — **Exactement le foyer de `chronicle`** : même point de départ, même
+    //   sélection. C'est délibéré — les deux bancs deviennent comparables, et
+    //   celui-ci n'a pas besoin d'une pression climatique particulière (c'est
+    //   l'affaire d'`etincelle`), seulement d'un pays qui porte de l'herbe.
+    //
+    //   `find_home_where` serait ici un piège : il appelle `nearest_spring` sur
+    //   chaque candidat, soit 81 chunks, et une bande de climat étroite le fait
+    //   balayer des milliers de candidats avant d'aboutir — mesuré à plus de
+    //   dix minutes avant le premier tick, pour un banc censé durer vingt. —
+    let mut sim = Sim::new(WorldSeed(seed), capacity);
+    let seed_point = (km_to_tiles(1500.0) as i64, km_to_tiles(2100.0) as i64);
+    let home = scenario::find_home(&mut sim, seed_point);
+
+    // Les humains et le gibier « normal » ; la densité arrive juste après.
+    let placed = scenario::populate(&mut sim, home, n_agents, 2);
+
+    // — L'étalement des **humains**, et c'est la variable qui compte.
+    //
+    //   `fauna::daily_immigration` tire son site candidat à 1–4 km d'un humain
+    //   pris au hasard, et le rejette s'il est à moins de 3 km d'un troupeau.
+    //   Ce filtre est décrit comme auto-limitant — il l'est, mais seulement
+    //   tant que les humains restent groupés : dès qu'ils s'étalent, un humain
+    //   isolé fournit toujours un site vierge, et l'immigration tire alors à
+    //   plein régime (0,15/jour) sans fin. Étaler les humains, c'est donc
+    //   **débrancher le limiteur** — l'hypothèse que ce banc doit trancher. —
+    if human_spread > 0 {
+        // Grille carrée : les humains occupent le territoire au lieu de se
+        // tenir en tas, sans qu'aucun ne parte à l'infini.
+        let side = (placed as f64).sqrt().ceil() as i64;
+        for (i, (_, pos)) in sim.agents.query_mut::<&mut Position>().into_iter().enumerate() {
+            let i = i as i64;
+            let (gx, gy) = (i % side - side / 2, i / side - side / 2);
+            pos.x = home.0 as f64 + (gx * human_spread) as f64;
+            pos.y = home.1 as f64 + (gy * human_spread) as f64;
+        }
+    }
+
+    // — La densité, posée à la main sur un pas serré : c'est la **condition
+    //   initiale** du banc. Spirale carrée depuis le foyer, pour que les
+    //   troupeaux restent groupés quel que soit leur nombre. —
+    let step = spacing;
+    let mut ring = 0i64;
+    'dense: while sim.fauna.query::<&Herd>().iter().count() < n_herds && ring < 60 {
+        ring += 1;
+        for dy in -ring..=ring {
+            for dx in -ring..=ring {
+                if dx.abs() < ring && dy.abs() < ring {
+                    continue; // seulement la couronne courante
+                }
+                let (x, y) = (home.0 + dx * step, home.1 + dy * step);
+                let tile = sim.world.tile(x, y);
+                if tile.is_walkable() && tile.biomass > 40 {
+                    sim.spawn_herd(x as f64, y as f64, fauna::HERD_START);
+                    if sim.fauna.query::<&Herd>().iter().count() >= n_herds {
+                        break 'dense;
+                    }
+                }
+            }
+        }
+    }
+
+    // — Des meutes en plus de celles que `populate` pose : sans prédateurs en
+    //   nombre comparable aux proies, on mesurerait une divergence qu'on aurait
+    //   fabriquée soi-même. On leur donne toutes leurs chances. —
+    let existing = sim.fauna.query::<&Pack>().iter().count();
+    for i in existing..n_packs {
+        let angle = i as f64 * 0.9;
+        let r = km_to_tiles(2.0 + (i % 5) as f64);
+        let (x, y) = (
+            home.0 + (angle.cos() * r) as i64,
+            home.1 + (angle.sin() * r) as i64,
+        );
+        if sim.world.tile(x, y).is_walkable() {
+            sim.spawn_pack(x as f64, y as f64, fauna::PACK_START);
+        }
+    }
+
+    let (h0, p0, nh0, np0) = census(&sim);
+    println!("╔══ BANC DE DÉRIVE ═══════════════════════════════════════════════════╗");
+    println!("  seed {seed} · foyer ({}, {}) · {days} jours de jeu", home.0, home.1);
+    println!(
+        "  départ : {placed} humains · {nh0} troupeaux ({h0:.0} têtes) · {np0} meutes ({p0:.0} prédateurs)"
+    );
+    println!(
+        "  pas de {:.2} km ⇒ étendue ~{:.1} km · capacité {capacity} chunks ({:.1} km de côté)",
+        tiles_to_km(spacing as f64),
+        tiles_to_km((2 * ring * step) as f64),
+        tiles_to_km((capacity as f64).sqrt() * cairn_sim::CHUNK_SIZE as f64),
+    );
+    if human_spread > 0 {
+        println!(
+            "  humains ÉTALÉS : pas de {:.1} km (le limiteur d'immigration est débranché)",
+            tiles_to_km(human_spread as f64)
+        );
+    }
+    println!("  relevé tous les {SAMPLE_DAYS} j");
+    println!("╚═════════════════════════════════════════════════════════════════════╝\n");
+    println!(
+        "{:>5} {:>7} {:>8} {:>7} {:>8} {:>8} {:>8} {:>6} {:>9} {:>7}",
+        "jour", "troup.", "têtes", "meutes", "préd.", "sales", "disp.km", "pop", "regen/j", "tps"
+    );
+    let _ = std::io::stdout().flush();
+
+    let mut samples: Vec<Sample> = Vec::new();
+    let t_start = Instant::now();
+    let mut t_window = Instant::now();
+    let mut ticks_window = 0u64;
+    let mut regen_prev = sim.world.generated;
+
+    for day in 1..=days {
+        for _ in 0..TICKS_PER_DAY {
+            sim.step();
+            ticks_window += 1;
+        }
+        if !day.is_multiple_of(SAMPLE_DAYS) {
+            continue;
+        }
+        let tps = ticks_window as f64 / t_window.elapsed().as_secs_f64().max(1e-9);
+        t_window = Instant::now();
+        ticks_window = 0;
+
+        let regen_per_day =
+            (sim.world.generated - regen_prev) as f64 / SAMPLE_DAYS as f64;
+        regen_prev = sim.world.generated;
+
+        let (head, predators, herds, packs) = census(&sim);
+        let s = Sample {
+            day,
+            herds,
+            packs,
+            head,
+            predators,
+            dirty: sim.world.dirty_count(),
+            spread_km: spread(&sim),
+            pop: sim.population(),
+            tps,
+            regen_per_day,
+        };
+        println!(
+            "{:>5} {:>7} {:>8.0} {:>7} {:>8.0} {:>8} {:>8.1} {:>6} {:>9.0} {:>7.1}",
+            s.day,
+            s.herds,
+            s.head,
+            s.packs,
+            s.predators,
+            s.dirty,
+            s.spread_km,
+            s.pop,
+            s.regen_per_day,
+            s.tps
+        );
+        // Un banc qui tourne des dizaines de minutes doit être lisible *pendant*
+        // qu'il tourne : sans ce vidage, la sortie reste bloquée dans le tampon
+        // dès qu'on la passe dans un tube (`tee`, `head`) et on croit le
+        // processus figé.
+        let _ = std::io::stdout().flush();
+        samples.push(s);
+    }
+
+    verdict(&samples, t_start.elapsed().as_secs_f64(), days);
+    utilization_report(&sim);
+}
+
+/// Mesure M1 — le taux d'utilisation des chunks. Ne s'affiche que sous la
+/// feature `chunk-stats` :
+///   cargo run --release -p cairn-sim --features chunk-stats --example derive
+#[cfg(feature = "chunk-stats")]
+fn utilization_report(sim: &Sim) {
+    const TILES: f64 = (cairn_sim::CHUNK_SIZE * cairn_sim::CHUNK_SIZE) as f64;
+    let (lives, mean, hist, dirty_lives) = sim.world.utilization();
+    if lives == 0 {
+        println!("\n(aucun chunk évincé : la scène tient dans le store, rien à mesurer)");
+        return;
+    }
+    println!("\n╔══ M1 — UTILISATION DES CHUNKS ══════════════════════════════════════╗");
+    println!("  {lives} vies de chunk achevées (générées puis évincées)");
+    println!(
+        "  tuiles distinctes touchées, en moyenne : {mean:.1} sur {TILES:.0}  ⇒  {:.3} %",
+        mean / TILES * 100.0
+    );
+    println!(
+        "  autrement dit : on paie ~{:.0} tuiles générées pour chaque tuile lue\n",
+        TILES / mean.max(1e-9)
+    );
+    // La fraction qui décide de la portée de C1 : l'écologie balaie les 4 096
+    // tuiles de tout chunk **écrit**, chaque jour. La génération paresseuse ne
+    // peut donc rien pour ceux-là — son gain porte sur les chunks qu'on ne fait
+    // que **lire** (les sondes de pâture, les scans de fourrage, la
+    // franchissabilité du pathfinding).
+    let clean = lives - dirty_lives;
+    println!(
+        "  vies SANS aucune écriture : {clean} sur {lives}  ⇒  {:.1} %  ← portée de C1",
+        clean as f64 / lives as f64 * 100.0
+    );
+    println!(
+        "  vies avec écriture : {dirty_lives}  (balayées en entier par l'écologie)\n"
+    );
+    println!("  répartition (nombre de tuiles touchées sur une vie de chunk) :");
+    for (k, &n) in hist.iter().enumerate() {
+        if n == 0 {
+            continue;
+        }
+        let (lo, hi) = if k == 0 { (0, 0) } else { (1 << (k - 1), (1 << k) - 1) };
+        let pct = n as f64 / lives as f64 * 100.0;
+        let bar = "█".repeat(((pct / 2.0) as usize).min(40));
+        let label =
+            if k == 0 { "       0".to_string() } else { format!("{lo:>4}-{hi:<4}") };
+        println!("    {label} {bar} {pct:>5.1} %  ({n})");
+    }
+    println!("╚═════════════════════════════════════════════════════════════════════╝");
+}
+
+#[cfg(not(feature = "chunk-stats"))]
+fn utilization_report(_sim: &Sim) {}
+
+/// (têtes, prédateurs, troupeaux, meutes) — même notion que `Sim::fauna_census`,
+/// recopiée ici pour n'avoir besoin que d'un `&Sim`.
+fn census(sim: &Sim) -> (f32, f32, usize, usize) {
+    let mut head = 0.0;
+    let mut herds = 0;
+    for (_, h) in sim.fauna.query::<&Herd>().iter() {
+        head += h.population;
+        herds += 1;
+    }
+    let mut predators = 0.0;
+    let mut packs = 0;
+    for (_, p) in sim.fauna.query::<&Pack>().iter() {
+        predators += p.population;
+        packs += 1;
+    }
+    (head, predators, herds, packs)
+}
+
+/// Rayon moyen de la population autour de son centroïde, en km — la même
+/// définition que la colonne `spread_mean_km` du banc `chronicle`.
+fn spread(sim: &Sim) -> f64 {
+    let mut n = 0.0;
+    let (mut cx, mut cy) = (0.0, 0.0);
+    for (_, pos) in sim.agents.query::<&Position>().iter() {
+        cx += pos.x;
+        cy += pos.y;
+        n += 1.0;
+    }
+    if n == 0.0 {
+        return 0.0;
+    }
+    cx /= n;
+    cy /= n;
+    let mut sum = 0.0;
+    for (_, pos) in sim.agents.query::<&Position>().iter() {
+        sum += ((pos.x - cx).powi(2) + (pos.y - cy).powi(2)).sqrt();
+    }
+    tiles_to_km(sum / n)
+}
+
+/// Moyenne d'une grandeur sur une tranche de relevés.
+fn mean(samples: &[Sample], f: impl Fn(&Sample) -> f64) -> f64 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    samples.iter().map(&f).sum::<f64>() / samples.len() as f64
+}
+
+/// Au-delà de cette croissance relative entre le 3ᵉ et le 4ᵉ quart du run, on
+/// parle de divergence. 15 % sur un quart de run est très au-delà du bruit
+/// saisonnier mesuré sur la scène de référence (le cycle proie-prédateur y
+/// oscille, mais autour d'une valeur).
+const DIVERGENCE_THRESHOLD: f64 = 0.15;
+
+fn verdict(samples: &[Sample], elapsed_s: f64, days: u64) {
+    if samples.len() < 8 {
+        println!("\nTrop peu de relevés pour conclure — allongez le run.");
+        return;
+    }
+    let n = samples.len();
+    let q3 = &samples[n / 2..3 * n / 4];
+    let q4 = &samples[3 * n / 4..];
+
+    println!("\n╔══ VERDICT ══════════════════════════════════════════════════════════╗");
+    println!(
+        "  {days} jours de jeu en {:.0} s réelles ({:.1} tps moyen)",
+        elapsed_s,
+        (days * TICKS_PER_DAY) as f64 / elapsed_s.max(1e-9)
+    );
+    println!("  Tendance mesurée entre le 3ᵉ et le 4ᵉ quart du run :\n");
+    println!("{:>22} {:>11} {:>11} {:>9}", "grandeur", "3ᵉ quart", "4ᵉ quart", "écart");
+
+    let mut diverging = Vec::new();
+    for (nom, f, croissance_est_mauvaise) in [
+        ("troupeaux", &(|s: &Sample| s.herds as f64) as &dyn Fn(&Sample) -> f64, true),
+        ("têtes de gibier", &|s: &Sample| s.head as f64, true),
+        ("meutes", &|s: &Sample| s.packs as f64, false),
+        ("prédateurs", &|s: &Sample| s.predators as f64, false),
+        ("chunks sales", &|s: &Sample| s.dirty as f64, true),
+        ("dispersion (km)", &|s: &Sample| s.spread_km, true),
+        ("population", &|s: &Sample| s.pop as f64, false),
+    ] {
+        let (a, b) = (mean(q3, f), mean(q4, f));
+        let rel = if a.abs() < 1e-9 { 0.0 } else { (b - a) / a };
+        let diverge = croissance_est_mauvaise && rel > DIVERGENCE_THRESHOLD;
+        if diverge {
+            diverging.push(nom);
+        }
+        println!(
+            "{nom:>22} {a:>11.1} {b:>11.1} {:>+8.0}%  {}",
+            rel * 100.0,
+            if diverge { "◄ DIVERGE" } else { "" }
+        );
+    }
+
+    // Le débit est la conséquence, pas la cause : on le rapporte à part, et une
+    // *baisse* est ce qui est mauvais — d'où le test inversé.
+    let (t3, t4) = (mean(q3, |s| s.tps), mean(q4, |s| s.tps));
+    let rel = if t3.abs() < 1e-9 { 0.0 } else { (t4 - t3) / t3 };
+    println!(
+        "{:>22} {t3:>11.1} {t4:>11.1} {:>+8.0}%  {}",
+        "débit (tps)",
+        rel * 100.0,
+        if rel < -DIVERGENCE_THRESHOLD { "◄ S'EFFONDRE" } else { "" }
+    );
+
+    println!("\n  ─────────────────────────────────────────────────────────────────");
+    if diverging.is_empty() {
+        println!("  AUCUNE DIVERGENCE — les effectifs trouvent leur équilibre.");
+    } else {
+        println!("  DIVERGENT : {}", diverging.join(", "));
+        println!("  Un effectif qui croît encore au dernier quart n'a pas de borne.");
+    }
+    println!("╚═════════════════════════════════════════════════════════════════════╝");
+
+    // Courbe brute, à coller dans docs/perf-baseline.txt : une référence de
+    // débit doit être une *courbe*, pas un nombre (le run du 2026-09-15 l'a
+    // prouvé — 400 ticks mesurés à l'an 1 auraient annoncé un gain de 570 %).
+    println!("\n# courbe tps (jour:tps)");
+    let stride = (samples.len() / 12).max(1);
+    let curve: Vec<String> = samples
+        .iter()
+        .step_by(stride)
+        .map(|s| format!("{}:{:.1}", s.day, s.tps))
+        .collect();
+    println!("# {}", curve.join(" "));
+}

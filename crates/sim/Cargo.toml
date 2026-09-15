@@ -3,6 +3,13 @@ name = "cairn-sim"
 version.workspace = true
 edition.workspace = true
 
+[features]
+# Instrumentation du taux d'utilisation des chunks (mesure M1 du chantier de
+# performance). Hors de cette feature, le code de mesure n'existe pas dans le
+# binaire : un compteur dans `World::tile` serait sur le chemin le plus chaud
+# de toute la simulation.
+chunk-stats = []
+
 [dependencies]
 cairn-core.workspace = true
 cairn-worldgen.workspace = true
