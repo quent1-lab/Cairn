@@ -73,6 +73,24 @@ struct Sample {
     spread_km: f64,
     pop: usize,
     tps: f64,
+    /// Troupeaux par km² — **le régime dans lequel on mesure**.
+    ///
+    /// Le banc a longtemps donné « aucune divergence » sans que je voie qu'il
+    /// testait toujours le même régime : une faune dense, où le prédateur ne
+    /// peut que gagner. Une mesure qui ne dit pas dans quelles conditions elle
+    /// a été prise ne permet pas de savoir ce qu'elle réfute.
+    density: f64,
+    /// Troupeaux présents en moyenne dans le disque de chasse d'une meute
+    /// (rayon `PACK_HUNT_RADIUS_TILES`). En dessous de ~0,5, une meute passe
+    /// l'essentiel de son temps sans rien à portée.
+    per_disc: f64,
+    /// **Prises réellement réalisées** par prédateur et par jour, contre un
+    /// maximum théorique de `PRED_KILL_PER_DAY` quand le gibier est à portée.
+    ///
+    /// La mesure qui départage « le prédateur ne trouve pas ses proies » de
+    /// « l'équation est mal réglée ». Déduite du run long à ~0,044 contre 0,18
+    /// possible ; ici elle est comptée, pas déduite.
+    kills_per_pred_day: f64,
     /// Chunks **régénérés** depuis le relevé précédent, ramenés au jour de jeu.
     ///
     /// Le discriminateur qui manquait. Un chunk évincé puis redemandé se
@@ -210,8 +228,8 @@ fn main() {
     println!("  relevé tous les {SAMPLE_DAYS} j");
     println!("╚═════════════════════════════════════════════════════════════════════╝\n");
     println!(
-        "{:>5} {:>7} {:>8} {:>7} {:>8} {:>8} {:>8} {:>6} {:>9} {:>7}",
-        "jour", "troup.", "têtes", "meutes", "préd.", "sales", "disp.km", "pop", "regen/j", "tps"
+        "{:>5} {:>7} {:>8} {:>7} {:>8} {:>8} {:>8} {:>8} {:>6} {:>9} {:>7}",
+        "jour", "troup.", "têtes", "meutes", "préd.", "trp/km²", "/disque", "prises", "pop", "regen/j", "tps"
     );
     let _ = std::io::stdout().flush();
 
@@ -220,11 +238,22 @@ fn main() {
     let mut t_window = Instant::now();
     let mut ticks_window = 0u64;
     let mut regen_prev = sim.world.generated;
+    let mut kills_window = 0.0f64;
+    let mut pred_ticks = 0.0f64;
 
     for day in 1..=days {
         for _ in 0..TICKS_PER_DAY {
             sim.step();
             ticks_window += 1;
+            // Les prises du tick, relevées à la source : `Pack::last_kills`
+            // est écrit par `update_packs` puis écrasé au tick suivant, donc
+            // c'est ici — et nulle part ailleurs — qu'on peut les totaliser.
+            // On accumule aussi les prédateurs-ticks pour normaliser : une
+            // moyenne de prises n'a de sens que rapportée aux bouches.
+            for (_, p) in sim.fauna.query::<&Pack>().iter() {
+                kills_window += p.last_kills as f64;
+                pred_ticks += p.population as f64;
+            }
         }
         if !day.is_multiple_of(SAMPLE_DAYS) {
             continue;
@@ -238,6 +267,10 @@ fn main() {
         regen_prev = sim.world.generated;
 
         let (head, predators, herds, packs) = census(&sim);
+        // Densité **mesurée** sur l'étendue réelle des troupeaux, pas déduite
+        // des paramètres de départ : la faune migre, et c'est la densité du
+        // moment qui gouverne la rencontre.
+        let density = herd_density(&sim, herds);
         let s = Sample {
             day,
             herds,
@@ -249,16 +282,28 @@ fn main() {
             pop: sim.population(),
             tps,
             regen_per_day,
+            density,
+            per_disc: density * disc_km2(),
+            // `pred_ticks` compte des prédateurs-ticks ; ramené au jour, c'est
+            // le nombre de prédateurs-jours sur la fenêtre.
+            kills_per_pred_day: if pred_ticks > 0.0 {
+                kills_window / (pred_ticks / TICKS_PER_DAY as f64)
+            } else {
+                0.0
+            },
         };
+        kills_window = 0.0;
+        pred_ticks = 0.0;
         println!(
-            "{:>5} {:>7} {:>8.0} {:>7} {:>8.0} {:>8} {:>8.1} {:>6} {:>9.0} {:>7.1}",
+            "{:>5} {:>7} {:>8.0} {:>7} {:>8.0} {:>8.2} {:>8.2} {:>8.3} {:>6} {:>9.0} {:>7.1}",
             s.day,
             s.herds,
             s.head,
             s.packs,
             s.predators,
-            s.dirty,
-            s.spread_km,
+            s.density,
+            s.per_disc,
+            s.kills_per_pred_day,
             s.pop,
             s.regen_per_day,
             s.tps
@@ -343,6 +388,44 @@ fn census(sim: &Sim) -> (f32, f32, usize, usize) {
         packs += 1;
     }
     (head, predators, herds, packs)
+}
+
+/// Troupeaux par km², sur le **disque effectivement occupé** par la faune.
+///
+/// Mesurée sur le rayon quadratique moyen autour du centroïde des troupeaux
+/// (et non sur la boîte englobante, qu'un seul troupeau égaré ferait exploser).
+/// C'est la grandeur qui gouverne la rencontre prédateur-proie : une meute ne
+/// tue que ce qui entre dans son disque de chasse, et ce disque ne voit pas le
+/// nombre total de troupeaux du monde, seulement leur densité locale.
+fn herd_density(sim: &Sim, herds: usize) -> f64 {
+    if herds == 0 {
+        return 0.0;
+    }
+    let mut n = 0.0;
+    let (mut cx, mut cy) = (0.0, 0.0);
+    for (_, (_, pos)) in sim.fauna.query::<(&Herd, &Position)>().iter() {
+        cx += pos.x;
+        cy += pos.y;
+        n += 1.0;
+    }
+    cx /= n;
+    cy /= n;
+    let mut sum2 = 0.0;
+    for (_, (_, pos)) in sim.fauna.query::<(&Herd, &Position)>().iter() {
+        sum2 += (pos.x - cx).powi(2) + (pos.y - cy).powi(2);
+    }
+    let rms_km = tiles_to_km((sum2 / n).sqrt());
+    // Un rayon nul (tous au même point) donnerait une densité infinie ; on
+    // plancher sur le disque de chasse lui-même, la plus petite surface qui
+    // ait un sens ici.
+    let area = (std::f64::consts::PI * rms_km * rms_km).max(disc_km2());
+    herds as f64 / area
+}
+
+/// Surface du disque de chasse d'une meute, en km².
+fn disc_km2() -> f64 {
+    let r = tiles_to_km(cairn_sim::fauna::PACK_HUNT_RADIUS_TILES);
+    std::f64::consts::PI * r * r
 }
 
 /// Rayon moyen de la population autour de son centroïde, en km — la même
