@@ -258,6 +258,12 @@ impl World {
                     let t = chunk.tile_mut(lx as usize, ly as usize, &self.worldgen);
                     t.biomass = biomass;
                     t.soil_fertility = soil_fertility;
+                    // Sans ce marquage, `touched` repartirait vide alors que
+                    // le chunk est de nouveau sale : une seconde éviction sans
+                    // écriture entre-temps produirait un instantané vide et
+                    // rendrait la tuile au baseline. Une tuile restaurée est
+                    // aussi modifiée qu'une tuile broutée — c'est le même fait.
+                    chunk.mark_touched(lx as usize, ly as usize);
                 }
                 // De nouveau résident : redevient sale « pour de vrai »,
                 // l'écologie peut reprendre sa repousse là où elle était.
@@ -528,6 +534,41 @@ mod tests {
         );
         assert_eq!(world.dirty_count(), 1);
         assert!(world.loaded() <= 8, "mémoire non bornée : {}", world.loaded());
+    }
+
+    #[test]
+    fn un_instantane_survit_a_une_seconde_eviction_sans_ecriture() {
+        // Le test voisin ne fait qu'**un** cycle d'éviction. Celui-ci en fait
+        // deux, et c'est le second qui compte : entre les deux, le chunk n'est
+        // rechargé que par une **lecture**.
+        //
+        // Réappliquer un instantané remet le chunk dans `dirty` mais laissait
+        // `touched` vide — or c'est `touched` que parcourt `snapshot_delta`.
+        // Une seconde éviction sans écriture entre-temps produisait donc un
+        // instantané vide, aussitôt jeté, et la biomasse consommée revenait
+        // silencieusement au baseline : exactement la perte d'état que le
+        // mécanisme de deltas existe pour empêcher.
+        let mut world = World::new(WorldSeed(42), 8);
+        world.tile_mut(100, 200).biomass = 7;
+        let baseline = baseline_biomass(world.tile(100, 200).biome);
+        assert_ne!(baseline, 7, "le test ne prouverait rien si 7 était le baseline");
+
+        let eloigne = |world: &mut World| {
+            for cx in 50..70 {
+                world.chunk(ChunkCoord { x: cx, y: cx });
+            }
+        };
+
+        eloigne(&mut world);
+        // Rechargement par une **lecture seule** : rien ne salit le chunk.
+        assert_eq!(world.tile(100, 200).biomass, 7, "premier retour");
+
+        eloigne(&mut world);
+        assert_eq!(
+            world.tile(100, 200).biomass,
+            7,
+            "l'état a été perdu à la seconde éviction : l'instantané n'avait rien à sauver"
+        );
     }
 
     #[test]
