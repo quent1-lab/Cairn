@@ -321,6 +321,28 @@ impl Pack {
 /// rejoindra pas.
 const PACK_GIVE_UP_TILES: f64 = km_to_tiles(6.0);
 
+/// Au-delà de cet effectif, la meute se scinde — la symétrie longtemps
+/// manquante de [`HERD_FISSION`].
+///
+/// **Une meute est un point dans l'espace.** Sa capacité à chasser ne dépend
+/// pas seulement de son effectif mais de l'endroit où elle se trouve : elle ne
+/// tue que ce qui entre dans son rayon de chasse. Tant que les meutes ne se
+/// scindaient pas, leur **nombre** ne croissait que par immigration, à taux
+/// constant — quand les troupeaux, eux, se multiplient par fission, donc
+/// géométriquement.
+///
+/// Mesuré sur un run de 8,4 années de jeu : jamais plus de **19 meutes** sur
+/// 603 relevés, pour jusqu'à **1 483 troupeaux** — soit 4,8 troupeaux par meute
+/// au départ et 28,6 à l'arrivée. Chaque meute vidait son voisinage puis
+/// jeûnait pendant que la proie prospérait partout ailleurs. Aucun réglage du
+/// taux de prises ne pouvait corriger ça : c'était une question de couverture,
+/// pas d'efficacité.
+///
+/// Le seuil est bas devant celui des troupeaux (90) parce qu'une meute est
+/// naturellement petite : à 5 individus au départ (`PACK_START`), 24 représente
+/// déjà une population qui a prospéré plusieurs fois.
+pub const PACK_FISSION: f32 = 24.0;
+
 /// Instantané d'un troupeau, pris avant les systèmes : c'est ce que lisent
 /// les chasseurs humains, les meutes et les autres troupeaux. Travailler sur
 /// un instantané (plutôt qu'en requêtant le monde pendant qu'on le mute)
@@ -620,9 +642,10 @@ pub fn update_packs(
     fauna: &mut hecs::World,
     world: &World,
     herds: &[HerdView],
-) -> (Vec<Kill>, Vec<hecs::Entity>) {
+) -> (Vec<Kill>, Vec<hecs::Entity>, Vec<PackFission>) {
     let mut kills = Vec::new();
     let mut doomed = Vec::new();
+    let mut fissions = Vec::new();
 
     for (entity, (pack, pos)) in fauna.query_mut::<(&mut Pack, &mut Position)>() {
         // — La proie choisie d'abord : on la garde tant qu'elle vit et qu'elle
@@ -668,9 +691,36 @@ pub fn update_packs(
         pack.population = pack_population_step(pack.population, pack.last_kills);
         if pack.population < PACK_MIN {
             doomed.push(entity);
+        } else if pack.population > PACK_FISSION {
+            // Trop nombreuse pour un seul territoire : la moitié part chasser
+            // ailleurs. C'est le pendant exact de la fission des troupeaux, et
+            // ce qui permet enfin au **nombre** de meutes de suivre la
+            // population de prédateurs — donc à la prédation de couvrir un
+            // territoire qui s'étend.
+            pack.population *= 0.5;
+            // Direction dérivée de la position, sans RNG : `update_packs` n'en
+            // tire aucun, et en introduire un ici décalerait tous les flux
+            // aléatoires en aval (le déterminisme bit-à-bit est une garde du
+            // projet). L'angle varie assez d'une meute à l'autre pour que les
+            // filles ne partent pas toutes dans le même sens.
+            let angle = (pos.x * 0.7 + pos.y * 1.3).rem_euclid(std::f64::consts::TAU);
+            let d = km_to_tiles(2.0);
+            fissions.push(PackFission {
+                pos: (pos.x + angle.cos() * d, pos.y + angle.sin() * d),
+                population: pack.population,
+                species: pack.species,
+            });
         }
     }
-    (kills, doomed)
+    (kills, doomed, fissions)
+}
+
+/// Une meute fille, à faire naître par l'appelant — `fauna` ne connaît pas
+/// `Sim::spawn_pack`, comme le reste du module.
+pub struct PackFission {
+    pub pos: (f64, f64),
+    pub population: f32,
+    pub species: Species,
 }
 
 /// Applique les prises (prédation + chasse humaine) aux troupeaux. L'ordre du
@@ -836,6 +886,7 @@ pub fn daily_predator_immigration(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Sim;
 
     #[test]
     fn un_troupeau_bien_nourri_croit_et_un_troupeau_affame_fond() {
@@ -869,6 +920,28 @@ mod tests {
             jours += 1;
         }
         assert!(pop < PACK_MIN, "une meute sans gibier doit disparaître");
+    }
+
+    #[test]
+    fn une_meute_qui_prospere_finit_par_se_scinder() {
+        // La garde du correctif de couverture : sans fission, le NOMBRE de
+        // meutes ne croissait que par immigration — jamais plus de 19 sur 8,4
+        // années de jeu, face à 1 483 troupeaux. Une meute est un point dans
+        // l'espace ; sa taille ne remplace pas sa position.
+        let mut sim = Sim::new(WorldSeed(42), 256);
+        sim.allow_fauna_immigration = false; // sinon on ne saurait pas d'où vient la 2ᵉ
+        let home = (0.0, 0.0);
+        sim.spawn_pack(home.0, home.1, PACK_FISSION - 0.5);
+        // Du gibier sous son nez, pour qu'elle franchisse le seuil vite : la
+        // meute croît de ~8 %/jour quand elle mange à sa faim.
+        sim.spawn_herd(home.0 + 1.0, home.1, 400.0);
+        assert_eq!(sim.fauna.query::<&Pack>().iter().count(), 1);
+
+        for _ in 0..24 * 4 {
+            sim.step();
+        }
+        let meutes = sim.fauna.query::<&Pack>().iter().count();
+        assert!(meutes >= 2, "une meute nourrie doit se scinder, on en compte {meutes}");
     }
 
     #[test]

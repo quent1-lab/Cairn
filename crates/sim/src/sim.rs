@@ -442,6 +442,22 @@ impl Sim {
         id
     }
 
+    /// Fait naître une meute d'une **espèce imposée** — utilisé par la fission,
+    /// qui préserve l'espèce de la mère (une meute de loups se scinde en deux
+    /// meutes de loups). Pendant exact de `spawn_herd_species`.
+    pub fn spawn_pack_species(
+        &mut self,
+        x: f64,
+        y: f64,
+        population: f32,
+        species: fauna::Species,
+    ) -> FaunaId {
+        let id = FaunaId(self.next_fauna_id);
+        self.next_fauna_id += 1;
+        self.fauna.spawn((id, Position { x, y }, Pack::new(population, species)));
+        id
+    }
+
     pub fn population(&self) -> usize {
         self.agents.len() as usize
     }
@@ -1005,11 +1021,18 @@ impl Sim {
         // toutes les prises — prédation et chasse humaine — sont appliquées
         // avant que les troupeaux ne fassent leurs petits : un troupeau
         // décimé ne doit pas engendrer comme s'il était intact.
-        let (pred_kills, dead_packs) = fauna::update_packs(&mut self.fauna, &self.world, &herds);
+        let (pred_kills, dead_packs, pack_fissions) =
+            fauna::update_packs(&mut self.fauna, &self.world, &herds);
         kills.extend(pred_kills);
         fauna::apply_kills(&mut self.fauna, &kills);
         for entity in dead_packs {
             let _ = self.fauna.despawn(entity);
+        }
+        // Les meutes filles naissent après coup : `update_packs` emprunte
+        // l'ECS, et `spawn_pack_species` y écrit (même patron que la fission
+        // des troupeaux).
+        for f in pack_fissions {
+            self.spawn_pack_species(f.pos.0, f.pos.1, f.population, f.species);
         }
 
         // Ce qui fait fuir un troupeau : les prédateurs et les hommes.
