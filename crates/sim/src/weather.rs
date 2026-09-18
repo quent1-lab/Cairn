@@ -42,7 +42,7 @@ use crate::salt;
 use crate::sim::Sim;
 
 /// Rayon d'une cellule (~1,5 km) : une averse locale, pas un front régional.
-const WEATHER_RADIUS_TILES: f64 = km_to_tiles(1.5);
+pub(crate) const WEATHER_RADIUS_TILES: f64 = km_to_tiles(1.5);
 /// Durée de vie d'une cellule, en jours.
 const WEATHER_DURATION_DAYS: u64 = 5;
 /// Chance qu'une cellule naisse d'elle-même un jour donné, près des habitants.

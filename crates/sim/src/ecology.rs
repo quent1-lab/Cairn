@@ -101,32 +101,97 @@ pub fn daily_regrowth(
         let half = crate::chunk::CHUNK_SIZE as f64 / 2.0;
         let shift = crate::weather::shift_at((ox as f64 + half, oy as f64 + half), weather);
         let weather_factor = 1.0 + crate::weather::CAPACITY_EFFECT * shift;
-        // Emprunts disjoints : la repousse mute les tuiles du chunk pendant que
-        // le worldgen les calcule (génération paresseuse). C'est cette passe
-        // qui borne le gain de la génération paresseuse — elle balaie les 4 096
-        // tuiles, donc les force toutes à exister. Elle ne porte que sur les
-        // chunks **sales**, soit 24 % des chunks générés (mesure M1) ; rendre
-        // ce balayage épars est un incrément à part, qui changerait un
-        // comportement (les tuiles jamais touchées cesseraient de repousser).
+        // — Balayage épars. Une tuile jamais mutée porte exactement le baseline
+        //   que `compute_tile` lui a donné : `biomass == baseline_biomass(biome)`
+        //   et `soil_fertility == baseline_fertility(biome)`, donc
+        //   `effective_capacity(tile) == tile.biomass`. Le test `biomass >= cap`
+        //   la rejette immédiatement. Le balayage complet payait donc 4 096
+        //   lectures pour la poignée de tuiles broutées — et, sous génération
+        //   paresseuse, **forçait le calcul** des 4 095 autres. `Chunk::touched`
+        //   liste précisément celles qui peuvent avoir quelque chose à faire.
+        //
+        //   **La seule exception est la pluie.** `weather_factor > 1` relève le
+        //   plafond *au-dessus* du baseline : une tuile intacte a alors
+        //   légitimement de quoi pousser, et l'ignorer supprimerait l'effet du
+        //   ciel sur les terres non broutées. Ce chunk-là reprend le balayage
+        //   complet.
+        //
+        //   La sécheresse ne demande rien : `weather_factor < 1` abaisse le
+        //   plafond, mais cette passe ne fait jamais décroître une biomasse. —
+        //
+        //   **L'ordre de visite fait partie du contrat.** `logistic_step` tire
+        //   dans le flux du chunk, donc le balayage épars doit servir les
+        //   mêmes tuiles *dans le même ordre* que le balayage complet — sinon
+        //   les tirages restent en même nombre mais changent de destinataire.
+        //   Mesuré : l'ordre naturel du `BTreeSet` (trié par lx, donc par
+        //   colonnes) décalait une tuile d'une unité de biomasse au 20ᵉ jour,
+        //   et la faune, exponentiellement instable, en faisait 984 troupeaux
+        //   contre 421 au 600ᵉ. On trie donc par lignes, comme la double
+        //   boucle d'origine.
         let Some((chunk, worldgen)) = world.chunk_mut_with_gen(coord) else { continue };
-        for ly in 0..CHUNK_SIZE as usize {
-            for lx in 0..CHUNK_SIZE as usize {
-                let tile = chunk.tile_mut(lx, ly, worldgen);
-                // Le plafond effectif suit la fertilité : un sol dégradé
-                // portera moins que le K du biome (surexploitation, §2.4).
-                let cap = ((f32::from(effective_capacity(tile)) * weather_factor).clamp(0.0, 255.0))
-                    as u8;
-                if tile.biomass >= cap {
-                    continue;
+        if weather_factor > 1.0 {
+            for ly in 0..CHUNK_SIZE as usize {
+                for lx in 0..CHUNK_SIZE as usize {
+                    regrow_tile(
+                        chunk, worldgen, lx, ly, oy, climate, time, weather_factor, elapsed,
+                        &mut rng,
+                    );
                 }
-                if !climate.grows(tile, oy + ly as i64, time) {
-                    continue;
-                }
-                tile.biomass = logistic_step(tile.biomass, cap, elapsed as f64, &mut rng);
+            }
+        } else {
+            // `touched` est emprunté en lecture, `tile_mut` en écriture : on
+            // recopie les quelques dizaines de coordonnées plutôt que de
+            // rescanner 4 096 tuiles pour les retrouver.
+            let mut cibles: Vec<(u8, u8)> = chunk.touched().iter().copied().collect();
+            cibles.sort_unstable_by_key(|&(lx, ly)| (ly, lx));
+            for (lx, ly) in cibles {
+                regrow_tile(
+                    chunk,
+                    worldgen,
+                    lx as usize,
+                    ly as usize,
+                    oy,
+                    climate,
+                    time,
+                    weather_factor,
+                    elapsed,
+                    &mut rng,
+                );
             }
         }
         world.clear_dirty_if_pristine(coord);
     }
+}
+
+/// Repousse d'une tuile. Renvoie `true` si la biomasse a effectivement été
+/// écrite — c'est ce que l'appelant utilise pour marquer la tuile mutée.
+/// `oy` est l'ordonnée absolue de l'origine du chunk (la latitude compte : le
+/// climat ne fait pas pousser partout à la même saison).
+#[allow(clippy::too_many_arguments)]
+fn regrow_tile(
+    chunk: &mut crate::chunk::Chunk,
+    worldgen: &cairn_worldgen::WorldGen,
+    lx: usize,
+    ly: usize,
+    oy: i64,
+    climate: &Climate,
+    time: SimTime,
+    weather_factor: f32,
+    elapsed: u64,
+    rng: &mut Pcg32,
+) -> bool {
+    let tile = chunk.tile_mut(lx, ly, worldgen);
+    // Le plafond effectif suit la fertilité : un sol dégradé portera moins
+    // que le K du biome (surexploitation, §2.4).
+    let cap = ((f32::from(effective_capacity(tile)) * weather_factor).clamp(0.0, 255.0)) as u8;
+    if tile.biomass >= cap {
+        return false;
+    }
+    if !climate.grows(tile, oy + ly as i64, time) {
+        return false;
+    }
+    tile.biomass = logistic_step(tile.biomass, cap, elapsed as f64, rng);
+    true
 }
 
 /// Capacité de charge effective d'une tuile : le K du biome, réduit
@@ -201,4 +266,90 @@ mod tests {
         let mut rng = rng();
         assert_eq!(logistic_step(0, 0, 100.0, &mut rng), 0);
     }
+
+    use crate::world::World;
+    use cairn_core::WorldSeed;
+
+    /// Une tuile qui pousse vraiment : biome fertile, et le climat du jour
+    /// l'autorise. Sans ce filtrage, un test posé au hasard tomberait sur de
+    /// l'océan ou sur un hiver, et passerait pour de mauvaises raisons.
+    fn tuile_qui_pousse(world: &mut World, time: SimTime, climate: &Climate) -> (i64, i64) {
+        for i in 0..4000i64 {
+            let (x, y) = (700_000 + i * 37, 1_050_000 + i * 53);
+            let tile = world.tile(x, y);
+            if crate::tile::baseline_biomass(tile.biome) > 20 && climate.grows(&tile, y, time) {
+                return (x, y);
+            }
+        }
+        panic!("aucune tuile fertile trouvée pour le test");
+    }
+
+    fn scene() -> (World, Climate, SimTime) {
+        let world = World::new(WorldSeed(42), 64);
+        let climate = Climate::new(world.worldgen().temperature.latitude());
+        // Plein été de l'hémisphère nord : on ne veut pas mesurer un hiver.
+        let time = SimTime { tick: 180 * cairn_core::TICKS_PER_DAY };
+        (world, climate, time)
+    }
+
+    #[test]
+    fn une_tuile_broutee_repousse_sans_pluie() {
+        // Le balayage épars doit rester équivalent au balayage complet sur ce
+        // qui compte : les tuiles effectivement modifiées.
+        let (mut world, climate, time) = scene();
+        let (x, y) = tuile_qui_pousse(&mut world, time, &climate);
+        let cap = crate::tile::baseline_biomass(world.tile(x, y).biome);
+        world.tile_mut(x, y).biomass = 1;
+
+        // Une journée depuis P = 1 donne P₁ ≈ 1,08 : l'arrondi stochastique la
+        // laisse à 1 neuf fois sur dix. Ce qu'on vérifie, c'est la repousse
+        // d'une saison — le régime dans lequel la passe est réellement utile.
+        let mut t = time;
+        for _ in 0..60 {
+            daily_regrowth(&mut world, &climate, t, &[], &[], 1);
+            t.tick += cairn_core::TICKS_PER_DAY;
+        }
+
+        let apres = world.tile(x, y).biomass;
+        assert!(apres > 20, "la tuile broutée n'a pas repoussé en 60 jours (à {apres})");
+        assert!(apres <= cap, "repousse au-delà de la capacité : {apres} > {cap}");
+    }
+
+    #[test]
+    fn sous_la_pluie_une_tuile_intacte_depasse_son_baseline() {
+        // C'est l'exception que le balayage épars doit préserver. Une tuile
+        // jamais touchée est à sa capacité *de temps sec* ; l'averse relève
+        // cette capacité de 40 %, et elle a donc légitimement de quoi pousser.
+        // Un balayage épars sans exception météo ne la visiterait jamais : ce
+        // test échoue alors, et c'est exactement ce qu'il est là pour attraper.
+        let (mut world, climate, time) = scene();
+        let (x, y) = tuile_qui_pousse(&mut world, time, &climate);
+        let baseline = world.tile(x, y).biomass;
+        assert_eq!(
+            baseline,
+            crate::tile::baseline_biomass(world.tile(x, y).biome),
+            "la tuile témoin doit être intacte"
+        );
+
+        // Le chunk doit être sale pour que la passe le visite : on salit une
+        // *autre* tuile du même chunk, jamais celle qu'on observe.
+        let (vx, vy) = (x ^ 1, y ^ 1);
+        assert_ne!((vx, vy), (x, y));
+        world.tile_mut(vx, vy).biomass = 1;
+
+        let averse = [crate::weather::WeatherCell {
+            pos: (x as f64, y as f64),
+            radius: crate::weather::WEATHER_RADIUS_TILES,
+            kind: crate::weather::WeatherKind::Rain,
+            age_days: 0,
+        }];
+        daily_regrowth(&mut world, &climate, time, &averse, &[], 1);
+
+        let apres = world.tile(x, y).biomass;
+        assert!(
+            apres > baseline,
+            "l'averse n'a pas fait pousser la tuile intacte ({baseline} → {apres})"
+        );
+    }
+
 }
