@@ -520,12 +520,31 @@ pub fn update_herds(
     let mut fissions = Vec::new();
 
     for (entity, (id, herd, pos)) in fauna.query_mut::<(&FaunaId, &mut Herd, &mut Position)>() {
+        // — Pas de LOD sur les troupeaux. —
+        //
+        //   Six tentatives mesurées, toutes fausses. Ralentir les proies seules
+        //   donne +953 % de prédateurs ; ralentir les deux côtés casse la
+        //   dynamique de rencontre, dont le cycle — attaquer, la proie détale,
+        //   la rattraper — est plus court que la fenêtre ; exempter les meutes
+        //   recrée le premier biais à +454 %.
+        //
+        //   **Un couple proie-prédateur ne se laisse pas grossir
+        //   temporellement.** Ce qui se grossit sans dommage, c'est ce qui n'a
+        //   pas de partenaire couplé : la flore (voir `ecology`), champ et non
+        //   acteur, dont le rattrapage est *exact* par forme fermée.
+        //
+        //   Et le profil a tranché la question de l'intérêt : la faune pèse
+        //   6,4 % du temps de tick, l'écologie 58 %. Il n'y avait rien à gagner
+        //   ici.
         let mut rng = Pcg32::new(tick_seed, id.0);
 
-        // Le souffle revient, qu'il y ait une menace ou non.
-        if herd.flee_ticks > 0 {
-            herd.flee_ticks -= 1;
-        }
+        // Le souffle revient, qu'il y ait une menace ou non — et il revient en
+        // **temps de jeu**, pas en nombre de tours. Sous LOD, un troupeau qui
+        // n'agit qu'une fois toutes les 24 heures serait resté essoufflé 72
+        // heures au lieu de 3 : incapable de fuir, il se faisait prendre. Le
+        // biais mesuré était de +106 % sur les prédateurs, pour une confusion
+        // d'unités entre « ticks » et « tours ».
+        herd.flee_ticks = herd.flee_ticks.saturating_sub(1);
 
         // — Fuite : elle prime sur tout le reste, y compris la faim — mais
         //   seulement si la bête a encore du souffle.
@@ -602,7 +621,9 @@ pub fn update_herds(
             }
         }
 
-        // — Démographie : la satiété commande.
+        // — Démographie : la satiété commande. `steps` fois quand le troupeau
+        //   est simulé grossièrement — on rattrape le temps sauté, on ne le
+        //   perd pas.
         herd.population = herd_population_step(herd.population, herd.satiation);
         if herd.population < HERD_MIN {
             doomed.push(entity);
@@ -648,6 +669,31 @@ pub fn update_packs(
     let mut fissions = Vec::new();
 
     for (entity, (pack, pos)) in fauna.query_mut::<(&mut Pack, &mut Position)>() {
+        // — Les meutes restent en simulation FINE, toujours.
+        //
+        //   Une interaction fondée sur des rencontres ne survit pas au
+        //   grossissement temporel : le cycle d'une chasse — attaquer, la proie
+        //   détale, la rattraper, retuer — est plus court que la fenêtre
+        //   grossière, et aucun facteur multiplicatif ne le reproduit. Mesuré
+        //   sur cinq tentatives : à pas 4 les prédateurs finissaient +59 %,
+        //   à pas 24 ils s'effondraient de −75 %, sans réglage intermédiaire
+        //   qui tienne.
+        //
+        //   Et le jeu n'en vaut pas la chandelle : une scène compte ~10 meutes
+        //   pour ~150 troupeaux. Les grossir ne rapporte presque rien et casse
+        //   toute l'écologie.
+        //
+        //   D'où la règle : **grossir ce qui est nombreux et faiblement couplé
+        //   (troupeaux, flore) ; garder fin ce qui est rare et fortement couplé
+        //   (prédateurs).** Un prédateur est rare par nature — c'est le sommet
+        //   de la pyramide.
+
+        // Rien de tué tant qu'on n'a pas frappé ce tick. Sans cette remise à
+        // zéro, une meute hors de portée conserve son dernier bilan et le
+        // reconvertit en croissance à chaque tick : mesuré à 622 meutes et
+        // 10 927 prédateurs en 90 jours, contre 13 et 109 attendus.
+        pack.last_kills = 0.0;
+
         // — La proie choisie d'abord : on la garde tant qu'elle vit et qu'elle
         //   reste à portée d'obstination. C'est ce qui permet d'épuiser un
         //   gibier plus rapide que soi. —
@@ -672,11 +718,21 @@ pub fn update_packs(
             best
         });
         pack.quarry = nearest.map(|(_, h)| h.entity);
-
-        pack.last_kills = 0.0;
         if let Some((d2, herd)) = nearest {
             let dist = d2.sqrt();
             if dist <= PACK_HUNT_RADIUS_TILES {
+                // — Combien de temps le contact dure-t-il vraiment ?
+                //
+                //   Multiplier les prises par `steps` supposerait la meute
+                //   collée à sa proie toute la fenêtre. C'est faux : dès la
+                //   première attaque le troupeau détale de 2 km, hors du rayon
+                //   de chasse (500 m). Une rencontre ne vaut donc qu'**un
+                //   tick** — sauf si le troupeau est à bout de souffle, et
+                //   c'est là, et seulement là, qu'il se fait prendre
+                //   plusieurs fois de suite.
+                //
+                //   Mesuré sans cette borne : les meutes en LOD tuaient 30 à
+                //   38 % de plus par prédateur qu'en simulation fine.
                 let taken = pack_kills(pack.population, herd.population);
                 pack.last_kills = taken;
                 kills.push(Kill { herd: herd.entity, head: taken });

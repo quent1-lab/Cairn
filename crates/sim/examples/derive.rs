@@ -80,10 +80,6 @@ struct Sample {
     /// peut que gagner. Une mesure qui ne dit pas dans quelles conditions elle
     /// a été prise ne permet pas de savoir ce qu'elle réfute.
     density: f64,
-    /// Troupeaux présents en moyenne dans le disque de chasse d'une meute
-    /// (rayon `PACK_HUNT_RADIUS_TILES`). En dessous de ~0,5, une meute passe
-    /// l'essentiel de son temps sans rien à portée.
-    per_disc: f64,
     /// **Prises réellement réalisées** par prédateur et par jour, contre un
     /// maximum théorique de `PRED_KILL_PER_DAY` quand le gibier est à portée.
     ///
@@ -91,6 +87,10 @@ struct Sample {
     /// « l'équation est mal réglée ». Déduite du run long à ~0,044 contre 0,18
     /// possible ; ici elle est comptée, pas déduite.
     kills_per_pred_day: f64,
+    /// Part des troupeaux **hors de vue de tout humain** (> 2 km, la portée de
+    /// `brain::HERD_SIGHT_TILES`). C'est la fraction que le LOD pourrait cesser
+    /// de simuler à plein régime sans que personne ne s'en aperçoive.
+    far_pct: f64,
     /// Chunks **régénérés** depuis le relevé précédent, ramenés au jour de jeu.
     ///
     /// Le discriminateur qui manquait. Un chunk évincé puis redemandé se
@@ -104,6 +104,9 @@ struct Sample {
 }
 
 const SAMPLE_DAYS: u64 = 5;
+
+/// Périodicité du rapport de profil, en jours de jeu.
+const PROFILE_EVERY_DAYS: u64 = 200;
 
 /// Pas par défaut de la grille de troupeaux, en tuiles (~400 m). Assez serré
 /// pour que 150 troupeaux tiennent sur 5 km — donc dans le store de chunks — et
@@ -129,6 +132,8 @@ fn main() {
     // Pas de la grille humaine, en tuiles. 0 = les humains restent groupés
     // comme les pose `scenario::populate`.
     let human_spread: i64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(0).max(0);
+    // Pas de LOD pour la faune hors de vue, en ticks. 1 = désactivé.
+    let lod: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(1).max(1);
 
     // — **Exactement le foyer de `chronicle`** : même point de départ, même
     //   sélection. C'est délibéré — les deux bancs deviennent comparables, et
@@ -141,6 +146,7 @@ fn main() {
     //   dix minutes avant le premier tick, pour un banc censé durer vingt. —
     let mut sim = Sim::new(WorldSeed(seed), capacity);
     let seed_point = (km_to_tiles(1500.0) as i64, km_to_tiles(2100.0) as i64);
+    sim.fauna_lod_period = lod;
     let home = scenario::find_home(&mut sim, seed_point);
 
     // Les humains et le gibier « normal » ; la densité arrive juste après.
@@ -225,11 +231,14 @@ fn main() {
             tiles_to_km(human_spread as f64)
         );
     }
+    if lod > 1 {
+        println!("  LOD faune : pas de {lod} ticks hors de vue d'un humain (marge 4 km)");
+    }
     println!("  relevé tous les {SAMPLE_DAYS} j");
     println!("╚═════════════════════════════════════════════════════════════════════╝\n");
     println!(
-        "{:>5} {:>7} {:>8} {:>7} {:>8} {:>8} {:>8} {:>8} {:>6} {:>9} {:>7}",
-        "jour", "troup.", "têtes", "meutes", "préd.", "trp/km²", "/disque", "prises", "pop", "regen/j", "tps"
+        "{:>5} {:>7} {:>8} {:>7} {:>8} {:>8} {:>8} {:>7} {:>8} {:>6} {:>9} {:>7}",
+        "jour", "troup.", "têtes", "meutes", "préd.", "trp/km²", "prises", "loin%", "disp.km", "pop", "regen/j", "tps"
     );
     let _ = std::io::stdout().flush();
 
@@ -271,6 +280,12 @@ fn main() {
         // des paramètres de départ : la faune migre, et c'est la densité du
         // moment qui gouverne la rencontre.
         let density = herd_density(&sim, herds);
+        let buckets = herds_by_distance(&sim);
+        let far_pct = if herds == 0 {
+            0.0
+        } else {
+            (herds - buckets[0]) as f64 / herds as f64 * 100.0
+        };
         let s = Sample {
             day,
             herds,
@@ -283,7 +298,7 @@ fn main() {
             tps,
             regen_per_day,
             density,
-            per_disc: density * disc_km2(),
+            far_pct,
             // `pred_ticks` compte des prédateurs-ticks ; ramené au jour, c'est
             // le nombre de prédateurs-jours sur la fenêtre.
             kills_per_pred_day: if pred_ticks > 0.0 {
@@ -295,15 +310,16 @@ fn main() {
         kills_window = 0.0;
         pred_ticks = 0.0;
         println!(
-            "{:>5} {:>7} {:>8.0} {:>7} {:>8.0} {:>8.2} {:>8.2} {:>8.3} {:>6} {:>9.0} {:>7.1}",
+            "{:>5} {:>7} {:>8.0} {:>7} {:>8.0} {:>8.2} {:>8.3} {:>6.0} {:>8.1} {:>6} {:>9.0} {:>7.1}",
             s.day,
             s.herds,
             s.head,
             s.packs,
             s.predators,
             s.density,
-            s.per_disc,
             s.kills_per_pred_day,
+            s.far_pct,
+            s.spread_km,
             s.pop,
             s.regen_per_day,
             s.tps
@@ -313,12 +329,32 @@ fn main() {
         // dès qu'on la passe dans un tube (`tee`, `head`) et on croit le
         // processus figé.
         let _ = std::io::stdout().flush();
+        // Profil périodique : un run long s'arrête à la main, il doit donc
+        // rendre ses chiffres en cours de route et pas seulement à la fin.
+        if day.is_multiple_of(PROFILE_EVERY_DAYS) {
+            profile_report(&sim);
+            let _ = std::io::stdout().flush();
+        }
         samples.push(s);
     }
 
     verdict(&samples, t_start.elapsed().as_secs_f64(), days);
+    profile_report(&sim);
     utilization_report(&sim);
 }
+
+/// Où passe le temps, par phase du tick. Ne s'affiche que sous la feature
+/// `profile` :
+///   cargo run --release -p cairn-sim --features profile --example derive
+#[cfg(feature = "profile")]
+fn profile_report(sim: &Sim) {
+    println!("\n╔══ PROFIL — répartition du temps par phase ══════════════════════════╗");
+    print!("{}", sim.prof.report());
+    println!("╚═════════════════════════════════════════════════════════════════════╝");
+}
+
+#[cfg(not(feature = "profile"))]
+fn profile_report(_sim: &Sim) {}
 
 /// Mesure M1 — le taux d'utilisation des chunks. Ne s'affiche que sous la
 /// feature `chunk-stats` :
@@ -420,6 +456,43 @@ fn herd_density(sim: &Sim, herds: usize) -> f64 {
     // ait un sens ici.
     let area = (std::f64::consts::PI * rms_km * rms_km).max(disc_km2());
     herds as f64 / area
+}
+
+/// Répartition des troupeaux par distance au plus proche humain.
+///
+/// **La mesure qui arbitre le LOD.** Un humain ne perçoit un troupeau qu'à
+/// `brain::HERD_SIGHT_TILES` (2 km) : au-delà, rien de ce que fait ce troupeau
+/// n'est observable. S'ils sont majoritairement loin, alors la divergence de la
+/// faune n'a pas besoin d'être *corrigée* — il suffit de ne plus la simuler à
+/// plein régime, et le coût cesse de suivre le nombre (BRIEF §8.2, « clé de la
+/// viabilité du monde infini »). Si au contraire ils se tiennent près des
+/// hommes, le LOD ne gagnerait rien et c'est l'écologie qu'il faut corriger.
+///
+/// Renvoie les effectifs par tranche : ≤2 km, 2-5, 5-10, 10-30, >30.
+fn herds_by_distance(sim: &Sim) -> [usize; 5] {
+    let humans: Vec<(f64, f64)> =
+        sim.agents.query::<&Position>().iter().map(|(_, p)| (p.x, p.y)).collect();
+    let mut buckets = [0usize; 5];
+    for (_, (_, pos)) in sim.fauna.query::<(&Herd, &Position)>().iter() {
+        let d2 = humans
+            .iter()
+            .map(|h| (h.0 - pos.x).powi(2) + (h.1 - pos.y).powi(2))
+            .fold(f64::INFINITY, f64::min);
+        let km = tiles_to_km(d2.sqrt());
+        let i = if km <= 2.0 {
+            0
+        } else if km <= 5.0 {
+            1
+        } else if km <= 10.0 {
+            2
+        } else if km <= 30.0 {
+            3
+        } else {
+            4
+        };
+        buckets[i] += 1;
+    }
+    buckets
 }
 
 /// Surface du disque de chasse d'une meute, en km².

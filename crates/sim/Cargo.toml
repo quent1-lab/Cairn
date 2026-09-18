@@ -9,6 +9,10 @@ edition.workspace = true
 # binaire : un compteur dans `World::tile` serait sur le chemin le plus chaud
 # de toute la simulation.
 chunk-stats = []
+# Profilage par phase du tick : où passe réellement le temps. Hors de cette
+# feature, aucun chrono n'existe dans le binaire — ces blocs sont le chemin le
+# plus chaud de la simulation.
+profile = []
 
 [dependencies]
 cairn-core.workspace = true

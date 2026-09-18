@@ -253,6 +253,25 @@ pub struct Sim {
     /// les scènes de test contrôlées la coupent — même patron explicite que
     /// `allow_wildfires`.
     pub allow_weather: bool,
+
+    /// Pas de simulation des troupeaux **hors de vue de tout humain**, en
+    /// ticks. `1` = pas de LOD, chaque troupeau simulé chaque heure.
+    ///
+    /// Mesuré : 79 à 100 % des troupeaux sont hors de portée de perception, et
+    /// on les simulait tous à plein régime. Ce réglage borne ce gaspillage sans
+    /// toucher à une seule règle : le troupeau lointain vit plus lentement,
+    /// mais il vit — il migre, broute et se scinde encore, contrairement à un
+    /// gel qui aurait tué les migrations émergentes du §2.4.
+    ///
+    /// **Déterministe** : le critère ne lit que l'état du monde (la distance
+    /// aux humains), jamais ce qu'un client regarde. Faire dépendre la
+    /// simulation d'un viewport ferait dépendre le monde de qui l'observe, et
+    /// le replay depuis la seed (§8.2) tomberait.
+    pub fauna_lod_period: u64,
+
+    /// Profilage par phase, sous la feature `profile`.
+    #[cfg(feature = "profile")]
+    pub prof: Profiler,
     /// L'immigration de gibier (`fauna::daily_immigration`) est-elle active
     /// pour cette simulation ? Vrai par défaut (le monde est censé être
     /// habité) ; les scènes de test qui veulent isoler une mécanique de
@@ -265,6 +284,76 @@ pub struct Sim {
     pub(crate) next_agent_id: u64,
     next_fauna_id: u64,
     pub(crate) next_clan_id: u64,
+}
+
+/// Chrono de phase — un `Instant` sous la feature `profile`, rien du tout
+/// sinon. Le profilage ne doit pas exister dans le binaire de production : ces
+/// blocs sont le chemin le plus chaud de la simulation.
+#[cfg(feature = "profile")]
+type Phase = std::time::Instant;
+/// Marqueur de taille nulle hors profilage — et non `()`, qui ferait passer
+/// une valeur unité en argument à chaque phase (lint `unit_arg`).
+#[cfg(not(feature = "profile"))]
+#[derive(Clone, Copy)]
+pub struct Phase;
+
+#[cfg(feature = "profile")]
+fn phase() -> Phase {
+    std::time::Instant::now()
+}
+#[cfg(not(feature = "profile"))]
+fn phase() -> Phase {
+    Phase
+}
+
+/// Où passe le temps, par grande phase du tick.
+///
+/// Après sept hypothèses réfutées en devinant la cause d'un effondrement de
+/// débit, ceci mesure enfin *où* le temps est dépensé plutôt que de le déduire
+/// des sorties de la simulation.
+#[cfg(feature = "profile")]
+#[derive(Default)]
+pub struct Profiler {
+    /// nom → (nanosecondes cumulées, nombre d'appels)
+    pub rows: std::collections::BTreeMap<&'static str, (u128, u64)>,
+}
+
+#[cfg(feature = "profile")]
+impl Profiler {
+    pub fn add(&mut self, name: &'static str, d: std::time::Duration) {
+        let e = self.rows.entry(name).or_insert((0, 0));
+        e.0 += d.as_nanos();
+        e.1 += 1;
+    }
+
+    /// Rapport trié par temps décroissant.
+    pub fn report(&self) -> String {
+        let total: u128 = self.rows.values().map(|(n, _)| *n).sum();
+        let mut v: Vec<_> = self.rows.iter().collect();
+        v.sort_by_key(|(_, (n, _))| std::cmp::Reverse(*n));
+        let mut out = format!(
+            "{:<18}{:>9}{:>10}{:>14}{:>12}\n",
+            "phase", "part", "ms", "appels", "µs/appel"
+        );
+        for (nom, (nanos, calls)) in v {
+            let pct = if total == 0 { 0.0 } else { *nanos as f64 / total as f64 * 100.0 };
+            let us = if *calls == 0 { 0.0 } else { *nanos as f64 / *calls as f64 / 1000.0 };
+            let ms = *nanos as f64 / 1e6;
+            out += &format!("{nom:<18}{pct:>7.1} %{ms:>10.0}{calls:>14}{us:>12.1}\n");
+        }
+        out
+    }
+}
+
+impl Sim {
+    #[cfg(feature = "profile")]
+    #[inline]
+    fn end(&mut self, name: &'static str, p: Phase) {
+        self.prof.add(name, p.elapsed());
+    }
+    #[cfg(not(feature = "profile"))]
+    #[inline(always)]
+    fn end(&mut self, _name: &'static str, _p: Phase) {}
 }
 
 impl Sim {
@@ -310,6 +399,11 @@ impl Sim {
             expeditions: BTreeMap::new(),
             allow_wildfires: true,
             allow_weather: true,
+            // Pas de LOD par défaut : on ne dégrade pas la simulation sans
+            // que l'appelant l'ait demandé.
+            fauna_lod_period: 1,
+            #[cfg(feature = "profile")]
+            prof: Profiler::default(),
             allow_fauna_immigration: true,
             next_agent_id: 0,
             next_fauna_id: 0,
@@ -677,6 +771,7 @@ impl Sim {
         let time = self.time;
 
         // 0. Instantanés : l'état de la faune et des humains tel qu'il est
+        let _ph = phase(); // 0 instantanes
         // *au début* du tick. Tout le monde délibère sur la même photo.
         // Le territoire de chaque clan (voir `social::detect_clans`) est
         // recalculé une fois par jour ; on n'en prend ici qu'une lecture.
@@ -698,7 +793,9 @@ impl Sim {
         // mutablement, et un sanctuaire est un point — le clone est négligeable.
         let shrines = self.shrines.clone();
 
+        self.end("0 instantanes", _ph);
         // 1. Délibération — bucketée : l'agent i ne repense sa tâche qu'aux
+        let _ph = phase(); // 1 deliberation
         // ticks (tick + i) % période == 0, ou dès qu'il n'a plus de tâche.
         // Les nourrissons ne délibèrent pas : ils sont portés.
         for (_, (id, pos, phys, traits, demo, kin, membership, carrying, knowledge, faith, behavior, mem)) in self
@@ -769,7 +866,9 @@ impl Sim {
             }
         }
 
+        self.end("1 deliberation", _ph);
         // 2. Exécution des tâches. Les chasses réussies sont collectées : on
+        let _ph = phase(); // 2 execution
         // n'entame pas le gibier pendant que les autres délibèrent dessus.
         // `path_budget` borne le nombre d'A* lancés ce tick (agents bloqués
         // par l'eau). `clan_stock` est une copie de travail des réserves —
@@ -867,15 +966,21 @@ impl Sim {
             }
         }
 
+        self.end("2 execution", _ph);
         // 2 ter. Expéditions : maintenant que les positions sont à jour, un
+        let _ph = phase(); // 2t expeditions
         // envoyé arrivé près de l'étain y est exposé et fait demi-tour ; rentré
         // au foyer, sa quête s'achève (voir `crate::commerce`).
         commerce::advance(self);
 
+        self.end("2t expeditions", _ph);
         // 2 bis. Les nourrissons : portés par leur mère, allaités par elle.
+        let _ph = phase(); // 2b nourrissons
         demography::nurse_infants(self);
 
+        self.end("2b nourrissons", _ph);
         // 3. Physiologie et morts. On collecte d'abord (on ne peut pas
+        let _ph = phase(); // 3 physiologie
         // retirer une entité pendant qu'on itère dessus), on retire après.
         // Instantané des huttes : un membre à portée d'une hutte de son clan
         // gagne une chaleur passive (voir `structures`), sans s'arrêter pour
@@ -951,35 +1056,50 @@ impl Sim {
             self.deaths.push(DeathRecord { tick: time.tick, agent, cause, pos });
         }
 
+        self.end("3 physiologie", _ph);
         // 3 bis. Démographie quotidienne à minuit : naissances, conceptions,
         // sénescence. Puis entretien du graphe social et détection des
         // clans (Phase 4) : le graphe doit voir la population du jour, pas
         // celle d'hier (un mort ne doit pas peser sur la cohésion).
         if time.tick.is_multiple_of(TICKS_PER_DAY) {
+            let _pa = phase();
             demography::daily(self);
+            let _pa = phase();
+            self.end("d demographie", _pa);
             social::daily(self);
+            self.end("d social", _pa);
             // La pression du jour (Phase 5) : besoin des clans et de leur
             // tension fraîche (posée par `social::daily`), lue plus tard par
             // le moteur d'insight. Mesure pure, ne déclenche rien encore.
+            let _pa = phase();
             pressure::measure(self);
+            self.end("d pression", _pa);
             // L'insight (Phase 5) : chaque adulte oisif, au confort, dans un
             // clan sous pression, peut découvrir une tech dont les prérequis
             // sont réunis. Après la pression, qu'elle consomme.
+            let _pa = phase();
             tech::insight(self);
+            self.end("d insight", _pa);
             // L'oubli (Phase 5) : constate quelles techs n'ont plus aucun
             // porteur vivant aujourd'hui (les morts du jour sont déjà passées,
             // étape 3) et les journalise — « l'humanité peut régresser ».
+            let _pa = phase();
             tech::forget(self);
+            self.end("d oubli", _pa);
             // Commerce (Phase 5) : un clan du cuivre sans étain dépêche un
             // envoyé le chercher au loin — la route qui, seule, mène au bronze.
+            let _pa = phase();
             commerce::dispatch(self);
+            self.end("d commerce", _pa);
             // Après que les clans du jour sont connus : réattribuer les
             // structures à qui contrôle leur tuile (et ruiner les abandonnées),
             // mesurer ce que chaque clan désire bâtir, puis ancrer le foyer des
             // clans sédentarisés à leur hutte du chef (en dernier : c'est cette
             // valeur ancrée que la délibération du lendemain doit lire).
             structures::maintain(self, time.tick / TICKS_PER_DAY);
+            let _pa = phase();
             structures::plan(self);
+            self.end("d structures", _pa);
             structures::anchor_homes(self);
             // Domestication (Phase 5) : les foyers étant fixés, apprivoiser (ou
             // refaroucher) les troupeaux domesticables selon la proximité d'un
@@ -995,12 +1115,19 @@ impl Sim {
             // peut s'enflammer — un sol détrempé ne prend pas.
             // La Foi (Phase 6) : la ferveur s'émousse, et ce qu'il en reste produit
             // la ressource du joueur. Cesser d'agir, c'est être oublié.
+            let _pa = phase();
             crate::faith::daily(self);
+            let _pa = phase();
+            self.end("d foi", _pa);
             crate::weather::daily(self);
+            let _pa = phase();
+            self.end("d meteo", _pa);
             fire::daily(self);
+            self.end("d feu", _pa);
         }
 
         // 3 ter. Échange de savoirs et renforcement des liens sociaux toutes
+        let _ph = phase(); // 3t echanges
         // les 4 h : un instantané quotidien raterait les croisements de la
         // journée (on se parle en se rencontrant, pas à minuit pile). Les
         // enfants héritent ainsi des sources — et du clan — de leurs
@@ -1017,7 +1144,9 @@ impl Sim {
             crate::faith::preach(self);
         }
 
+        self.end("3t echanges", _ph);
         // 4. Faune. Les meutes chassent d'abord (sur l'instantané), puis
+        let _ph = phase(); // 4 faune
         // toutes les prises — prédation et chasse humaine — sont appliquées
         // avant que les troupeaux ne fassent leurs petits : un troupeau
         // décimé ne doit pas engendrer comme s'il était intact.
@@ -1050,6 +1179,8 @@ impl Sim {
         );
 
         let seed = self.world.seed();
+        // Les positions humaines seules (pas les meutes) : c'est la présence
+        // d'un observateur qui décide de la finesse, pas celle d'un prédateur.
         let (dead_herds, fissions) = fauna::update_herds(
             &mut self.fauna,
             &mut self.world,
@@ -1065,7 +1196,9 @@ impl Sim {
             self.spawn_herd_species(x, y, population, species);
         }
 
+        self.end("4 faune", _ph);
         // 4 bis. Immigration de gibier, quotidienne : sans elle, une zone
+        let _ph = phase(); // 4b immigration
         // qui perd tous ses troupeaux (chasse sous `HERD_MIN`, prédation
         // comprise) reste vide pour toujours — rien ne fait *repousser* un
         // troupeau depuis zéro individu, contrairement à la végétation
@@ -1107,12 +1240,24 @@ impl Sim {
             }
         }
 
+        self.end("4b immigration", _ph);
         // 5. Écologie quotidienne, à minuit.
+        let _ph = phase(); // 5 ecologie
         if time.tick.is_multiple_of(TICKS_PER_DAY) {
-            ecology::daily_regrowth(&mut self.world, &self.climate, time, &self.weather);
+            let eco_humans: Vec<(f64, f64)> =
+                self.agents.query::<&Position>().iter().map(|(_, p)| (p.x, p.y)).collect();
+            ecology::daily_regrowth(
+                &mut self.world,
+                &self.climate,
+                time,
+                &self.weather,
+                &eco_humans,
+                self.fauna_lod_period,
+            );
         }
 
         self.time.tick += 1;
+        self.end("5 ecologie", _ph);
     }
 }
 
@@ -2453,7 +2598,12 @@ mod tests {
         // Le troupeau est juste sous la main : cette scène teste la
         // mécanique de mise à mort, pas l'approche.
         let herd =
-            HerdView { entity: hecs::Entity::DANGLING, pos: (pos.x, pos.y), population: 20.0, tameness: 0.0 };
+            HerdView {
+                entity: hecs::Entity::DANGLING,
+                pos: (pos.x, pos.y),
+                population: 20.0,
+                tameness: 0.0,
+            };
 
         let kill = execute(
             &mut sim.world,

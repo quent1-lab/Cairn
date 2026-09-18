@@ -60,9 +60,37 @@ pub fn daily_regrowth(
     climate: &Climate,
     time: SimTime,
     weather: &[crate::weather::WeatherCell],
+    humans: &[(f64, f64)],
+    lod_period: u64,
 ) {
     let eco_seed = world.seed().derive(salt::ECOLOGY) ^ splitmix64(time.tick);
+    let today = time.tick / cairn_core::TICKS_PER_DAY;
     for coord in world.dirty_coords() {
+        // — LOD de la flore, exactement ce que le BRIEF §8.2 décrit : « un
+        //   chunk sans agent n'est pas simulé tick par tick ; sa végétation est
+        //   rattrapée analytiquement au moment de l'accès ». `logistic_step`
+        //   prend déjà une durée, donc rattraper N jours coûte le même calcul
+        //   qu'en rattraper un — la logistique a une solution exacte.
+        //
+        //   Le rattrapage n'est pas une approximation de N pas quotidiens :
+        //   c'est la **même courbe**, échantillonnée moins souvent. Seul
+        //   l'arrondi stochastique diffère, et il diffère en mieux (moins de
+        //   bruit d'arrondi accumulé). —
+        let last = world.last_regrowth.get(&coord).copied().unwrap_or(today);
+        let elapsed = today.saturating_sub(last).max(1);
+        if lod_period > 1 && elapsed < lod_period {
+            let (ox0, oy0) = coord.origin();
+            let half0 = crate::chunk::CHUNK_SIZE as f64 / 2.0;
+            let c = (ox0 as f64 + half0, oy0 as f64 + half0);
+            let r = cairn_core::km_to_tiles(4.0);
+            let vu = humans.iter().any(|h| {
+                (h.0 - c.0).powi(2) + (h.1 - c.1).powi(2) <= r * r
+            });
+            if !vu {
+                continue;
+            }
+        }
+        world.last_regrowth.insert(coord, today);
         // Un flux RNG par (jour, chunk) : l'arrondi d'une tuile ne dépend pas
         // de ce que les autres chunks ont fait.
         let stream = (coord.x as u64) ^ (coord.y as u64).rotate_left(32);
@@ -94,7 +122,7 @@ pub fn daily_regrowth(
                 if !climate.grows(tile, oy + ly as i64, time) {
                     continue;
                 }
-                tile.biomass = logistic_step(tile.biomass, cap, 1.0, &mut rng);
+                tile.biomass = logistic_step(tile.biomass, cap, elapsed as f64, &mut rng);
             }
         }
         world.clear_dirty_if_pristine(coord);

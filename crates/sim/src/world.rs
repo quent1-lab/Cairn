@@ -84,6 +84,9 @@ pub struct World {
     /// dizaines d'octets, et la requête « où est l'eau ? » porte sur le
     /// baseline pur — pas besoin de matérialiser des tuiles pour y répondre.
     springs: BTreeMap<ChunkCoord, Vec<(u8, u8)>>,
+    /// Jour de la dernière repousse par chunk (LOD de la flore). Quelques
+    /// octets par chunk sale, sans commune mesure avec un chunk résident.
+    pub last_regrowth: BTreeMap<ChunkCoord, u64>,
     /// Horloge logique : incrémentée à chaque accès.
     clock: u64,
     /// Nombre maximal de chunks résidents.
@@ -146,6 +149,7 @@ impl World {
             dirty: BTreeSet::new(),
             deltas: BTreeMap::new(),
             springs: BTreeMap::new(),
+            last_regrowth: BTreeMap::new(),
             clock: 0,
             capacity: capacity.max(1),
             generated: 0,
