@@ -272,6 +272,10 @@ pub struct Sim {
     /// Profilage par phase, sous la feature `profile`.
     #[cfg(feature = "profile")]
     pub prof: Profiler,
+    /// Télémétrie de la faune (réponse fonctionnelle, refuge). Le champ existe
+    /// toujours ; c'est le **type** qui est vide hors de la feature
+    /// `fauna-stats`, ce qui évite de semer des `cfg` sur chaque site d'appel.
+    pub fauna_stats: crate::fauna::FaunaStats,
     /// L'immigration de gibier (`fauna::daily_immigration`) est-elle active
     /// pour cette simulation ? Vrai par défaut (le monde est censé être
     /// habité) ; les scènes de test qui veulent isoler une mécanique de
@@ -404,6 +408,7 @@ impl Sim {
             fauna_lod_period: 1,
             #[cfg(feature = "profile")]
             prof: Profiler::default(),
+            fauna_stats: Default::default(),
             allow_fauna_immigration: true,
             next_agent_id: 0,
             next_fauna_id: 0,
@@ -1151,7 +1156,7 @@ impl Sim {
         // avant que les troupeaux ne fassent leurs petits : un troupeau
         // décimé ne doit pas engendrer comme s'il était intact.
         let (pred_kills, dead_packs, pack_fissions) =
-            fauna::update_packs(&mut self.fauna, &self.world, &herds);
+            fauna::update_packs(&mut self.fauna, &self.world, &herds, &mut self.fauna_stats);
         kills.extend(pred_kills);
         fauna::apply_kills(&mut self.fauna, &kills);
         for entity in dead_packs {

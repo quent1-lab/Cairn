@@ -13,6 +13,11 @@ chunk-stats = []
 # feature, aucun chrono n'existe dans le binaire — ces blocs sont le chemin le
 # plus chaud de la simulation.
 profile = []
+# Télémétrie de la faune : réponse fonctionnelle (prises appariées à la densité
+# locale de proies) et fraction de refuge. Hors de cette feature, `FaunaStats`
+# est un type vide et ses appels s'évaporent — elle ajoute une boucle sur les
+# troupeaux par meute et par tick, ce qui doublerait le coût du tour de meute.
+fauna-stats = []
 
 [dependencies]
 cairn-core.workspace = true

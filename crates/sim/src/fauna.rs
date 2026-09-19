@@ -663,16 +663,115 @@ fn graze(world: &mut World, pos: (f64, f64), population: f32) {
     }
 }
 
+/// Rayon auquel on mesure la densité locale de proies autour d'une meute :
+/// 2 km, quatre fois le rayon de chasse. C'est l'échelle du garde-manger, pas
+/// celle du coup de dent — une réponse fonctionnelle se lit contre la densité
+/// *disponible*, pas contre celle qu'on est en train de mordre.
+pub const PACK_SENSE_RADIUS_TILES: f64 = km_to_tiles(2.0);
+
+/// Bornes hautes des classes de densité locale (têtes dans `PACK_SENSE_RADIUS`).
+/// Échelonnées en puissances approximatives de trois : la question est la
+/// *forme* de la courbe sur plusieurs ordres de grandeur, pas sa valeur en un
+/// point.
+#[cfg(feature = "fauna-stats")]
+pub const DENSITY_EDGES: [f32; 8] =
+    [1.0, 10.0, 30.0, 100.0, 300.0, 1000.0, 3000.0, f32::INFINITY];
+
+/// Télémétrie de la faune — **mesure seulement**, aucune rétroaction sur la
+/// simulation, donc aucun risque pour le déterminisme. Type vide hors de la
+/// feature `fauna-stats` : les appels s'évaporent à la compilation, comme pour
+/// `profile` et `chunk-stats`.
+///
+/// Elle répond à deux des trois questions de P1 (la troisième — réponse
+/// numérique et son retard — se lit sur la série quotidienne du banc, qui n'a
+/// besoin de rien ici) :
+///
+/// - **réponse fonctionnelle** : prises par prédateur et par jour, rangées par
+///   classe de densité locale de proies. `pack_kills` ne fait pas apparaître la
+///   densité, mais le rayon de chasse et l'écrêtage par le troupeau visé
+///   peuvent en introduire une dépendance *de fait* — c'est précisément ce
+///   qu'on ne veut pas déduire.
+/// - **fraction de refuge** : part des troupeaux jamais entrés dans le rayon de
+///   chasse d'une meute. Sans refuge, rien n'empêche mathématiquement la
+///   prédation d'aller jusqu'à zéro proie.
+#[cfg(not(feature = "fauna-stats"))]
+#[derive(Default)]
+pub struct FaunaStats;
+
+#[cfg(not(feature = "fauna-stats"))]
+impl FaunaStats {
+    #[inline(always)]
+    pub fn encounter(&mut self, _pos: &Position, _herds: &[HerdView], _pred: f32, _kills: f32) {}
+    #[inline(always)]
+    pub fn herds_alive(&mut self, _herds: &[HerdView]) {}
+}
+
+#[cfg(feature = "fauna-stats")]
+#[derive(Default)]
+pub struct FaunaStats {
+    /// Par classe de densité : (pack-ticks, prédateurs cumulés, prises
+    /// cumulées, pack-ticks ayant effectivement pris). Les prédateurs sont
+    /// cumulés et non moyennés pour que « prises par prédateur » se calcule à
+    /// la fin, pondéré par l'effectif — une classe visitée par une grosse meute
+    /// ne doit pas compter comme une visitée par une petite.
+    pub response: [(u64, f64, f64, u64); 8],
+    /// Troupeaux **distincts** entrés dans le rayon de chasse au moins une fois.
+    pub hunted: std::collections::BTreeSet<u64>,
+    /// Troupeaux **distincts** ayant existé. Le complément donne le refuge.
+    pub seen: std::collections::BTreeSet<u64>,
+}
+
+#[cfg(feature = "fauna-stats")]
+impl FaunaStats {
+    /// Une rencontre : la densité locale vue par cette meute, appariée à ce
+    /// qu'elle a prélevé ce tick.
+    pub fn encounter(&mut self, pos: &Position, herds: &[HerdView], pred: f32, kills: f32) {
+        let (sense2, hunt2) = (
+            PACK_SENSE_RADIUS_TILES * PACK_SENSE_RADIUS_TILES,
+            PACK_HUNT_RADIUS_TILES * PACK_HUNT_RADIUS_TILES,
+        );
+        let mut local = 0.0f32;
+        for h in herds {
+            let d2 = (pos.x - h.pos.0).powi(2) + (pos.y - h.pos.1).powi(2);
+            if d2 <= sense2 {
+                local += h.population;
+            }
+            if d2 <= hunt2 {
+                self.hunted.insert(h.entity.to_bits().get());
+            }
+        }
+        let i = DENSITY_EDGES.iter().position(|&e| local < e).unwrap_or(7);
+        let slot = &mut self.response[i];
+        slot.0 += 1;
+        slot.1 += f64::from(pred);
+        slot.2 += f64::from(kills);
+        if kills > 0.0 {
+            slot.3 += 1;
+        }
+    }
+
+    /// Les troupeaux vivants de ce tick — appelé **une fois par tick**, pas par
+    /// meute, sinon on paierait le même ensemble autant de fois qu'il y a de
+    /// meutes pour n'y rien ajouter.
+    pub fn herds_alive(&mut self, herds: &[HerdView]) {
+        for h in herds {
+            self.seen.insert(h.entity.to_bits().get());
+        }
+    }
+}
+
 /// Le système des meutes : poursuite du gibier, prises, démographie.
 /// Renvoie les prises à appliquer aux troupeaux et les meutes à retirer.
 pub fn update_packs(
     fauna: &mut hecs::World,
     world: &World,
     herds: &[HerdView],
+    stats: &mut FaunaStats,
 ) -> (Vec<Kill>, Vec<hecs::Entity>, Vec<PackFission>) {
     let mut kills = Vec::new();
     let mut doomed = Vec::new();
     let mut fissions = Vec::new();
+    stats.herds_alive(herds);
 
     for (entity, (pack, pos)) in fauna.query_mut::<(&mut Pack, &mut Position)>() {
         // — Les meutes restent en simulation FINE, toujours.
@@ -749,6 +848,12 @@ pub fn update_packs(
                 try_move(world, pos, dir, PACK_STEP_TILES.min(dist));
             }
         }
+
+        // La rencontre, telle qu'elle a eu lieu : densité locale de proies
+        // appariée aux prises du tick. Placé **après** le calcul des prises et
+        // **avant** la démographie, seul instant où les deux sont vrais
+        // ensemble. Sans la feature, cette ligne n'existe pas.
+        stats.encounter(pos, herds, pack.population, pack.last_kills);
 
         pack.population = pack_population_step(pack.population, pack.last_kills);
         if pack.population < PACK_MIN {

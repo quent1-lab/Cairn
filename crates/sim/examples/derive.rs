@@ -271,6 +271,15 @@ fn main() {
     let mut regen_prev = sim.world.generated;
     let mut kills_window = 0.0f64;
     let mut pred_ticks = 0.0f64;
+    // — Série **quotidienne** de la boucle proie-prédateur, pour la troisième
+    //   mesure de P1 : la réponse numérique et son retard. Le relevé à 5 jours
+    //   ne peut pas la porter — un retard de deux ou trois jours y serait
+    //   invisible, et c'est précisément l'ordre de grandeur qui distingue « le
+    //   prédateur recrute trop vite » de « il recrute trop tard ». Écrite en
+    //   CSV plutôt qu'affichée : 240 lignes n'ont pas leur place dans un
+    //   rapport qu'on lit pendant qu'il tourne. —
+    let mut daily: Vec<(u64, f64, f64, usize, f64, usize)> = Vec::new();
+    let mut kills_day = 0.0f64;
 
     for day in 1..=days {
         for _ in 0..TICKS_PER_DAY {
@@ -283,8 +292,14 @@ fn main() {
             // moyenne de prises n'a de sens que rapportée aux bouches.
             for (_, p) in sim.fauna.query::<&Pack>().iter() {
                 kills_window += p.last_kills as f64;
+                kills_day += p.last_kills as f64;
                 pred_ticks += p.population as f64;
             }
+        }
+        {
+            let (head, predators, herds, packs) = census(&sim);
+            daily.push((day, kills_day, f64::from(predators), packs, f64::from(head), herds));
+            kills_day = 0.0;
         }
         if !day.is_multiple_of(SAMPLE_DAYS) {
             continue;
@@ -370,9 +385,86 @@ fn main() {
     }
 
     verdict(&samples, t_start.elapsed().as_secs_f64(), days);
+    write_daily(&daily, seed);
+    fauna_stats_report(&sim);
     profile_report(&sim);
     utilization_report(&sim);
 }
+
+/// La série quotidienne de la boucle proie-prédateur, en CSV. C'est la matière
+/// de la **réponse numérique et de son retard** : le recrutement des
+/// prédateurs se corrèle-t-il aux prises du jour, ou à celles d'il y a une
+/// semaine ? Une corrélation croisée sur 240 points répond ; deux moyennes de
+/// quart, non.
+fn write_daily(daily: &[(u64, f64, f64, usize, f64, usize)], seed: u64) {
+    let path = format!("out/derive_daily_{seed}.csv");
+    let mut out = String::from("jour,prises,predateurs,meutes,tetes,troupeaux\n");
+    for (j, k, p, m, h, t) in daily {
+        out.push_str(&format!("{j},{k:.4},{p:.2},{m},{h:.1},{t}\n"));
+    }
+    match std::fs::write(&path, out) {
+        Ok(()) => println!("\n  série quotidienne → {path}"),
+        Err(e) => println!("\n  (série quotidienne non écrite : {e})"),
+    }
+}
+
+/// Réponse fonctionnelle et fraction de refuge. Ne s'affiche que sous la
+/// feature `fauna-stats` :
+///   cargo run --release -p cairn-sim --features fauna-stats --example derive
+#[cfg(feature = "fauna-stats")]
+fn fauna_stats_report(sim: &Sim) {
+    let st = &sim.fauna_stats;
+    println!("\n╔══ RÉPONSE FONCTIONNELLE ════════════════════════════════════════════╗");
+    println!("  Prises par prédateur et par jour, contre la densité locale de proies");
+    println!("  (têtes dans {:.1} km). **Le test** : une courbe plate ou linéaire en", 
+        tiles_to_km(cairn_sim::fauna::PACK_SENSE_RADIUS_TILES));
+    println!("  densité est du Holling type I — déstabilisant par construction, car");
+    println!("  rien ne freine le prédateur quand la proie se raréfie.\n");
+    println!(
+        "{:>16} {:>12} {:>14} {:>12} {:>10}",
+        "densité locale", "pack-ticks", "prises/préd/j", "préd. moyens", "% avec prise"
+    );
+    let mut bas = 0.0f64;
+    for (i, &(ticks, preds, kills, hits)) in st.response.iter().enumerate() {
+        if ticks == 0 {
+            continue;
+        }
+        let haut = cairn_sim::fauna::DENSITY_EDGES[i];
+        let label = if haut.is_infinite() {
+            format!("{bas:.0}+")
+        } else {
+            format!("{bas:.0}-{haut:.0}")
+        };
+        // Prises par prédateur et par jour : on divise par les prédateurs
+        // **cumulés** (un prédateur-tick), puis on ramène au jour.
+        let par_pred_jour = if preds > 0.0 {
+            kills / preds * f64::from(cairn_core::TICKS_PER_DAY as u32)
+        } else {
+            0.0
+        };
+        println!(
+            "{label:>16} {ticks:>12} {par_pred_jour:>14.4} {:>12.1} {:>9.1}%",
+            preds / ticks as f64,
+            hits as f64 / ticks as f64 * 100.0
+        );
+        bas = f64::from(haut);
+    }
+    let (chasses, vus) = (st.hunted.len(), st.seen.len());
+    println!("\n  ── FRACTION DE REFUGE ──");
+    println!("  {chasses} troupeaux sur {vus} sont entrés au moins une fois dans le rayon");
+    if vus > 0 {
+        let refuge = (vus - chasses) as f64 / vus as f64 * 100.0;
+        println!(
+            "  de chasse d'une meute  ⇒  refuge = {refuge:.1} %  (part jamais approchée)"
+        );
+        println!("  Un refuge nul signifie qu'aucune proie n'est structurellement hors");
+        println!("  d'atteinte : rien n'empêche alors la prédation d'aller à zéro proie.");
+    }
+    println!("╚═════════════════════════════════════════════════════════════════════╝");
+}
+
+#[cfg(not(feature = "fauna-stats"))]
+fn fauna_stats_report(_sim: &Sim) {}
 
 /// Où passe le temps, par phase du tick. Ne s'affiche que sous la feature
 /// `profile` :
