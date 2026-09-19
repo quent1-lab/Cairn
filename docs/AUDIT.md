@@ -126,16 +126,44 @@ pierre…). Chacun doit rester une **dette tracée**, pas un oubli.
   - Mesure : `example chronicle` / `client_render` impriment le tps.
 - [ ] **RAM** : capacité de chunks × ~1 Mo/chunk vs budget 2 Go (§8.3). Le LRU
   borne l'empreinte ; vérifier que la capacité par défaut reste raisonnable.
-- [ ] **Goulots connus** (à re-mesurer, pas à supposer) :
-  - génération de chunk (bruit fBm du worldgen) — le coût dominant mesuré ;
-  - churn LRU quand la population se disperse (visite de nombreux chunks) ;
-  - scan de fourrage (~289 tuiles/délibération, `best_forage`) ;
-  - allocations par tick (`herd_views`/`human_views`/`clan_views` reconstruits).
+- [ ] **Goulots connus** — **mesurés** depuis le 2026-09-18 par le profileur
+  (feature `profile`, `Sim::phase`/`Sim::end`), qui a mis fin à trois jours
+  d'hypothèses. Scène dense, 600 jours :
+  - [x] génération de chunk (bruit fBm du worldgen) — **fait** : génération
+    paresseuse par tuile (`Chunk::ready`, 6a0f273), ×1,6 à ×5 selon la
+    capacité ;
+  - [x] balayage écologique des 4096 tuiles par chunk sale — **fait** :
+    balayage épars sur `Chunk::touched` (92ef903), écologie de 61,3 % à
+    10,1 % du temps, ×32,5 en absolu, trajectoire bit-identique ;
+  - [ ] **faune — 84,8 % du temps de tick**, et le seul effectif non borné
+    (+138 % de têtes entre le 3ᵉ et le 4ᵉ quart). Deux causes distinctes à ne
+    pas confondre : les **requêtes de voisinage en O(n·m)** (`update_packs`
+    parcourt tous les troupeaux pour chaque meute — la grille spatiale du
+    §8.2 n'existe pas) et le **coût par entité** (`best_pasture` échantillonne
+    9 tuiles espacées de 80, donc jusqu'à 9 **chunks distincts** par troupeau
+    et par tick : 421 troupeaux ⇒ ~3 800 accès chunks distincts/tick, ce qui
+    relie directement la croissance de la faune au churn LRU) ;
+  - [ ] churn LRU quand la population se disperse — diagnostiqué (balayage de
+    capacité [C]), jamais corrigé ; la pénalité de dispersion est retombée de
+    8,8× à 2,9× **par effet de bord** de la génération paresseuse ;
+  - [ ] scan de fourrage (`best_forage`, `FORAGE_RADIUS=24`/`FORAGE_STRIDE=3`
+    ⇒ 17×17 = **289 tuiles par délibération**) — intact ; la délibération pèse
+    3,8 % du temps, donc ce n'est pas la priorité malgré son ancienneté ;
+  - [ ] allocations par tick (`herd_views`/`human_views`/`clan_views`
+    reconstruits, `sim.rs:684-687`) — intact, jamais mesuré isolément.
 - [ ] **Lints de perf** : `cargo clippy --workspace -- -D warnings` propre
   (clone superflu, allocation en boucle, `collect` inutile…).
-- [ ] **LOD temporel** (§8.2) respecté : un chunk sans agent n'est pas simulé
-  tick par tick (repousse en forme fermée). Vérifier qu'aucun système ne balaie
-  tous les chunks résidents chaque tick sans borne.
+- [x] **LOD temporel** (§8.2) respecté : un chunk sans agent n'est pas simulé
+  tick par tick (repousse en forme fermée) et **aucun système ne balaie plus
+  tous les chunks résidents sans borne** — c'était le cas de `daily_regrowth`
+  jusqu'au 2026-09-19.
+  - **Acquis négatif, payé cher** : le LOD temporel ne se généralise **pas** à
+    la faune. Six tentatives mesurées, six biais (de +59 % à +953 % sur les
+    prédateurs) — un couple proie-prédateur ne se laisse pas grossir
+    temporellement, parce que son cycle de rencontre est plus court que la
+    fenêtre de réveil. Ce qui se grossit sans dommage est ce qui n'a pas de
+    partenaire couplé : la flore, **champ** et non acteur, dont le rattrapage
+    est *exact* par forme fermée. Voir le commentaire de `fauna::update_herds`.
 
 Toute optimisation proposée doit citer **le chiffre avant/après**. Sans mesure,
 on ne touche pas.

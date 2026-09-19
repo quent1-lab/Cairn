@@ -55,6 +55,45 @@ tps=9.44  # 2026-07-30 seed42 400ticks — Phase 6 incr. 1 (Chronique) + correct
 # départ (la scène est dense, il est bas par construction) — c'est la **pente**
 # et la liste des effectifs qui divergent.
 
+# ─── Scène « écologie » (2026-09-18/19) ──────────────────────────────────────
+#   derive 42 600 150 4 20 20000 750 0 1   (600 j · 150 troupeaux · 4 meutes ·
+#   20 humains · 20 000 chunks · pas de 1,5 km ⇒ 18 km · LOD flore désactivé)
+#   Capacité 20 000 : le store couvre 18,1 km, soit toute l'étendue de la
+#   scène — aucun thrashing, on mesure la simulation et non le store.
+
+# 2026-09-18 · TÉMOIN, avant le balayage épars
+#   600 j en 7661 s · 1.9 tps moyen
+#   5:2.1 55:3.2 105:3.1 155:3.8 205:4.1 255:4.2 305:4.7
+#   355:3.2 405:3.4 455:1.4 505:1.4 555:0.7
+#   fin : 421 troupeaux · 29 856 têtes · 43 meutes · 205 prédateurs
+#   verdict : troupeaux +127 %, têtes +138 %, chunks sales +17 % ⇒ DIVERGE
+#             débit −64 % ⇒ S'EFFONDRE
+#   profil : écologie 61.3 % (4694 s) · faune 36.9 % (2826 s) · délib. 1.3 %
+
+# 2026-09-19 · APRÈS le balayage épars (92ef903)
+#   600 j en 1423 s · 10.1 tps moyen                          ← ×5.4
+#   5:6.1 55:15.5 105:14.5 155:18.5 205:19.4 255:21.9 305:29.4
+#   355:18.3 405:17.5 455:7.9 505:7.5 555:3.6
+#   TRAJECTOIRE BIT-IDENTIQUE au témoin : 120 relevés sur 120 sans un écart.
+#   Le verdict de dérive est donc rigoureusement le même — seul le temps change.
+#   profil : faune 84.8 % (1207 s) · écologie 10.1 % (144 s) · délib. 3.8 %
+#
+#   Deux lectures, et la seconde est la plus importante :
+#   1. L'écologie est réglée : ×32,5 en absolu. Elle ne balaie plus que les
+#      tuiles de `Chunk::touched`, pas les 4096 du chunk.
+#   2. LA DÉRIVE N'A PAS BOUGÉ D'UN JOUR. La machine est 5,4× plus rapide et
+#      s'effondre exactement au même endroit, avec les mêmes effectifs. C'est
+#      la démonstration que l'écologie était un **coût fixe** et la faune une
+#      **croissance** : aucune optimisation de parcours ne rattrape un effectif
+#      qui double par quart de run.
+#
+#   Effet de bord non expliqué, à garder en tête : la faune a été divisée par
+#   2,3 en absolu (2826 s → 1207 s) alors qu'aucune ligne de `fauna.rs` n'a
+#   changé et que les effectifs sont identiques à l'unité près. Hypothèse la
+#   plus probable — NON VÉRIFIÉE — la localité mémoire : le balayage complet
+#   faisait transiter 64 Kio de tuiles par chunk sale et par jour, soit des
+#   centaines de Mio quotidiens à travers le cache.
+
 
 ## [C] Balayage de capacité — l'étalon du chantier chunk
 #
@@ -92,3 +131,8 @@ tps=9.44  # 2026-07-30 seed42 400ticks — Phase 6 incr. 1 (Chronique) + correct
 #   par tuile utile. 22,8 % des chunks n'en voient qu'UNE. 75,6 % ne sont
 #   jamais écrits — c'est la portée de C1 ; les 24,4 % restants sont balayés
 #   en entier par l'écologie, qui borne le gain.
+#   → Cette dernière borne est levée depuis le 2026-09-19 (balayage épars,
+#     92ef903) : l'écologie ne visite plus que les tuiles de `Chunk::touched`.
+#     Le balayage de capacité est donc à refaire — les chiffres [C] ci-dessus
+#     datent d'une version où l'écologie matérialisait encore les 4096 tuiles
+#     de chaque chunk sale, ce qui gonflait mécaniquement la régénération.

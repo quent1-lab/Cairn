@@ -533,9 +533,15 @@ pub fn update_herds(
         //   pas de partenaire couplé : la flore (voir `ecology`), champ et non
         //   acteur, dont le rattrapage est *exact* par forme fermée.
         //
-        //   Et le profil a tranché la question de l'intérêt : la faune pèse
-        //   6,4 % du temps de tick, l'écologie 58 %. Il n'y avait rien à gagner
-        //   ici.
+        //   **Attention en relisant ceci.** Ce commentaire s'est longtemps
+        //   terminé par « la faune pèse 6,4 % du temps de tick, l'écologie
+        //   58 % : il n'y a rien à gagner ici ». C'est faux depuis le
+        //   balayage épars de l'écologie (92ef903) : la faune pèse désormais
+        //   **84,8 %** et reste le seul effectif non borné. Ce qui reste vrai,
+        //   et qui est la seule chose que ce commentaire doit interdire, c'est
+        //   le **LOD temporel** — les six biais ci-dessus ne dépendent pas du
+        //   profil. Optimiser la faune autrement (grille spatiale pour les
+        //   requêtes de voisinage, coût par entité) reste entièrement ouvert.
         let mut rng = Pcg32::new(tick_seed, id.0);
 
         // Le souffle revient, qu'il y ait une menace ou non — et il revient en

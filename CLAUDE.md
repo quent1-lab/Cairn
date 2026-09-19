@@ -32,9 +32,13 @@ Chacune vient d'une erreur réelle, pas d'un principe. Elles priment sur l'intui
 
 **Phase 6 — partie serveur.** Fait : `crates/protocol` (types partagés, terrain non transmis car fonction pure de la seed). Reste : serveur détaché, WebSocket, client réseau, `inspect`, persistance, déploiement. **Suspendu** le temps du chantier de dérive.
 
-**Chantier de dérive (en cours).** Le débit s'effondre sur les runs longs. Deux bugs trouvés et corrigés : la génération de chunk payait 216 tuiles par tuile lue (génération paresseuse, ×1,6 à ×5) ; la repousse végétale se gelait sur toute terre broutée puis évincée — ce dernier façonnait toute la dynamique de faune du projet.
+**Chantier de dérive (en cours).** Le débit s'effondre sur les runs longs. Trois bugs trouvés et corrigés (génération de chunk à 216 tuiles par tuile lue ; repousse gelée sur toute terre broutée puis évincée ; `pack.last_kills` non remis à zéro), puis un profileur (feature `profile`) qui a mis fin à trois jours d'hypothèses. Le coût était l'**écologie** — que personne n'avait suspectée : `daily_regrowth` balayait les 4 096 tuiles de chaque chunk sale pour n'en faire pousser qu'une poignée. Balayage épars sur `Chunk::touched` (92ef903) : **×5,4 sur 600 jours, trajectoire bit-identique**.
 
-**Question ouverte** : le rendement de chasse des meutes plafonne à 17-35 % du potentiel, la prédation totale ne suit pas l'abondance (0-10 proies/jour pendant que le gibier passe de 59 à 4 650). Correctif à l'essai : la meute s'attache à sa proie au lieu de recibler chaque tick.
+**Le résultat qui oriente la suite** : la machine est 5,4× plus rapide et **la dérive n'a pas bougé d'un jour** — mêmes effectifs, même effondrement. L'écologie était un *coût fixe* ; la faune est une *croissance*. Elle pèse désormais **84,8 %** du temps de tick et reste le seul effectif non borné (+138 % de têtes entre le 3ᵉ et le 4ᵉ quart). Aucune optimisation de parcours ne rattrapera ça : il faut soit borner l'effectif par le modèle, soit rendre les requêtes de voisinage sous-quadratiques (la **grille spatiale** du §8.2, jamais écrite).
+
+**Acquis négatif à ne pas retenter** : le LOD temporel ne se généralise **pas** à la faune. Six tentatives, six biais mesurés (+59 % à +953 % sur les prédateurs). Un couple proie-prédateur ne se grossit pas temporellement — son cycle de rencontre est plus court que toute fenêtre de réveil utile. Ce qui se grossit est ce qui n'a pas de partenaire couplé : la flore, **champ** et non acteur, au rattrapage exact par forme fermée.
+
+**Dette identifiée, non livrée** : sous la pluie, une tuile intacte pousse au-dessus du baseline sans entrer dans `Chunk::touched` — elle échappe donc à l'instantané d'éviction et repart silencieusement au baseline. Bug **antérieur** au balayage épars ; test de reproduction écrit, en attente de son propre commit.
 
 Historique complet, incrément par incrément : **[docs/JOURNAL.md](docs/JOURNAL.md)**.
 
