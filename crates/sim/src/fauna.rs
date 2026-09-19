@@ -55,6 +55,11 @@ const HERB_BIRTH_PER_DAY: f32 = 0.020;
 const HERB_DEATH_PER_DAY: f32 = 0.010;
 /// Biomasse broutée par tête et par tick, étalée sur la tuile et ses voisines.
 const GRAZE_PER_HEAD: f32 = 1.0;
+/// **Satiété d'équilibre** : en dessous le troupeau fond, au-dessus il croît.
+/// Ce n'est pas un réglage indépendant, c'est exactement le rapport
+/// mortalité/natalité — le nommer évite de le recalculer de tête dans les
+/// bancs, et de le lire comme un seuil réglable séparément.
+pub const HERB_SATIATION_EQUILIBRIUM: f32 = HERB_DEATH_PER_DAY / HERB_BIRTH_PER_DAY;
 
 // — Démographie des prédateurs —
 
@@ -514,7 +519,11 @@ pub fn update_herds(
     time: SimTime,
     seed: WorldSeed,
     threats: &[(f64, f64)],
+    stats: &mut FaunaStats,
 ) -> (Vec<hecs::Entity>, Vec<Fission>) {
+    // Sans la feature, `stats` est un type vide : le paramètre ne coûte rien et
+    // évite une seconde signature.
+    let _ = &stats;
     let tick_seed = seed.derive(salt::FAUNA) ^ splitmix64(time.tick);
     let mut doomed = Vec::new();
     let mut fissions = Vec::new();
@@ -584,6 +593,20 @@ pub fn update_herds(
             let here_tile = world.tile(pos.x.floor() as i64, pos.y.floor() as i64);
             herd.satiation =
                 (f32::from(biomass) / 255.0) * herd.species.habitat_factor(here_tile.biome);
+
+            // — Mesure du fourrage. Bloc sous `cfg` et non appel no-op, parce
+            //   qu'il faut relire la tuile d'où vient l'herbe pour connaître sa
+            //   capacité : ce coût-là ne doit pas exister hors de la feature. —
+            #[cfg(feature = "fauna-stats")]
+            {
+                let t = world.tile(target.0, target.1);
+                stats.forage_sample(
+                    here_tile.biome,
+                    herd.satiation,
+                    biomass,
+                    crate::ecology::effective_capacity(&t),
+                );
+            }
 
             let winter = !climate.grows(&here_tile, pos.y.floor() as i64, time);
             if let Some(anchor) = herd.anchor {
@@ -706,9 +729,40 @@ impl FaunaStats {
     pub fn herds_alive(&mut self, _herds: &[HerdView]) {}
 }
 
+/// Ce qui limite le fourrage d'un troupeau, par biome. **Le discriminateur du
+/// régulateur par le bas** : sur la seule satiété, un troupeau qui fond parce
+/// que la steppe ne donne pas davantage et un troupeau qui fond parce qu'il a
+/// tout brouté se ressemblent exactement. Les distinguer demande de comparer la
+/// biomasse trouvée à la **capacité de la tuile où elle a été trouvée**.
+#[cfg(feature = "fauna-stats")]
+#[derive(Default, Clone, Copy)]
+pub struct Forage {
+    /// Herd-ticks observés dans ce biome (hors fuite : un troupeau qui détale
+    /// ne broute pas et n'a pas de satiété du jour).
+    pub ticks: u64,
+    pub satiation_sum: f64,
+    /// Somme du **taux de remplissage** `biomasse trouvée / capacité de la
+    /// tuile` : 1,0 = pâture pleine *pour ce biome*, donc le broutage n'y est
+    /// pour rien.
+    pub fill_sum: f64,
+    /// Herd-ticks sous la satiété d'équilibre — le troupeau y perd des têtes.
+    pub declining: u64,
+    /// Parmi ceux-là, pâture **pleine** (remplissage > 0,9) : le biome ne peut
+    /// pas les nourrir, et aucune repousse n'y changera rien.
+    pub declining_full_pasture: u64,
+    /// Parmi ceux-là, pâture **épuisée** (remplissage < 0,5) : le régulateur par
+    /// le bas a effectivement agi, c'est le mécanisme qu'on espère voir.
+    pub declining_grazed_out: u64,
+    /// Histogramme de satiété, dix classes de 0,1.
+    pub sat_hist: [u64; 10],
+}
+
 #[cfg(feature = "fauna-stats")]
 #[derive(Default)]
 pub struct FaunaStats {
+    /// Indexé par `Biome as u8` — `#[repr(u8)]` le garantit, et il y a douze
+    /// biomes.
+    pub forage: [Forage; 12],
     /// Par classe de densité : (pack-ticks, prédateurs cumulés, prises
     /// cumulées, pack-ticks ayant effectivement pris). Les prédateurs sont
     /// cumulés et non moyennés pour que « prises par prédateur » se calcule à
@@ -756,6 +810,33 @@ impl FaunaStats {
     pub fn herds_alive(&mut self, herds: &[HerdView]) {
         for h in herds {
             self.seen.insert(h.entity.to_bits().get());
+        }
+    }
+
+    /// Un herd-tick de pâture : le biome où il broute, la satiété qui en
+    /// résulte, la biomasse trouvée et la capacité de la tuile qui la portait.
+    pub fn forage_sample(
+        &mut self,
+        biome: cairn_worldgen::Biome,
+        satiation: f32,
+        found: u8,
+        cap: u8,
+    ) {
+        let f = &mut self.forage[biome as usize];
+        f.ticks += 1;
+        f.satiation_sum += f64::from(satiation);
+        // Capacité nulle (océan, glacier) : pas de remplissage définissable.
+        let fill = if cap == 0 { 0.0 } else { f64::from(found) / f64::from(cap) };
+        f.fill_sum += fill;
+        let bin = ((satiation.clamp(0.0, 0.999) * 10.0) as usize).min(9);
+        f.sat_hist[bin] += 1;
+        if satiation < HERB_SATIATION_EQUILIBRIUM {
+            f.declining += 1;
+            if fill > 0.9 {
+                f.declining_full_pasture += 1;
+            } else if fill < 0.5 {
+                f.declining_grazed_out += 1;
+            }
         }
     }
 }
@@ -932,6 +1013,18 @@ const IMMIGRATION_CHANCE_PER_DAY: f32 = 0.15;
 /// ces deux rayons : assez loin pour ne pas apparaître sous les pieds de
 /// quelqu'un, assez proche pour rester dans la zone chargée (chunks déjà
 /// résidents pour la plupart — pas de génération forcée au loin).
+///
+/// **L'ancrage sur un humain est une garde de performance, pas un choix de
+/// modélisation — ne pas le remplacer par « là où il y a de l'herbe ».** Ce
+/// serait plus réaliste et ce serait ruineux : le monde est infini et l'herbe y
+/// est partout, donc le gibier peuplerait des régions que personne ne regarde,
+/// chacune coûtant des chunks résidents et des herd-ticks à chaque tour. On ne
+/// simule la faune que là où quelqu'un peut la voir ; c'est le même principe
+/// que pour les feux et la météo, qui ne naissent eux aussi qu'à proximité des
+/// habitants. Corollaire à garder en tête en lisant la **fraction de refuge** :
+/// le gibier réapparaît autour des humains alors que les prédateurs
+/// réapparaissent autour du gibier, donc le refuge ne peut que décroître — et
+/// cette asymétrie-là est assumée, pas un oubli.
 const IMMIGRATION_MIN_RADIUS_TILES: f64 = km_to_tiles(1.0);
 const IMMIGRATION_MAX_RADIUS_TILES: f64 = km_to_tiles(4.0);
 /// Aucun troupeau ne doit déjà se trouver à moins de cette distance du site

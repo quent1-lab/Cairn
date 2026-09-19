@@ -1193,6 +1193,7 @@ impl Sim {
             time,
             seed,
             &threats,
+            &mut self.fauna_stats,
         );
         for entity in dead_herds {
             let _ = self.fauna.despawn(entity);

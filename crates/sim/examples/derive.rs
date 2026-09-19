@@ -449,6 +449,79 @@ fn fauna_stats_report(sim: &Sim) {
         );
         bas = f64::from(haut);
     }
+    // — LE DISCRIMINATEUR DU RÉGULATEUR PAR LE BAS. Un troupeau qui fond parce
+    //   que son biome ne donne pas davantage et un troupeau qui fond parce
+    //   qu'il a tout brouté ont **la même satiété**. Seule la comparaison de la
+    //   biomasse trouvée à la capacité de la tuile qui la portait les sépare, et
+    //   c'est ce qui décide où est le levier : recalibrer la satiété, ou
+    //   accélérer la repousse. —
+    println!("\n╔══ FOURRAGE — CE QUI LIMITE LA SATIÉTÉ, PAR BIOME ═══════════════════╗");
+    println!(
+        "  Satiété d'équilibre = {:.2} (mortalité/natalité). En dessous, le troupeau",
+        cairn_sim::fauna::HERB_SATIATION_EQUILIBRIUM
+    );
+    println!("  perd des têtes. « rempli » = biomasse trouvée / capacité de la tuile :");
+    println!("  1,00 veut dire pâture pleine *pour ce biome*, donc broutage hors de cause.\n");
+    println!(
+        "{:>16} {:>10} {:>8} {:>8} {:>9} {:>12} {:>12}",
+        "biome", "herd-ticks", "satiété", "rempli", "en déclin", "dont pâture", "dont brouté"
+    );
+    println!(
+        "{:>16} {:>10} {:>8} {:>8} {:>9} {:>12} {:>12}",
+        "", "", "moy.", "moy.", "%", "PLEINE", "à ras"
+    );
+    let biomes = [
+        "Ocean", "Coast", "Glacier", "Tundra", "Taiga", "ColdDesert", "Steppe",
+        "Grassland", "TemperateForest", "HotDesert", "Savanna", "TropicalForest",
+    ];
+    let (mut tot, mut tot_full, mut tot_grazed, mut tot_decl) = (0u64, 0u64, 0u64, 0u64);
+    for (i, f) in st.forage.iter().enumerate() {
+        if f.ticks == 0 {
+            continue;
+        }
+        tot += f.ticks;
+        tot_decl += f.declining;
+        tot_full += f.declining_full_pasture;
+        tot_grazed += f.declining_grazed_out;
+        println!(
+            "{:>16} {:>10} {:>8.3} {:>8.3} {:>8.1}% {:>11.1}% {:>11.1}%",
+            biomes[i],
+            f.ticks,
+            f.satiation_sum / f.ticks as f64,
+            f.fill_sum / f.ticks as f64,
+            f.declining as f64 / f.ticks as f64 * 100.0,
+            if f.declining > 0 {
+                f.declining_full_pasture as f64 / f.declining as f64 * 100.0
+            } else {
+                0.0
+            },
+            if f.declining > 0 {
+                f.declining_grazed_out as f64 / f.declining as f64 * 100.0
+            } else {
+                0.0
+            },
+        );
+    }
+    if tot_decl > 0 {
+        println!("\n  ── VERDICT DU RÉGULATEUR PAR LE BAS ──");
+        println!(
+            "  {:.1} % des herd-ticks sont en déclin. Parmi eux :",
+            tot_decl as f64 / tot.max(1) as f64 * 100.0
+        );
+        println!(
+            "    pâture PLEINE  : {:>5.1} %  ← le biome ne peut pas les nourrir,",
+            tot_full as f64 / tot_decl as f64 * 100.0
+        );
+        println!("                             aucune repousse n'y changera rien");
+        println!(
+            "    pâture à ras   : {:>5.1} %  ← le régulateur a effectivement agi",
+            tot_grazed as f64 / tot_decl as f64 * 100.0
+        );
+        println!("  Le premier chiffre dominant désigne une erreur de **calibration** de la");
+        println!("  satiété ; le second, un régulateur qui fonctionne et qu'il suffit de régler.");
+    }
+    println!("╚═════════════════════════════════════════════════════════════════════╝");
+
     let (chasses, vus) = (st.hunted.len(), st.seen.len());
     println!("\n  ── FRACTION DE REFUGE ──");
     println!("  {chasses} troupeaux sur {vus} sont entrés au moins une fois dans le rayon");
