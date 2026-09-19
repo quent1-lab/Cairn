@@ -26,8 +26,19 @@
 //! Il ne mesure **pas** le débit absolu — la scène est volontairement dense et
 //! le chiffre n'est pas comparable à celui de `client_render`. Il mesure des
 //! **tendances** : sur la seconde moitié du run, chaque effectif converge-t-il
-//! ou diverge-t-il ? Le verdict compare la moyenne du 3ᵉ quart à celle du 4ᵉ,
-//! ce qui est robuste au bruit saisonnier sans demander d'ajustement de courbe.
+//! ou diverge-t-il ? Le verdict compare le 3ᵉ quart au 4ᵉ, ce qui est robuste
+//! au bruit saisonnier sans demander d'ajustement de courbe.
+//!
+//! **Trois grandeurs, pas une** (2026-09-19). Comparer deux **moyennes**
+//! suppose une grandeur monotone, et ce banc s'est trompé deux fois sur le même
+//! run pour l'avoir supposé : il a condamné un correctif qui divisait un stock
+//! par six, parce que la base était six fois plus basse et que l'écart relatif
+//! y paraissait donc plus grand. Le verdict rapporte désormais la **médiane**
+//! (niveau, insensible aux pointes), le **minimum** (plancher — c'est lui qui
+//! sépare un *cliquet*, qui ne redescend jamais, d'un *réservoir* qui revient à
+//! son étiage) et l'**amplitude** `max/min` (une oscillation dont l'amplitude
+//! grossit n'est pas amortie). Un effectif n'est déclaré sans borne que si son
+//! niveau **et** son plancher montent.
 //!
 //! ## Densité sans étalement — la contrainte qui a dicté la scène
 //!
@@ -543,19 +554,40 @@ fn spread(sim: &Sim) -> f64 {
     tiles_to_km(sum / n)
 }
 
-/// Moyenne d'une grandeur sur une tranche de relevés.
-fn mean(samples: &[Sample], f: impl Fn(&Sample) -> f64) -> f64 {
-    if samples.is_empty() {
-        return 0.0;
-    }
-    samples.iter().map(&f).sum::<f64>() / samples.len() as f64
-}
-
 /// Au-delà de cette croissance relative entre le 3ᵉ et le 4ᵉ quart du run, on
 /// parle de divergence. 15 % sur un quart de run est très au-delà du bruit
 /// saisonnier mesuré sur la scène de référence (le cycle proie-prédateur y
 /// oscille, mais autour d'une valeur).
 const DIVERGENCE_THRESHOLD: f64 = 0.15;
+
+/// Minimum, médiane, maximum d'une grandeur sur un quart de run.
+///
+/// **La médiane remplace la moyenne comme niveau de référence.** Une grandeur
+/// qui oscille — le surplus laissé par les averses, le cycle proie-prédateur —
+/// voit sa moyenne tirée par ses pointes, et deux runs dont les pointes ne
+/// tombent pas aux mêmes jours paraissent alors différer de niveau.
+fn stats(samples: &[Sample], f: &dyn Fn(&Sample) -> f64) -> (f64, f64, f64) {
+    let mut v: Vec<f64> = samples.iter().map(f).collect();
+    v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let med = if v.len() % 2 == 0 {
+        (v[v.len() / 2 - 1] + v[v.len() / 2]) / 2.0
+    } else {
+        v[v.len() / 2]
+    };
+    (v[0], med, v[v.len() - 1])
+}
+
+/// Écart relatif, nul plutôt qu'infini quand la référence est nulle.
+fn ecart(a: f64, b: f64) -> f64 {
+    if a.abs() < 1e-9 { 0.0 } else { (b - a) / a }
+}
+
+/// Amplitude d'un quart : `max/min`. `None` quand le minimum est nul — la
+/// grandeur a touché le fond, le rapport ne veut plus rien dire (et c'est
+/// l'information intéressante : un effectif qui touche zéro est éteint).
+fn amplitude(min: f64, max: f64) -> Option<f64> {
+    (min.abs() > 1e-9).then(|| max / min)
+}
 
 fn verdict(samples: &[Sample], elapsed_s: f64, days: u64) {
     if samples.len() < 8 {
@@ -572,10 +604,39 @@ fn verdict(samples: &[Sample], elapsed_s: f64, days: u64) {
         elapsed_s,
         (days * TICKS_PER_DAY) as f64 / elapsed_s.max(1e-9)
     );
-    println!("  Tendance mesurée entre le 3ᵉ et le 4ᵉ quart du run :\n");
-    println!("{:>22} {:>11} {:>11} {:>9}", "grandeur", "3ᵉ quart", "4ᵉ quart", "écart");
+    println!("  Tendance mesurée entre le 3ᵉ et le 4ᵉ quart du run.");
+    println!("  Δméd = niveau, Δmin = plancher, ampl = max/min dans le quart.\n");
+    println!(
+        "{:>22} {:>10} {:>10} {:>7} {:>7} {:>8} {:>8} {:>11}",
+        "grandeur", "méd 3ᵉq", "méd 4ᵉq", "Δméd", "Δmin", "ampl 3ᵉq", "ampl 4ᵉq", "forme"
+    );
 
-    let mut diverging = Vec::new();
+    // — Pourquoi trois colonnes et non une. Le verdict d'origine comparait deux
+    //   **moyennes** et criait « DIVERGE » au-delà de +15 %. Il supposait donc
+    //   une grandeur monotone, et il s'est trompé deux fois sur le même run :
+    //   il a condamné un correctif qui divisait le stock de tuiles sur-cap par
+    //   six, simplement parce que la base était six fois plus basse et que
+    //   l'écart *relatif* y paraissait plus grand (+127 % contre +13 %).
+    //
+    //   Ce qui départage un **cliquet** d'un **réservoir qui se vide** n'est pas
+    //   le niveau, c'est le **plancher** : un cliquet ne redescend jamais, donc
+    //   son minimum monte avec lui ; un réservoir revient à son étiage à chaque
+    //   cycle, donc son minimum reste bas quoi que fasse sa médiane.
+    //
+    //   Et l'**amplitude** répond à une question que ce banc ne savait pas
+    //   poser : une oscillation dont `max/min` grossit d'un quart à l'autre
+    //   n'est pas amortie. C'est la mesure qui manquait pour la faune — le
+    //   multi-seed a montré que le couple proie-prédateur n'a pas de point
+    //   d'équilibre et part d'un côté ou de l'autre selon la seed, ce qu'aucune
+    //   moyenne de quart ne pouvait dire. —
+    let mut cliquets = Vec::new();
+    let mut non_amorties = Vec::new();
+    // Les grandeurs du **couple proie-prédateur**. L'amplitude d'un chunk sale
+    // ou d'une dispersion grossit pour des raisons de store, pas d'écologie :
+    // les mélanger ferait dire au verdict que le store n'a pas de point
+    // d'équilibre. On sépare donc la liste, et seule la moitié faune reçoit la
+    // lecture écologique.
+    const FAUNE: [&str; 4] = ["troupeaux", "têtes de gibier", "meutes", "prédateurs"];
     for (nom, f, croissance_est_mauvaise) in [
         ("troupeaux", &(|s: &Sample| s.herds as f64) as &dyn Fn(&Sample) -> f64, true),
         ("têtes de gibier", &|s: &Sample| s.head as f64, true),
@@ -587,36 +648,99 @@ fn verdict(samples: &[Sample], elapsed_s: f64, days: u64) {
         ("dispersion (km)", &|s: &Sample| s.spread_km, true),
         ("population", &|s: &Sample| s.pop as f64, false),
     ] {
-        let (a, b) = (mean(q3, f), mean(q4, f));
-        let rel = if a.abs() < 1e-9 { 0.0 } else { (b - a) / a };
-        let diverge = croissance_est_mauvaise && rel > DIVERGENCE_THRESHOLD;
-        if diverge {
-            diverging.push(nom);
+        let (min3, med3, max3) = stats(q3, f);
+        let (min4, med4, max4) = stats(q4, f);
+        let (d_med, d_min) = (ecart(med3, med4), ecart(min3, min4));
+        let (a3, a4) = (amplitude(min3, max3), amplitude(min4, max4));
+
+        // CLIQUET : le niveau **et** le plancher montent — l'effectif ne
+        // redescend plus. C'est le seul « sans borne » que ce banc affirme.
+        let cliquet = croissance_est_mauvaise
+            && d_med > DIVERGENCE_THRESHOLD
+            && d_min > DIVERGENCE_THRESHOLD;
+        // OSCILLE : le niveau monte, le plancher non. Descriptif, pas une
+        // alarme — c'est ici que tombe un réservoir qui se remplit et se vide.
+        let oscille = !cliquet && d_med > DIVERGENCE_THRESHOLD;
+        // Amplitude qui grossit : l'oscillation n'est pas amortie.
+        let enfle = match (a3, a4) {
+            (Some(x), Some(y)) => y > x * (1.0 + DIVERGENCE_THRESHOLD),
+            // Toucher zéro au dernier quart après une amplitude finie : pire
+            // qu'une amplitude qui grossit, l'effectif s'est éteint.
+            (Some(_), None) => true,
+            _ => false,
+        };
+        if cliquet {
+            cliquets.push(nom);
         }
+        if enfle {
+            non_amorties.push(nom);
+        }
+        let fmt_ampl = |a: Option<f64>| match a {
+            Some(v) => format!("{v:.1}×"),
+            None => "—".to_string(),
+        };
         println!(
-            "{nom:>22} {a:>11.1} {b:>11.1} {:>+8.0}%  {}",
-            rel * 100.0,
-            if diverge { "◄ DIVERGE" } else { "" }
+            "{nom:>22} {med3:>10.1} {med4:>10.1} {:>+6.0}% {:>+6.0}% {:>8} {:>8} {:>11}",
+            d_med * 100.0,
+            d_min * 100.0,
+            fmt_ampl(a3),
+            fmt_ampl(a4),
+            format!(
+                "{}{}",
+                if cliquet {
+                    "CLIQUET"
+                } else if oscille {
+                    "OSCILLE"
+                } else {
+                    ""
+                },
+                if enfle { " ↑ampl" } else { "" }
+            )
         );
     }
 
     // Le débit est la conséquence, pas la cause : on le rapporte à part, et une
     // *baisse* est ce qui est mauvais — d'où le test inversé.
-    let (t3, t4) = (mean(q3, |s| s.tps), mean(q4, |s| s.tps));
-    let rel = if t3.abs() < 1e-9 { 0.0 } else { (t4 - t3) / t3 };
+    let (tmin3, tmed3, tmax3) = stats(q3, &|s: &Sample| s.tps);
+    let (tmin4, tmed4, tmax4) = stats(q4, &|s: &Sample| s.tps);
+    let rel = ecart(tmed3, tmed4);
+    let fmt_ampl = |min: f64, max: f64| match amplitude(min, max) {
+        Some(v) => format!("{v:.1}×"),
+        None => "—".to_string(),
+    };
     println!(
-        "{:>22} {t3:>11.1} {t4:>11.1} {:>+8.0}%  {}",
+        "{:>22} {tmed3:>10.1} {tmed4:>10.1} {:>+6.0}% {:>+6.0}% {:>8} {:>8} {:>11}",
         "débit (tps)",
         rel * 100.0,
-        if rel < -DIVERGENCE_THRESHOLD { "◄ S'EFFONDRE" } else { "" }
+        ecart(tmin3, tmin4) * 100.0,
+        fmt_ampl(tmin3, tmax3),
+        fmt_ampl(tmin4, tmax4),
+        if rel < -DIVERGENCE_THRESHOLD { "S'EFFONDRE" } else { "" }
     );
 
     println!("\n  ─────────────────────────────────────────────────────────────────");
-    if diverging.is_empty() {
-        println!("  AUCUNE DIVERGENCE — les effectifs trouvent leur équilibre.");
+    if cliquets.is_empty() {
+        println!("  AUCUN CLIQUET — aucun effectif ne monte en emportant son plancher.");
     } else {
-        println!("  DIVERGENT : {}", diverging.join(", "));
-        println!("  Un effectif qui croît encore au dernier quart n'a pas de borne.");
+        println!("  SANS BORNE : {}", cliquets.join(", "));
+        println!("  Niveau *et* plancher montent : cet effectif ne redescend plus.");
+    }
+    let (faune, autres): (Vec<&str>, Vec<&str>) =
+        non_amorties.iter().copied().partition(|n| FAUNE.contains(n));
+    if faune.is_empty() {
+        println!("  Faune : aucune amplitude en expansion — les oscillations s'amortissent.");
+    } else {
+        println!("  OSCILLATION NON AMORTIE (faune) : {}", faune.join(", "));
+        println!("  L'amplitude grossit d'un quart à l'autre, ou l'effectif a touché zéro.");
+        println!("  Un couple proie-prédateur qui fait ça n'a pas de point d'équilibre, et");
+        println!("  quel côté s'effondre en premier se joue à la seed — ce n'est donc pas");
+        println!("  une propriété du modèle qu'on puisse lire sur un seul run.");
+    }
+    if !autres.is_empty() {
+        // Sans lecture écologique : ces amplitudes-là parlent du store et de la
+        // géographie, et une seule cause peut les bouger toutes (un monde qui
+        // s'éteint arrête de salir des chunks).
+        println!("  Amplitude en expansion, hors faune : {}", autres.join(", "));
     }
     println!("╚═════════════════════════════════════════════════════════════════════╝");
 
