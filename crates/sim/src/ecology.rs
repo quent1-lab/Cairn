@@ -33,6 +33,11 @@ pub const GROWTH_RATE_PER_DAY: f64 = 0.08;
 
 /// Solution exacte de la logistique après `days` jours, en unités u8.
 /// L'arrondi de la partie fractionnaire est tiré dans `rng` (stochastique).
+///
+/// **Vaut dans les deux sens.** Pour `p > k` la forme fermée décroît vers `k`
+/// sans jamais le franchir — c'est la même courbe, prise de l'autre côté de
+/// son asymptote. `regrow_tile` s'en sert pour résorber le surplus qu'une
+/// averse a laissé au-dessus de la capacité de temps sec.
 pub fn logistic_step(p: u8, k: u8, days: f64, rng: &mut Pcg32) -> u8 {
     if k == 0 {
         return p; // sol stérile : rien ne pousse jamais
@@ -118,8 +123,11 @@ pub fn daily_regrowth(
         //   quoi l'éviction le rendrait au baseline sans que rien ne le dise
         //   (`regrow_tile` s'en charge).
         //
-        //   La sécheresse ne demande rien : `weather_factor < 1` abaisse le
-        //   plafond, mais cette passe ne fait jamais décroître une biomasse. —
+        //   La sécheresse ne demande toujours rien, mais plus pour la même
+        //   raison qu'avant : la passe *sait* désormais faire décroître une
+        //   biomasse (le surplus de la pluie se résorbe), seulement son
+        //   plancher est la capacité de **temps sec**. Une tuile intacte y est
+        //   déjà : `weather_factor < 1` ne lui donne rien à faire. —
         //
         //   **L'ordre de visite fait partie du contrat.** `logistic_step` tire
         //   dans le flux du chunk, donc le balayage épars doit servir les
@@ -193,14 +201,41 @@ fn regrow_tile(
     let tile = chunk.tile_mut(lx, ly, worldgen);
     // Le plafond effectif suit la fertilité : un sol dégradé portera moins
     // que le K du biome (surexploitation, §2.4).
-    let cap = ((f32::from(effective_capacity(tile)) * weather_factor).clamp(0.0, 255.0)) as u8;
-    if tile.biomass >= cap {
+    let cap_dry = effective_capacity(tile);
+    // Le ciel du jour déplace ce plafond : l'averse le relève, la sécheresse
+    // l'abaisse.
+    let cap_sky = ((f32::from(cap_dry) * weather_factor).clamp(0.0, 255.0)) as u8;
+    // — Vers quoi la tuile relaxe. La logistique joue **dans les deux sens**
+    //   (`dP/dt < 0` dès que `P > K`) et `logistic_step` traite déjà ce cas :
+    //   c'est ce qui fait redescendre le surplus qu'une averse a laissé. Le
+    //   don de la pluie est temporaire, comme l'averse elle-même.
+    //
+    //   **Le plancher est la capacité de temps sec, jamais en dessous.** Sous
+    //   sécheresse `cap_sky` passe sous le baseline ; y laisser descendre la
+    //   tuile ferait dépérir les terres broutées pendant que leurs voisines
+    //   intactes — que le balayage épars ne visite pas — resteraient vertes.
+    //   Le monde serait plausible et faux. Les faire dépérir toutes est un
+    //   changement de modèle (il donnerait à la faune le régulateur par le
+    //   haut qui lui manque) : il se défend sur ses propres mesures, ce n'est
+    //   pas une dette à solder.
+    //
+    //   Les trois cas sont disjoints, et l'ordre compte : borner la
+    //   **croissance** à `cap_sky` est ce qui empêche une sécheresse de faire
+    //   repousser une tuile broutée *plus vite* qu'un ciel calme. —
+    let cap_floor = cap_sky.max(cap_dry);
+    let target = if tile.biomass < cap_sky {
+        // Pousse vers le plafond du jour — seule branche que la saison peut
+        // interdire : rien ne germe en hiver, mais un surplus s'y résorbe.
+        if !climate.grows(tile, oy + ly as i64, time) {
+            return;
+        }
+        cap_sky
+    } else if tile.biomass > cap_floor {
+        cap_floor
+    } else {
         return;
-    }
-    if !climate.grows(tile, oy + ly as i64, time) {
-        return;
-    }
-    tile.biomass = logistic_step(tile.biomass, cap, elapsed as f64, rng);
+    };
+    tile.biomass = logistic_step(tile.biomass, target, elapsed as f64, rng);
     // L'emprunt mutable de `tile` s'arrête à la ligne au-dessus : le
     // compilateur laisse donc reprendre `chunk` ici (NLL).
     chunk.mark_touched(lx, ly);
@@ -274,6 +309,25 @@ mod tests {
     }
 
     #[test]
+    fn la_forme_fermee_decroit_aussi_vers_k() {
+        // Tout le correctif du surplus de pluie repose là-dessus : au-dessus de
+        // K, la même courbe redescend vers K sans jamais le franchir. Et la
+        // convergence en u8 n'est pas acquise d'avance — à P = K+1 l'arrondi
+        // stochastique remonte à K+1 neuf fois sur dix ; c'est le tirage qui
+        // finit par livrer K, et K est alors absorbant (P = K ⇒ P₁ = K).
+        let mut rng = rng();
+        let k = 110u8;
+        let mut p = 200u8;
+        for _ in 0..400 {
+            let suivant = logistic_step(p, k, 1.0, &mut rng);
+            assert!(suivant <= p, "la décroissance remonte : {p} → {suivant}");
+            assert!(suivant >= k, "franchit K par le bas : {suivant} < {k}");
+            p = suivant;
+        }
+        assert_eq!(p, k, "n'a pas convergé vers K (bloquée à {p})");
+    }
+
+    #[test]
     fn sol_sterile_reste_sterile() {
         let mut rng = rng();
         assert_eq!(logistic_step(0, 0, 100.0, &mut rng), 0);
@@ -317,7 +371,9 @@ mod tests {
         // laisse à 1 neuf fois sur dix. Ce qu'on vérifie, c'est la repousse
         // d'une saison — le régime dans lequel la passe est réellement utile.
         let mut t = time;
-        for _ in 0..60 {
+        // 120 jours et non 60 : la résorption finit en u8, où P = K+1 ne
+        // retombe sur K que par tirage (voir `la_forme_fermee_decroit_aussi_vers_k`).
+        for _ in 0..120 {
             daily_regrowth(&mut world, &climate, t, &[], &[], 1);
             t.tick += cairn_core::TICKS_PER_DAY;
         }
@@ -417,4 +473,53 @@ mod tests {
         );
     }
 
+    #[test]
+    fn la_pousse_de_la_pluie_redescend_quand_l_averse_passe() {
+        // Le don de la pluie est **temporaire** — c'est ce que le module dit
+        // d'une averse, et la logistique le donne d'elle-même : `dP/dt < 0`
+        // dès que `P > K`. Or `regrow_tile` court-circuite sur
+        // `biomass >= cap` et ne fait donc jamais décroître une biomasse : une
+        // tuile gonflée par une averse garde son surplus **pour toujours**.
+        // L'éviction masquait l'anomalie en rendant la tuile au baseline ;
+        // depuis 5099f8c la pousse est correctement conservée, donc le défaut
+        // de modèle est devenu observable.
+        let (mut world, climate, time) = scene();
+        let (x, y) = tuile_qui_pousse(&mut world, time, &climate);
+        let baseline = crate::tile::baseline_biomass(world.tile(x, y).biome);
+
+        // Le chunk doit être sale pour que la passe le visite.
+        world.tile_mut(x ^ 1, y ^ 1).biomass = 1;
+
+        let averse = [crate::weather::WeatherCell {
+            pos: (x as f64, y as f64),
+            radius: crate::weather::WEATHER_RADIUS_TILES,
+            kind: crate::weather::WeatherKind::Rain,
+            age_days: 0,
+        }];
+        let mut t = time;
+        for _ in 0..10 {
+            daily_regrowth(&mut world, &climate, t, &averse, &[], 1);
+            t.tick += cairn_core::TICKS_PER_DAY;
+        }
+        let gonflee = world.tile(x, y).biomass;
+        assert!(
+            gonflee > baseline,
+            "l'averse n'a rien fait pousser : le test ne prouverait rien"
+        );
+
+        // L'averse est passée : plus aucune cellule. Le ciel sec doit ramener
+        // la tuile à sa capacité de temps sec — même constante de temps que la
+        // repousse, qui remplit une tuile rasée en une saison.
+        for _ in 0..60 {
+            daily_regrowth(&mut world, &climate, t, &[], &[], 1);
+            t.tick += cairn_core::TICKS_PER_DAY;
+        }
+
+        let apres = world.tile(x, y).biomass;
+        assert_eq!(
+            apres, baseline,
+            "le surplus de l'averse ne redescend pas : {gonflee} → {apres}, \
+             attendu {baseline} (la capacité de temps sec)"
+        );
+    }
 }
