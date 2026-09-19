@@ -38,7 +38,9 @@ Chacune vient d'une erreur réelle, pas d'un principe. Elles priment sur l'intui
 
 **Acquis négatif à ne pas retenter** : le LOD temporel ne se généralise **pas** à la faune. Six tentatives, six biais mesurés (+59 % à +953 % sur les prédateurs). Un couple proie-prédateur ne se grossit pas temporellement — son cycle de rencontre est plus court que toute fenêtre de réveil utile. Ce qui se grossit est ce qui n'a pas de partenaire couplé : la flore, **champ** et non acteur, au rattrapage exact par forme fermée.
 
-**Dette identifiée, non livrée** : sous la pluie, une tuile intacte pousse au-dessus du baseline sans entrer dans `Chunk::touched` — elle échappe donc à l'instantané d'éviction et repart silencieusement au baseline. Bug **antérieur** au balayage épars ; test de reproduction écrit, en attente de son propre commit.
+**Dette de la pluie : soldée** (5099f8c). Le marquage vivait chez l'appelant, sous forme d'un `bool` de retour que les *deux* appelants de `regrow_tile` ignoraient — il est descendu à l'écriture, la seule place où on ne peut pas l'oublier. Coût mesuré au banc `derive` : nul (jours 5 à 30 bit-identiques entre les deux runs, débit identique). Le run corrigé finit plus vite et sans divergence, mais **ce gain n'est pas au crédit du correctif** : une seule seed, et la faune convertit une unité de biomasse en centaines de troupeaux d'écart.
+
+**Ce que ce correctif a exposé** : une biomasse gonflée par la pluie ne redescend **jamais**, alors que la logistique le ferait d'elle-même (`dP/dt < 0` quand `P > K`, cas que `logistic_step` gère déjà — c'est le court-circuit `biomass >= cap` de `regrow_tile` qui le refuse). L'éviction blanchissait cet état ; il est désormais permanent, donc visible. Changement de modèle, pas de comptabilité : non livré.
 
 Historique complet, incrément par incrément : **[docs/JOURNAL.md](docs/JOURNAL.md)**.
 
