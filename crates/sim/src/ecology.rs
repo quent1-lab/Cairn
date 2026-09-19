@@ -114,7 +114,9 @@ pub fn daily_regrowth(
         //   plafond *au-dessus* du baseline : une tuile intacte a alors
         //   légitimement de quoi pousser, et l'ignorer supprimerait l'effet du
         //   ciel sur les terres non broutées. Ce chunk-là reprend le balayage
-        //   complet.
+        //   complet — et ce qu'il fait pousser entre dans `touched`, faute de
+        //   quoi l'éviction le rendrait au baseline sans que rien ne le dise
+        //   (`regrow_tile` s'en charge).
         //
         //   La sécheresse ne demande rien : `weather_factor < 1` abaisse le
         //   plafond, mais cette passe ne fait jamais décroître une biomasse. —
@@ -163,8 +165,16 @@ pub fn daily_regrowth(
     }
 }
 
-/// Repousse d'une tuile. Renvoie `true` si la biomasse a effectivement été
-/// écrite — c'est ce que l'appelant utilise pour marquer la tuile mutée.
+/// Repousse d'une tuile, **et l'inscrit dans `Chunk::touched` si elle a
+/// effectivement poussé**. Ce marquage vivait avant chez l'appelant, sous
+/// forme d'un `bool` de retour que les deux appelants ignoraient : le
+/// balayage épars n'en avait pas besoin (ses tuiles sont déjà marquées) et le
+/// balayage complet de la pluie l'oubliait. Une tuile intacte poussée par
+/// l'averse n'entrait donc dans aucun registre — ni l'instantané d'éviction
+/// (`world::snapshot_delta`), ni le test de retour au baseline — et repartait
+/// silencieusement au baseline à la première éviction. Le marquage appartient
+/// à l'écriture, pas à ses appelants : c'est la seule place où on ne peut pas
+/// l'oublier.
 /// `oy` est l'ordonnée absolue de l'origine du chunk (la latitude compte : le
 /// climat ne fait pas pousser partout à la même saison).
 #[allow(clippy::too_many_arguments)]
@@ -179,19 +189,21 @@ fn regrow_tile(
     weather_factor: f32,
     elapsed: u64,
     rng: &mut Pcg32,
-) -> bool {
+) {
     let tile = chunk.tile_mut(lx, ly, worldgen);
     // Le plafond effectif suit la fertilité : un sol dégradé portera moins
     // que le K du biome (surexploitation, §2.4).
     let cap = ((f32::from(effective_capacity(tile)) * weather_factor).clamp(0.0, 255.0)) as u8;
     if tile.biomass >= cap {
-        return false;
+        return;
     }
     if !climate.grows(tile, oy + ly as i64, time) {
-        return false;
+        return;
     }
     tile.biomass = logistic_step(tile.biomass, cap, elapsed as f64, rng);
-    true
+    // L'emprunt mutable de `tile` s'arrête à la ligne au-dessus : le
+    // compilateur laisse donc reprendre `chunk` ici (NLL).
+    chunk.mark_touched(lx, ly);
 }
 
 /// Capacité de charge effective d'une tuile : le K du biome, réduit
@@ -349,6 +361,59 @@ mod tests {
         assert!(
             apres > baseline,
             "l'averse n'a pas fait pousser la tuile intacte ({baseline} → {apres})"
+        );
+    }
+
+    #[test]
+    fn la_pousse_sous_la_pluie_survit_a_une_eviction() {
+        // Règle 5, deux compteurs qui doivent concorder : ce que la tuile vaut
+        // juste après l'averse, et ce qu'elle vaut après un aller-retour par
+        // l'éviction. L'instantané d'éviction ne parcourt que `Chunk::touched`,
+        // et la passe de repousse écrit par `Chunk::tile_mut`, qui n'y inscrit
+        // rien : une tuile intacte poussée par la pluie n'existe donc que dans
+        // le chunk résident, et repart au baseline sans que personne ne le dise.
+        //
+        // Capacité 8 : le chunk observé est forcément évincé dès qu'on regarde
+        // ailleurs, comme dans les tests d'éviction de `world`.
+        let mut world = World::new(WorldSeed(42), 8);
+        let climate = Climate::new(world.worldgen().temperature.latitude());
+        let time = SimTime { tick: 180 * cairn_core::TICKS_PER_DAY };
+        let (x, y) = tuile_qui_pousse(&mut world, time, &climate);
+        let baseline = crate::tile::baseline_biomass(world.tile(x, y).biome);
+        assert_eq!(world.tile(x, y).biomass, baseline, "la tuile témoin doit être intacte");
+
+        // Salir une *autre* tuile du chunk : c'est ce qui rend le chunk sale,
+        // donc visible de la passe, sans toucher celle qu'on observe.
+        world.tile_mut(x ^ 1, y ^ 1).biomass = 1;
+
+        let averse = [crate::weather::WeatherCell {
+            pos: (x as f64, y as f64),
+            radius: crate::weather::WEATHER_RADIUS_TILES,
+            kind: crate::weather::WeatherKind::Rain,
+            age_days: 0,
+        }];
+        // Plusieurs jours d'averse : une seule journée depuis le baseline ne
+        // gagne parfois qu'une fraction d'unité, que l'arrondi stochastique
+        // peut laisser à zéro. Le test ne doit pas dépendre d'un tirage.
+        let mut t = time;
+        for _ in 0..5 {
+            daily_regrowth(&mut world, &climate, t, &averse, &[], 1);
+            t.tick += cairn_core::TICKS_PER_DAY;
+        }
+        let pousse = world.tile(x, y).biomass;
+        assert!(pousse > baseline, "l'averse n'a rien fait pousser : le test ne prouverait rien");
+
+        // On s'éloigne : le chunk est évincé, et seul son instantané le suit.
+        for cx in 50..70 {
+            world.chunk(crate::chunk::ChunkCoord { x: cx, y: cx });
+        }
+        assert!(world.evicted > 0, "le chunk observé aurait dû être évincé");
+
+        assert_eq!(
+            world.tile(x, y).biomass,
+            pousse,
+            "la pousse due à la pluie a été perdue à l'éviction : \
+             la tuile n'était pas dans l'instantané"
         );
     }
 

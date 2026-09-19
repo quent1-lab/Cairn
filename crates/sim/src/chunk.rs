@@ -52,7 +52,9 @@ pub struct Chunk {
     /// plus proche » en parcourant quelques listes courtes au lieu de dizaines
     /// de milliers de tuiles.
     pub springs: Vec<(u8, u8)>,
-    /// Tuiles locales déjà passées par `World::tile_mut` (broutage, cueillette).
+    /// Tuiles locales déjà **écrites** : `World::tile_mut` (broutage,
+    /// cueillette) et la repousse de l'écologie, qui passe par `Chunk::tile_mut`
+    /// et doit donc s'inscrire elle-même (voir `ecology::regrow_tile`).
     /// Sert uniquement l'instantané d'éviction (`world::snapshot_delta`) : sans
     /// lui, retrouver les quelques tuiles modifiées obligerait à comparer les
     /// 4096 tuiles au baseline à chaque éviction — mesuré, ce scan complet
