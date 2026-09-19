@@ -357,6 +357,39 @@ impl World {
         }
     }
 
+    /// Recensement de la biomasse écrite, à l'usage des bancs : parmi les
+    /// tuiles **marquées** des chunks sales résidents, combien il y en a, et
+    /// combien portent une biomasse **au-dessus de leur capacité de temps
+    /// sec**.
+    ///
+    /// Le second compteur est le seul qui rende la météo lisible sur la durée
+    /// d'un run. Une averse relève le plafond de croissance et laisse derrière
+    /// elle des tuiles au-dessus de leur capacité : si ce nombre **croît sans
+    /// fin**, le surplus ne redescend jamais ; s'il **oscille avec le ciel**,
+    /// il redescend. Le premier compteur répond à la question voisine — est-ce
+    /// que `touched` enfle, c'est-à-dire est-ce que le balayage épars se
+    /// dégrade en balayage complet ?
+    ///
+    /// Domaine : les chunks **sales et résidents**, comme `dirty_coords()`.
+    /// Un chunk propre a par définition toutes ses tuiles au baseline, et un
+    /// chunk en pause n'a rien à dire d'aujourd'hui. Parcours en O(tuiles
+    /// marquées) et déterministe (`BTreeSet`) — à appeler au relevé, pas au
+    /// tick.
+    pub fn biomass_census(&self) -> (usize, usize) {
+        let (mut marquees, mut au_dessus) = (0usize, 0usize);
+        for coord in &self.dirty {
+            let Some(chunk) = self.chunks.get(coord) else { continue };
+            for &(lx, ly) in chunk.touched() {
+                marquees += 1;
+                let t = chunk.tile_ready(lx as usize, ly as usize);
+                if t.biomass > crate::ecology::effective_capacity(t) {
+                    au_dessus += 1;
+                }
+            }
+        }
+        (marquees, au_dessus)
+    }
+
     /// Évince les chunks les moins récemment accédés jusqu'à revenir sous la
     /// capacité. `keep` (celui qu'on vient de charger) n'est jamais évincé.
     ///

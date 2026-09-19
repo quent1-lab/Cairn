@@ -70,6 +70,17 @@ struct Sample {
     head: f32,
     predators: f32,
     dirty: usize,
+    /// Tuiles **marquées** (`Chunk::touched`) des chunks sales résidents, et
+    /// parmi elles celles dont la biomasse dépasse leur capacité de **temps
+    /// sec**. Les deux compteurs que la météo rend indispensables.
+    ///
+    /// `marquees` dit si le balayage épars se dégrade en balayage complet ;
+    /// `sur_cap` dit si le surplus laissé par une averse **redescend**. Un
+    /// `sur_cap` qui croît sans fin signifie que le don de la pluie est
+    /// définitif — ce que la logistique ne fait pas d'elle-même, et ce que
+    /// l'éviction masquait jusqu'à 5099f8c en rendant la tuile au baseline.
+    marquees: usize,
+    sur_cap: usize,
     spread_km: f64,
     pop: usize,
     tps: f64,
@@ -237,8 +248,8 @@ fn main() {
     println!("  relevé tous les {SAMPLE_DAYS} j");
     println!("╚═════════════════════════════════════════════════════════════════════╝\n");
     println!(
-        "{:>5} {:>7} {:>8} {:>7} {:>8} {:>8} {:>8} {:>7} {:>8} {:>6} {:>9} {:>7}",
-        "jour", "troup.", "têtes", "meutes", "préd.", "trp/km²", "prises", "loin%", "disp.km", "pop", "regen/j", "tps"
+        "{:>5} {:>7} {:>8} {:>7} {:>8} {:>8} {:>8} {:>7} {:>8} {:>6} {:>9} {:>9} {:>8} {:>7}",
+        "jour", "troup.", "têtes", "meutes", "préd.", "trp/km²", "prises", "loin%", "disp.km", "pop", "regen/j", "marquées", "sur-cap", "tps"
     );
     let _ = std::io::stdout().flush();
 
@@ -276,6 +287,11 @@ fn main() {
         regen_prev = sim.world.generated;
 
         let (head, predators, herds, packs) = census(&sim);
+        // Deux compteurs indépendants du reste : ils ne parlent pas de la
+        // faune mais du **sol** qu'elle broute, et c'est ce qui les rend utiles
+        // — une divergence d'effectif et une dérive de la végétation ne se
+        // confondent pas si on les lit séparément.
+        let recensement = sim.world.biomass_census();
         // Densité **mesurée** sur l'étendue réelle des troupeaux, pas déduite
         // des paramètres de départ : la faune migre, et c'est la densité du
         // moment qui gouverne la rencontre.
@@ -293,6 +309,8 @@ fn main() {
             head,
             predators,
             dirty: sim.world.dirty_count(),
+            marquees: recensement.0,
+            sur_cap: recensement.1,
             spread_km: spread(&sim),
             pop: sim.population(),
             tps,
@@ -310,7 +328,7 @@ fn main() {
         kills_window = 0.0;
         pred_ticks = 0.0;
         println!(
-            "{:>5} {:>7} {:>8.0} {:>7} {:>8.0} {:>8.2} {:>8.3} {:>6.0} {:>8.1} {:>6} {:>9.0} {:>7.1}",
+            "{:>5} {:>7} {:>8.0} {:>7} {:>8.0} {:>8.2} {:>8.3} {:>6.0} {:>8.1} {:>6} {:>9.0} {:>9} {:>8} {:>7.1}",
             s.day,
             s.herds,
             s.head,
@@ -322,6 +340,8 @@ fn main() {
             s.spread_km,
             s.pop,
             s.regen_per_day,
+            s.marquees,
+            s.sur_cap,
             s.tps
         );
         // Un banc qui tourne des dizaines de minutes doit être lisible *pendant*
@@ -562,6 +582,8 @@ fn verdict(samples: &[Sample], elapsed_s: f64, days: u64) {
         ("meutes", &|s: &Sample| s.packs as f64, false),
         ("prédateurs", &|s: &Sample| s.predators as f64, false),
         ("chunks sales", &|s: &Sample| s.dirty as f64, true),
+        ("tuiles marquées", &|s: &Sample| s.marquees as f64, true),
+        ("tuiles sur-cap", &|s: &Sample| s.sur_cap as f64, true),
         ("dispersion (km)", &|s: &Sample| s.spread_km, true),
         ("population", &|s: &Sample| s.pop as f64, false),
     ] {
