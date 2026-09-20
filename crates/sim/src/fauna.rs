@@ -718,6 +718,10 @@ pub fn update_herds(
             }
         }
 
+        // Domaine vital : chemin parcouru contre déplacement net, après que le
+        // troupeau a bougé (fuite, pâture ou migration confondues).
+        stats.herd_step(id.0, (pos.x, pos.y), time.tick / cairn_core::TICKS_PER_DAY);
+
         // — Démographie : la satiété commande. `steps` fois quand le troupeau
         //   est simulé grossièrement — on rattrape le temps sauté, on ne le
         //   perd pas.
@@ -795,6 +799,8 @@ impl FaunaStats {
     pub fn encounter(&mut self, _pos: &Position, _herds: &[HerdView], _pred: f32, _kills: f32) {}
     #[inline(always)]
     pub fn herds_alive(&mut self, _herds: &[HerdView]) {}
+    #[inline(always)]
+    pub fn herd_step(&mut self, _id: u64, _pos: (f64, f64), _day: u64) {}
 }
 
 /// Ce qui limite le fourrage d'un troupeau, par biome. **Le discriminateur du
@@ -844,9 +850,33 @@ pub struct Forage {
     pub sample_min_fill_sum: f64,
 }
 
+/// Suivi du **domaine vital** d'un troupeau, sur une fenêtre glissante de la
+/// durée d'une repousse. Ce qu'on cherche : le chemin parcouru contre le
+/// déplacement net. Chemin ≫ net ⇒ la bête tourne déjà dans un domaine, et le
+/// confiner demande de resserrer une portée existante. Chemin ≈ net ⇒ elle
+/// dérive, et il faut lui donner un domaine qu'elle n'a pas.
+#[cfg(feature = "fauna-stats")]
+#[derive(Clone, Copy)]
+pub struct Track {
+    pub window_start: (f64, f64),
+    pub last: (f64, f64),
+    pub path: f64,
+    pub start_day: u64,
+}
+
+/// Fenêtre de suivi, en jours : la durée qu'une tuile broutée met à repousser
+/// (~15 j à r = 0,08). C'est l'échelle à laquelle « revenir sur sa pâture »
+/// veut dire quelque chose.
+#[cfg(feature = "fauna-stats")]
+pub const RANGE_WINDOW_DAYS: u64 = 15;
+
 #[cfg(feature = "fauna-stats")]
 #[derive(Default)]
 pub struct FaunaStats {
+    /// Suivi en cours, par troupeau.
+    pub tracks: std::collections::BTreeMap<u64, Track>,
+    /// Fenêtres achevées : (chemin parcouru, déplacement net), en tuiles.
+    pub windows: Vec<(f64, f64)>,
     /// Indexé par `Biome as u8` — `#[repr(u8)]` le garantit, et il y a douze
     /// biomes.
     pub forage: [Forage; 12],
@@ -897,6 +927,24 @@ impl FaunaStats {
     pub fn herds_alive(&mut self, herds: &[HerdView]) {
         for h in herds {
             self.seen.insert(h.entity.to_bits().get());
+        }
+    }
+
+    /// Un pas de troupeau : cumule le chemin, et clôt la fenêtre quand elle est
+    /// écoulée. Appelé après le déplacement du tick.
+    pub fn herd_step(&mut self, id: u64, pos: (f64, f64), day: u64) {
+        let t = self.tracks.entry(id).or_insert(Track {
+            window_start: pos,
+            last: pos,
+            path: 0.0,
+            start_day: day,
+        });
+        t.path += (pos.0 - t.last.0).hypot(pos.1 - t.last.1);
+        t.last = pos;
+        if day.saturating_sub(t.start_day) >= RANGE_WINDOW_DAYS {
+            let net = (pos.0 - t.window_start.0).hypot(pos.1 - t.window_start.1);
+            self.windows.push((t.path, net));
+            *t = Track { window_start: pos, last: pos, path: 0.0, start_day: day };
         }
     }
 

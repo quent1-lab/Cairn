@@ -544,6 +544,30 @@ fn fauna_stats_report(sim: &Sim) {
     }
     println!("╚═════════════════════════════════════════════════════════════════════╝");
 
+    if !st.windows.is_empty() {
+        let n = st.windows.len() as f64;
+        let mut nets: Vec<f64> = st.windows.iter().map(|w| w.1).collect();
+        nets.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let path = st.windows.iter().map(|w| w.0).sum::<f64>() / n;
+        let net = st.windows.iter().map(|w| w.1).sum::<f64>() / n;
+        println!("\n  ── DOMAINE VITAL ({} j) ──", cairn_sim::fauna::RANGE_WINDOW_DAYS);
+        println!("  {} fenêtres de troupeau achevées", st.windows.len());
+        println!(
+            "  chemin parcouru  {:.2} km   déplacement net  {:.2} km   tortuosité {:.1}×",
+            tiles_to_km(path),
+            tiles_to_km(net),
+            path / net.max(1e-9)
+        );
+        println!(
+            "  net médian {:.2} km · 10ᵉ centile {:.2} km · 90ᵉ {:.2} km",
+            tiles_to_km(nets[nets.len() / 2]),
+            tiles_to_km(nets[nets.len() / 10]),
+            tiles_to_km(nets[nets.len() * 9 / 10])
+        );
+        println!("  Chemin ≫ net : le troupeau tourne déjà dans un domaine, il suffit de le");
+        println!("  resserrer. Chemin ≈ net : il dérive, et le domaine reste à inventer.");
+    }
+
     let (chasses, vus) = (st.hunted.len(), st.seen.len());
     println!("\n  ── FRACTION DE REFUGE ──");
     println!("  {chasses} troupeaux sur {vus} sont entrés au moins une fois dans le rayon");
