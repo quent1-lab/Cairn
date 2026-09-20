@@ -475,6 +475,7 @@ fn fauna_stats_report(sim: &Sim) {
         "Grassland", "TemperateForest", "HotDesert", "Savanna", "TropicalForest",
     ];
     let (mut tot, mut tot_full, mut tot_grazed, mut tot_decl) = (0u64, 0u64, 0u64, 0u64);
+    let mut tot_sterile = 0u64;
     for (i, f) in st.forage.iter().enumerate() {
         if f.ticks == 0 {
             continue;
@@ -483,6 +484,7 @@ fn fauna_stats_report(sim: &Sim) {
         tot_decl += f.declining;
         tot_full += f.declining_full_pasture;
         tot_grazed += f.declining_grazed_out;
+        tot_sterile += f.declining_sterile;
         println!(
             "{:>16} {:>10} {:>8.3} {:>8.3} {:>8.1}% {:>11.1}% {:>11.1}%",
             biomes[i],
@@ -517,6 +519,12 @@ fn fauna_stats_report(sim: &Sim) {
             "    pâture à ras   : {:>5.1} %  ← le régulateur a effectivement agi",
             tot_grazed as f64 / tot_decl as f64 * 100.0
         );
+        if tot_sterile > 0 {
+            println!(
+                "    sol stérile    : {:>5.1} %  ← ni l'un ni l'autre, rien n'y pousse",
+                tot_sterile as f64 / tot_decl as f64 * 100.0
+            );
+        }
         println!("  Le premier chiffre dominant désigne une erreur de **calibration** de la");
         println!("  satiété ; le second, un régulateur qui fonctionne et qu'il suffit de régler.");
     }

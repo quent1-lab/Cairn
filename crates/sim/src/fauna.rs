@@ -794,6 +794,12 @@ pub struct Forage {
     /// Parmi ceux-là, pâture **épuisée** (remplissage < 0,5) : le régulateur par
     /// le bas a effectivement agi, c'est le mécanisme qu'on espère voir.
     pub declining_grazed_out: u64,
+    /// Parmi ceux-là, tuile **stérile** (capacité nulle : océan, glacier). Ni
+    /// pleine ni broutée — il n'y a jamais rien eu à manger. Compté à part
+    /// parce que les ranger sous « broutée à ras » faisait dire au verdict que
+    /// le régulateur avait agi : 7 936 herd-ticks de côte sur seed 1337
+    /// annonçaient « régulateur à 100 % » sur un rivage nu.
+    pub declining_sterile: u64,
     /// Histogramme de satiété, dix classes de 0,1.
     pub sat_hist: [u64; 10],
 }
@@ -873,7 +879,12 @@ impl FaunaStats {
         f.sat_hist[bin] += 1;
         if satiation < HERB_SATIATION_EQUILIBRIUM {
             f.declining += 1;
-            if fill > 0.9 {
+            // Les trois classes sont exclusives et couvrent tout : sans la
+            // garde sur `cap`, une tuile stérile tombait dans « broutée à ras »
+            // par le seul fait que son remplissage est nul.
+            if cap == 0 {
+                f.declining_sterile += 1;
+            } else if fill > 0.9 {
                 f.declining_full_pasture += 1;
             } else if fill < 0.5 {
                 f.declining_grazed_out += 1;
