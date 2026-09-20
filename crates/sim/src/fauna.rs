@@ -388,6 +388,44 @@ pub type Fission = (f64, f64, f32, Species);
 
 // — Équations pures (testables sans monde) —
 
+/// Satiété d'un troupeau : la part **de sa capacité** que la pâture trouvée
+/// porte encore, pondérée par l'adéquation du biome à son espèce.
+///
+/// — **Le rapport est local, et c'est tout l'enjeu.** `found / cap`, non
+///   `found / 255`. Normalisée sur la plage du `u8`, la satiété valait
+///   exactement `K(biome) / 255 × habitat` : une **constante** par couple
+///   (espèce, biome), que le broutage ne déplaçait jamais. Mesuré sur
+///   2 234 548 herd-ticks et quatre seeds — 0,824 en forêt tempérée (210/255),
+///   0,431 en prairie (110/255), 0,497 hors habitat — et **pas un seul déclin
+///   causé par le broutage**. Le signe de la croissance d'un troupeau était
+///   donc décidé par le biome où il était né, pour toute sa vie : 0 % de
+///   déclin en forêt (croissance illimitée), 100 % en prairie (extinction
+///   garantie), alors qu'une prairie pleine est une *bonne* pâture.
+///
+///   Avec le rapport local, pâture pleine ⇒ satiété = `habitat` ; pâture
+///   broutée de moitié ⇒ 0,5, soit exactement
+///   [`HERB_SATIATION_EQUILIBRIUM`]. Une capacité de charge émerge donc dans
+///   **tous** les biomes, et elle s'échelonne d'elle-même : à mi-hauteur, une
+///   pâture riche repousse plus vite qu'une pauvre (la logistique donne
+///   `r·K/4`), donc elle nourrit plus de têtes. Rien de cela n'est écrit.
+///
+///   Le facteur d'habitat continue de cantonner les espèces : à 0,35 (biome
+///   hostile), l'équilibre demanderait une pâture à 143 % de sa capacité —
+///   inatteignable, donc le troupeau y fond quoi qu'il arrive. C'est la niche,
+///   et elle survit au changement.
+///
+///   **Pas de borne haute ici.** Une averse peut porter la biomasse au-dessus
+///   de la capacité de temps sec (voir `ecology`), et il est juste qu'une
+///   pâture gorgée d'eau nourrisse mieux — surtout un troupeau hors de son
+///   habitat, qui y gagne sa seule marge. `herd_population_step` écrête déjà
+///   la satiété à 1 pour la natalité. —
+pub fn satiation_from_forage(found: u8, cap: u8, habitat: f32) -> f32 {
+    if cap == 0 {
+        return 0.0; // océan, glacier : rien n'y pousse, rien n'y paît
+    }
+    (f32::from(found) / f32::from(cap)) * habitat
+}
+
 /// Un tick de démographie herbivore : la natalité suit la satiété, la
 /// mortalité est de fond. Renvoie le nouvel effectif.
 pub fn herd_population_step(population: f32, satiation: f32) -> f32 {
@@ -591,8 +629,11 @@ pub fn update_herds(
             // à l'espèce (un cerf en plein désert broute mal) — c'est ce qui
             // cantonne chaque espèce à sa niche, sans règle « ne va pas là ».
             let here_tile = world.tile(pos.x.floor() as i64, pos.y.floor() as i64);
-            herd.satiation =
-                (f32::from(biomass) / 255.0) * herd.species.habitat_factor(here_tile.biome);
+            herd.satiation = satiation_from_forage(
+                biomass,
+                crate::ecology::effective_capacity(&here_tile),
+                herd.species.habitat_factor(here_tile.biome),
+            );
 
             // — Mesure du fourrage. Bloc sous `cfg` et non appel no-op, parce
             //   qu'il faut relire la tuile d'où vient l'herbe pour connaître sa
@@ -1169,6 +1210,62 @@ mod tests {
             pop = herd_population_step(pop, 0.5);
         }
         assert!((pop - 40.0).abs() < 0.5, "doit rester ~40 têtes : {pop:.2}");
+    }
+
+    #[test]
+    fn une_pature_pleine_rassasie_dans_tous_les_biomes() {
+        // Un troupeau dans sa niche, sur une pâture **intacte**, doit pouvoir
+        // croître — donc dépasser la satiété d'équilibre. Avec une satiété
+        // normalisée sur la plage du u8, il ne le peut qu'au-dessus de K = 128 :
+        // une prairie pleine (K = 110) condamne l'aurochs à fondre sur de
+        // l'herbe vierge, et la steppe encore plus. Mesuré sur 2 234 548
+        // herd-ticks : 100 % de déclin en prairie, 0 % en forêt, et pas un seul
+        // déclin causé par le broutage. La satiété ne mesurait pas la pâture,
+        // elle mesurait le biome.
+        for (nom, k) in
+            [("steppe", 70u8), ("savane", 90), ("prairie", 110), ("forêt tempérée", 210)]
+        {
+            let s = satiation_from_forage(k, k, 1.0);
+            assert!(
+                s > HERB_SATIATION_EQUILIBRIUM,
+                "{nom} pleine (K = {k}) ne rassasie pas : satiété {s:.3} ≤ équilibre {:.3}",
+                HERB_SATIATION_EQUILIBRIUM
+            );
+        }
+    }
+
+    #[test]
+    fn une_pature_pleine_vaut_autant_partout() {
+        // L'invariant qui fait de la satiété une mesure de la **pâture** et non
+        // du biome : plein, c'est plein, que le biome porte 70 ou 210. Sans lui,
+        // le troupeau ne peut pas distinguer « j'ai tout mangé » de « je suis
+        // dans un pays pauvre » — une prairie pleine donnait 0,431 et une forêt
+        // broutée de moitié 0,412, deux situations écologiquement opposées.
+        let steppe = satiation_from_forage(70, 70, 1.0);
+        let foret = satiation_from_forage(210, 210, 1.0);
+        assert_eq!(
+            steppe, foret,
+            "pâture pleine : la satiété dépend encore du biome ({steppe:.3} vs {foret:.3})"
+        );
+    }
+
+    #[test]
+    fn la_satiete_suit_ce_qui_reste_a_brouter() {
+        // Et elle doit **descendre** quand la pâture baisse, sinon aucune
+        // capacité de charge ne peut émerger : c'est le mécanisme même du
+        // régulateur par le bas. À moitié broutée, on est pile à l'équilibre —
+        // c'est donc là que l'effectif se stabilise, dans n'importe quel biome.
+        let k = 210u8;
+        assert!(satiation_from_forage(k, k, 1.0) > HERB_SATIATION_EQUILIBRIUM);
+        assert!((satiation_from_forage(k / 2, k, 1.0) - HERB_SATIATION_EQUILIBRIUM).abs() < 0.01);
+        assert!(satiation_from_forage(k / 4, k, 1.0) < HERB_SATIATION_EQUILIBRIUM);
+    }
+
+    #[test]
+    fn un_sol_sterile_ne_nourrit_personne() {
+        // Capacité nulle (océan, glacier) : pas de division par zéro, et pas de
+        // satiété non plus.
+        assert_eq!(satiation_from_forage(0, 0, 1.0), 0.0);
     }
 
     #[test]
