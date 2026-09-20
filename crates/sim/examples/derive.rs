@@ -463,12 +463,23 @@ fn fauna_stats_report(sim: &Sim) {
     println!("  perd des têtes. « rempli » = biomasse trouvée / capacité de la tuile :");
     println!("  1,00 veut dire pâture pleine *pour ce biome*, donc broutage hors de cause.\n");
     println!(
-        "{:>16} {:>10} {:>8} {:>8} {:>9} {:>12} {:>12}",
-        "biome", "herd-ticks", "satiété", "rempli", "en déclin", "dont pâture", "dont brouté"
+        "  Les trois dernières colonnes sont LE discriminateur : `rempli` porte sur la"
     );
     println!(
-        "{:>16} {:>10} {:>8} {:>8} {:>9} {:>12} {:>12}",
-        "", "", "moy.", "moy.", "%", "PLEINE", "à ras"
+        "  tuile RETENUE, donc sur un maximum. Si la moyenne et le minimum des neuf"
+    );
+    println!(
+        "  sondes collent à 1 eux aussi, le pâturage n'est pas entamé du tout et la"
+    );
+    println!("  régulation par le fourrage est hors d'atteinte à cette densité.\n");
+    println!(
+        "{:>16} {:>10} {:>7} {:>7} {:>8} {:>10} {:>10} {:>8} {:>8}",
+        "biome", "herd-ticks", "satiété", "rempli", "déclin", "dont PLEINE", "dont à ras",
+        "sondes", "sondes"
+    );
+    println!(
+        "{:>16} {:>10} {:>7} {:>7} {:>8} {:>10} {:>10} {:>8} {:>8}",
+        "", "", "moy.", "max", "%", "%", "%", "moy.", "min"
     );
     let biomes = [
         "Ocean", "Coast", "Glacier", "Tundra", "Taiga", "ColdDesert", "Steppe",
@@ -485,8 +496,9 @@ fn fauna_stats_report(sim: &Sim) {
         tot_full += f.declining_full_pasture;
         tot_grazed += f.declining_grazed_out;
         tot_sterile += f.declining_sterile;
+        let st_n = f.sample_ticks.max(1) as f64;
         println!(
-            "{:>16} {:>10} {:>8.3} {:>8.3} {:>8.1}% {:>11.1}% {:>11.1}%",
+            "{:>16} {:>10} {:>7.3} {:>7.3} {:>7.1}% {:>9.1}% {:>9.1}% {:>8.3} {:>8.3}",
             biomes[i],
             f.ticks,
             f.satiation_sum / f.ticks as f64,
@@ -502,6 +514,8 @@ fn fauna_stats_report(sim: &Sim) {
             } else {
                 0.0
             },
+            f.sample_fill_sum / st_n,
+            f.sample_min_fill_sum / st_n,
         );
     }
     if tot_decl > 0 {

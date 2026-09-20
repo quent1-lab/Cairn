@@ -493,12 +493,24 @@ fn try_move(world: &World, pos: &mut Position, dir: (f64, f64), step: f64) {
 /// monde marchaient **plein est en ligne droite à 1,9 km/jour** — une dérive
 /// balistique au lieu d'une errance. Le hasard rend la marche diffusive,
 /// c'est-à-dire un vrai domaine vital.
-fn best_pasture(world: &mut World, rng: &mut Pcg32, pos: (f64, f64)) -> ((i64, i64), u8) {
+fn best_pasture(
+    world: &mut World,
+    rng: &mut Pcg32,
+    pos: (f64, f64),
+    stats: &mut FaunaStats,
+) -> ((i64, i64), u8) {
+    let _ = &stats;
     let here = (pos.0.floor() as i64, pos.1.floor() as i64);
     let r = GRAZE_SAMPLE_TILES;
     let mut candidates = [(here, 0u8); 9];
     let mut n = 0;
     let mut best_biomass = 0u8;
+    // Remplissage des sondes : somme, minimum, nombre. Sous feature seulement —
+    // calculer la capacité de neuf tuiles par troupeau et par tick est
+    // exactement le genre de coût qu'on ne met pas dans le binaire de
+    // production pour une mesure.
+    #[cfg(feature = "fauna-stats")]
+    let mut acc: (f64, f64, u32) = (0.0, f64::INFINITY, 0);
     for (dx, dy) in [
         (0, 0),
         (r, 0), (-r, 0), (0, r), (0, -r),
@@ -508,6 +520,16 @@ fn best_pasture(world: &mut World, rng: &mut Pcg32, pos: (f64, f64)) -> ((i64, i
         let tile = world.tile(p.0, p.1);
         if !tile.is_walkable() {
             continue;
+        }
+        #[cfg(feature = "fauna-stats")]
+        {
+            let cap = crate::ecology::effective_capacity(&tile);
+            if cap > 0 {
+                let f = f64::from(tile.biomass) / f64::from(cap);
+                acc.0 += f;
+                acc.1 = acc.1.min(f);
+                acc.2 += 1;
+            }
         }
         match tile.biomass.cmp(&best_biomass) {
             std::cmp::Ordering::Greater => {
@@ -521,6 +543,11 @@ fn best_pasture(world: &mut World, rng: &mut Pcg32, pos: (f64, f64)) -> ((i64, i
             }
             std::cmp::Ordering::Less => {}
         }
+    }
+    #[cfg(feature = "fauna-stats")]
+    if acc.2 > 0 {
+        let biome = world.tile(here.0, here.1).biome;
+        stats.pasture_sample(biome, acc.0 / f64::from(acc.2), acc.1);
     }
     if n == 0 {
         return (here, 0); // cerné par l'eau : on ne bouge pas
@@ -624,7 +651,7 @@ pub fn update_herds(
             //   pas la migration, il pousse simplement le troupeau vers le
             //   voisin le plus vert. Une zone entièrement broutée fait donc
             //   fondre puis dériver le troupeau, sans stampede.
-            let (target, biomass) = best_pasture(world, &mut rng, (pos.x, pos.y));
+            let (target, biomass) = best_pasture(world, &mut rng, (pos.x, pos.y), stats);
             // La satiété = l'herbe trouvée, PONDÉRÉE par l'adéquation du biome
             // à l'espèce (un cerf en plein désert broute mal) — c'est ce qui
             // cantonne chaque espèce à sa niche, sans règle « ne va pas là ».
@@ -802,6 +829,19 @@ pub struct Forage {
     pub declining_sterile: u64,
     /// Histogramme de satiété, dix classes de 0,1.
     pub sat_hist: [u64; 10],
+    /// — Ce que les **neuf sondes** de `best_pasture` voient vraiment, et non
+    ///   seulement la meilleure d'entre elles.
+    ///
+    ///   Le remplissage déjà mesuré (`fill_sum`) porte sur la tuile *retenue*,
+    ///   donc sur un maximum : il vaut 1,000 partout, ce qui ne départage pas
+    ///   « le pâturage n'est pas entamé » de « il l'est, et le maximum le
+    ///   cache ». Un paysage sérieusement brouté présente encore une tuile
+    ///   pleine tous les 160 m. La moyenne et le minimum du voisinage
+    ///   tranchent : s'ils collent à 1 aussi, il n'y a rien à percevoir et la
+    ///   régulation par le fourrage est hors d'atteinte à ces densités. —
+    pub sample_ticks: u64,
+    pub sample_fill_sum: f64,
+    pub sample_min_fill_sum: f64,
 }
 
 #[cfg(feature = "fauna-stats")]
@@ -858,6 +898,14 @@ impl FaunaStats {
         for h in herds {
             self.seen.insert(h.entity.to_bits().get());
         }
+    }
+
+    /// Le voisinage sondé par `best_pasture`, en moyenne et au pire.
+    pub fn pasture_sample(&mut self, biome: cairn_worldgen::Biome, mean: f64, min: f64) {
+        let f = &mut self.forage[biome as usize];
+        f.sample_ticks += 1;
+        f.sample_fill_sum += mean;
+        f.sample_min_fill_sum += min;
     }
 
     /// Un herd-tick de pâture : le biome où il broute, la satiété qui en
