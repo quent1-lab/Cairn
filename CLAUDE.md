@@ -62,6 +62,12 @@ Le verdict refondu (194d769) le confirme sur **4 seeds sur 4** : l'amplitude de 
 
 **Mesuré sur témoin multi-seed** (4 seeds, binaire instrumenté gelé avant correctif, `World::biomass_census` en b801fa1) : le stock de tuiles au-dessus de leur capacité sèche passe de **cliquet à réservoir qui se vide** — minimum sur les jours 120-240, seed 42 142 876 → **637**, seed 1337 346 510 → 74 231, seed 2024 20 024 → 0. Deux prédictions posées avant la mesure ont été **réfutées** (les chunks sales ne baissent pas, le broutage les garde sales ; le débit ne change pas : 2 148 s contre 2 185 s au total).
 
+**L'HYPOTHÈSE QUI RÉORIENTE LE CHANTIER (2026-09-21, run longue 21 ans).** **Il n'y a de rareté nulle part.** Mesuré sur 7 616 jours : faim moyenne médiane 0,14 et **jamais au-dessus de 0,19** ; l'humain le plus affamé franchit 0,8 pendant **16 jours sur 7 616** ; `min_health` = **1,00 aux 90ᵉ et 99ᵉ percentiles** ; le **froid vaut exactement 0,00 à tous les percentiles** malgré des hivers à 3 °C. Côté faune, satiété ~1,0 en permanence, **zéro déclin dû au broutage sur 2,7 M de herd-ticks**.
+
+Conséquence : l'explosion de la faune et la stagnation culturelle (oratoire figé à 0,713 sur 21 ans, chasse en baisse, `tension_max` à 0) ne sont peut-être pas deux problèmes mais **un seul vu à deux endroits**. Or c'est la rareté qui produit la pression, donc l'invention (BRIEF §5). Le chantier de dérive, traité comme un problème de **performance**, serait le symptôme d'un défaut de **conception du cœur** — cohérent avec le fait que ×5,4 puis ×3,6 de débit n'ont jamais déplacé la dérive d'un jour.
+
+La run montre aussi que la faune **bascule** au lieu de dériver : 23 % des jours à zéro troupeau et 278 extinctions pendant 17 ans (le prédateur gagne), puis la proie s'échappe une fois et croît à +0,67 %/jour pour toujours. Les bancs à 240 jours lisaient donc le même système des deux côtés de sa bascule selon la seed.
+
 Historique complet, incrément par incrément : **[docs/JOURNAL.md](docs/JOURNAL.md)**.
 
 ## Architecture
