@@ -116,6 +116,10 @@ struct Cumulative {
     d_old: u64,
     clans_formed: u64,
     clans_dissolved: u64,
+    d_pred: u64,
+    d_viol: u64,
+    d_dis: u64,
+    d_light: u64,
 }
 
 impl Cumulative {
@@ -126,11 +130,16 @@ impl Cumulative {
                 DeathCause::Dehydration => self.d_dehyd += 1,
                 DeathCause::Hypothermia => self.d_hypo += 1,
                 DeathCause::OldAge => self.d_old += 1,
-                // Prédation et violence : non ventilées dans ce banc.
-                DeathCause::Predation
-                | DeathCause::Violence
-                | DeathCause::Disease
-                | DeathCause::Lightning => {}
+                // — Ventilées depuis 2026-09-21. Elles ne l'étaient pas, et
+                //   l'écart a failli coûter cher : sur la run longue, **23 des
+                //   30 morts** ne tombaient dans aucune colonne, ce qui faisait
+                //   lire « rien ne contraint les humains » alors que la
+                //   prédation les tuait. Deux compteurs qui doivent concorder —
+                //   `deaths_cum` et la somme des causes — ne concordaient pas. —
+                DeathCause::Predation => self.d_pred += 1,
+                DeathCause::Violence => self.d_viol += 1,
+                DeathCause::Disease => self.d_dis += 1,
+                DeathCause::Lightning => self.d_light += 1,
             }
         }
         self.seen_deaths = sim.deaths.len();
@@ -154,7 +163,8 @@ const HEADER: &[&str] = &[
     // démographie
     "pop", "infants", "children", "adults", "females", "males", "pregnant",
     "births_cum", "deaths_cum", "deaths_starvation", "deaths_dehydration",
-    "deaths_hypothermia", "deaths_oldage", "mean_age_y", "max_age_y",
+    "deaths_hypothermia", "deaths_oldage", "deaths_predation", "deaths_violence",
+    "deaths_disease", "deaths_lightning", "mean_age_y", "max_age_y",
     // physiologie (moyennes + pires cas)
     "mean_health", "min_health", "distress", "mean_hunger", "max_hunger",
     "mean_thirst", "max_thirst", "mean_fatigue", "mean_cold", "max_cold",
@@ -382,6 +392,10 @@ fn sample_row(sim: &mut Sim, acc: &Cumulative, tps: f64) -> Vec<String> {
         acc.d_dehyd.to_string(),
         acc.d_hypo.to_string(),
         acc.d_old.to_string(),
+        acc.d_pred.to_string(),
+        acc.d_viol.to_string(),
+        acc.d_dis.to_string(),
+        acc.d_light.to_string(),
         format!("{:.2}", m(sum_age)),
         format!("{max_age:.2}"),
         format!("{:.3}", m(sum_health)),
