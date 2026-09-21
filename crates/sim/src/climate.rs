@@ -195,4 +195,54 @@ mod tests {
         // À l'équateur, on ne nomme rien.
         assert_eq!(climate.season(0, t0), None);
     }
+
+    /// **Le banc `etincelle` doit connaître des jours sous zéro.** Il choisit
+    /// son foyer entre 1 et 5 °C de moyenne annuelle « parce que c'est le froid
+    /// qui pousse au feu » — mais le froid ne s'accumule qu'en dessous de
+    /// `COLD_THRESHOLD_C = 0 °C` (`agent::Physiology::tick`). Si le ressenti ne
+    /// croise jamais zéro à ce foyer, la prémisse du banc ne se déclenche
+    /// jamais et sa validation ne prouve rien.
+    ///
+    /// Mesuré sur la run longue : le foyer *tempéré* de `chronicle` ne descend
+    /// pas sous 2,96 °C en 7 616 jours, et le froid y vaut exactement 0,00 à
+    /// tous les percentiles. D'où ce test sur le foyer *frais*.
+    #[test]
+    fn le_foyer_frais_d_etincelle_connait_le_gel() {
+        use crate::scenario;
+        use cairn_worldgen::Biome;
+        let mut sim = crate::Sim::new(cairn_core::WorldSeed(42), 4096);
+        let seed_point = (
+            cairn_core::km_to_tiles(1500.0) as i64,
+            cairn_core::km_to_tiles(2100.0) as i64,
+        );
+        let home = scenario::find_home_where(
+            &mut sim,
+            seed_point,
+            1.0..=5.0,
+            &[Biome::TemperateForest, Biome::Taiga, Biome::Grassland],
+        )
+        .expect("le banc etincelle doit trouver son foyer frais");
+        let tile = sim.world.tile(home.0, home.1);
+        let mut min = f64::INFINITY;
+        let mut sous_zero = 0;
+        for jour in 0..360u64 {
+            let t = SimTime { tick: jour * cairn_core::TICKS_PER_DAY };
+            let felt = sim.climate.instant(&tile, home.1, t);
+            min = min.min(felt);
+            if felt < crate::agent::COLD_THRESHOLD_C {
+                sous_zero += 1;
+            }
+        }
+        println!(
+            "foyer etincelle ({}, {}) — ressenti minimal {min:.2} °C, {sous_zero} jours sous {} °C sur 360",
+            home.0, home.1, crate::agent::COLD_THRESHOLD_C
+        );
+        assert!(
+            sous_zero > 0,
+            "le foyer « frais » ne gèle jamais (minimum {min:.2} °C) : le froid ne \
+             s'accumulant qu'en dessous de {} °C, la prémisse du banc etincelle — \
+             « c'est le froid qui pousse au feu » — ne se déclenche jamais",
+            crate::agent::COLD_THRESHOLD_C
+        );
+    }
 }
