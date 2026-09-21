@@ -79,8 +79,25 @@ const GRAZE_STEP_TILES: f64 = 40.0;
 /// Laisse d'un cheptel ancré (~600 m) : au-delà, il revient vers son foyer
 /// (domestication, voir `crate::pastoral`).
 const HERD_LEASH_TILES: f64 = km_to_tiles(0.6);
-/// Portée d'échantillonnage de l'herbe autour du troupeau (~160 m).
-const GRAZE_SAMPLE_TILES: i64 = 80;
+/// Portée d'échantillonnage de l'herbe autour du troupeau (~40 m).
+///
+/// — **Ramené de 80 à 20 tuiles.** `best_pasture` lit neuf tuiles en croix à
+///   cette distance ; à 80, la croix couvrait 160 tuiles de large pour un chunk
+///   qui en fait 64, si bien que chaque troupeau touchait jusqu'à **neuf chunks
+///   distincts à chaque tick** et forçait la génération paresseuse à
+///   matérialiser des tuiles dont personne d'autre n'avait besoin (mesure M1 :
+///   216 tuiles générées par tuile réellement lue). La faune pèse 84,8 % du
+///   temps de tick et c'est là qu'elle lit le monde.
+///
+///   À 20, la croix entière tient dans la largeur d'un chunk : les sondes
+///   tombent sur celui où le troupeau se trouve déjà, donc résident.
+///
+///   Ce n'est pas qu'une optimisation : 40 m est aussi plus juste. Un troupeau
+///   choisit la touffe voisine, il ne compare pas des pâturages à 160 m. Reste
+///   que sa marche en dépend — le départage aléatoire des ex æquo a déjà été
+///   nécessaire pour éviter une dérive balistique — donc l'effet sur la
+///   dispersion se **mesure**, il ne se suppose pas. —
+const GRAZE_SAMPLE_TILES: i64 = 20;
 /// Fuite : ~2 km avalés d'un trait.
 const FLEE_STEP_TILES: f64 = km_to_tiles(2.0);
 /// Distance à laquelle un troupeau détecte une menace (~600 m).
@@ -1373,6 +1390,27 @@ mod tests {
         // Capacité nulle (océan, glacier) : pas de division par zéro, et pas de
         // satiété non plus.
         assert_eq!(satiation_from_forage(0, 0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn les_sondes_de_pature_tiennent_dans_un_chunk() {
+        // `best_pasture` lit neuf tuiles en croix, espacées de
+        // `GRAZE_SAMPLE_TILES`. À 80 tuiles, la croix couvre 160 tuiles de large
+        // pour un chunk qui en fait 64 : chaque troupeau touche donc jusqu'à
+        // neuf **chunks distincts** à chaque tick, et force la génération
+        // paresseuse à matérialiser des tuiles dont personne d'autre n'a besoin
+        // (M1 : 216 tuiles générées par tuile utile). C'est le poste le plus
+        // lourd de la faune, qui pèse 84,8 % du temps de tick.
+        //
+        // L'invariant : la croix entière doit tenir dans la largeur d'un chunk,
+        // pour que les sondes tombent sur celui où le troupeau se trouve déjà.
+        assert!(
+            GRAZE_SAMPLE_TILES * 2 <= crate::CHUNK_SIZE,
+            "sondage sur {} tuiles de large pour un chunk de {} : chaque troupeau \
+             traverse plusieurs chunks à chaque tick",
+            GRAZE_SAMPLE_TILES * 2,
+            crate::CHUNK_SIZE
+        );
     }
 
     #[test]
