@@ -568,6 +568,58 @@ fn fauna_stats_report(sim: &Sim) {
         println!("  resserrer. Chemin ≈ net : il dérive, et le domaine reste à inventer.");
     }
 
+    // — M1-FAUNE : LA LOI DE CROISSANCE CONTRE LA DENSITÉ. Le potentiel ne voit
+    //   que le fourrage ; le réalisé voit tout ce qui a retiré des têtes. Un
+    //   frein densité-dépendant, par le bas ou par le haut, doit faire baisser
+    //   l'un ou l'autre quand la densité monte. —
+    println!("\n╔══ M1-FAUNE — CROISSANCE CONTRE DENSITÉ ═════════════════════════════╗");
+    println!(
+        "  Recensement quotidien : têtes dans {:.1} km autour de chaque troupeau (lui",
+        tiles_to_km(cairn_sim::fauna::HERD_CROWD_RADIUS_TILES)
+    );
+    println!("  compris). Potentiel = 0,020·min(sat,1) − 0,010 (le plafond vaut 0,0100/j).");
+    println!("  Réalisé = ln(pop/pop veille), fissions corrigées : prédation et chasse");
+    println!("  comprises. « pondéré » = taux de l'ensemble de la classe.\n");
+    println!(
+        "{:>12} {:>10} {:>9} {:>7} {:>7} {:>10} {:>10} {:>10} {:>8}",
+        "têtes/2 km", "troup.-j", "têtes moy", "satiété", "sat≥1", "potentiel", "réalisé",
+        "pondéré", "disparus"
+    );
+    let mut bas = 0.0f32;
+    let (mut w, mut wp) = (0.0f64, 0.0f64);
+    for (i, c) in st.crowd.iter().enumerate() {
+        let haut = cairn_sim::fauna::CROWD_EDGES[i];
+        if c.herd_days > 0 {
+            let n = c.herd_days as f64;
+            let label = if haut.is_infinite() {
+                format!("{bas:.0}+")
+            } else {
+                format!("{bas:.0}-{haut:.0}")
+            };
+            println!(
+                "{label:>12} {:>10} {:>9.0} {:>7.3} {:>6.1}% {:>10.4} {:>10.4} {:>10.4} {:>7.2}%",
+                c.herd_days,
+                c.heads_sum / n,
+                c.satiation_sum / n,
+                c.satiated as f64 / n * 100.0,
+                c.potential_sum / n,
+                c.realized_sum / c.realized_n.max(1) as f64,
+                c.realized_w / c.realized_pop.max(1e-9),
+                c.vanished as f64 / n * 100.0,
+            );
+            w += c.realized_w;
+            wp += c.realized_pop;
+        }
+        bas = haut;
+    }
+    println!(
+        "\n  Taux réalisé de l'ensemble (pondéré, toutes classes) : {:.4}/j",
+        w / wp.max(1e-9)
+    );
+    println!("  À confronter au taux de la série `tetes` (qui compte en plus les");
+    println!("  naissances de troupeaux par immigration et les disparitions).");
+    println!("╚═════════════════════════════════════════════════════════════════════╝");
+
     let (chasses, vus) = (st.hunted.len(), st.seen.len());
     println!("\n  ── FRACTION DE REFUGE ──");
     println!("  {chasses} troupeaux sur {vus} sont entrés au moins une fois dans le rayon");

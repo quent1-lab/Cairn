@@ -748,6 +748,7 @@ pub fn update_herds(
         } else if herd.population > HERD_FISSION {
             // Trop nombreux : la moitié part fonder un troupeau ailleurs.
             herd.population *= 0.5;
+            stats.herd_fission(id.0);
             let angle = rng.next_f64() * std::f64::consts::TAU;
             let d = km_to_tiles(1.0);
             // La fille hérite de l'espèce de la mère (un troupeau de cerfs se
@@ -818,6 +819,48 @@ impl FaunaStats {
     pub fn herds_alive(&mut self, _herds: &[HerdView]) {}
     #[inline(always)]
     pub fn herd_step(&mut self, _id: u64, _pos: (f64, f64), _day: u64) {}
+    #[inline(always)]
+    pub fn herd_fission(&mut self, _id: u64) {}
+}
+
+/// Rayon du recensement de densité autour d'un troupeau (M1-faune) : 2 km, à
+/// l'échelle du domaine vital mesuré (1,5 km net sur 15 j). C'est la zone dont
+/// la pâture nourrit ce troupeau — donc celle où une densité-dépendance, si
+/// elle existait, devrait se lire.
+#[cfg(feature = "fauna-stats")]
+pub const HERD_CROWD_RADIUS_TILES: f64 = km_to_tiles(2.0);
+
+/// Bornes hautes des classes de densité du recensement (têtes dans
+/// `HERD_CROWD_RADIUS`, le troupeau lui-même compris — d'où un plancher
+/// pratique à `HERD_MIN`). Échelonnées comme `DENSITY_EDGES`, décalées vers le
+/// haut : on cherche la forme sur plusieurs ordres de grandeur.
+#[cfg(feature = "fauna-stats")]
+pub const CROWD_EDGES: [f32; 8] =
+    [30.0, 100.0, 300.0, 1000.0, 3000.0, 10000.0, 30000.0, f32::INFINITY];
+
+/// Une classe de densité du recensement quotidien. Deux taux nets, et c'est
+/// leur écart qui compte : le **potentiel** ne voit que la satiété (le
+/// fourrage), le **réalisé** voit tout ce qui a retiré des têtes depuis la
+/// veille (prédation, chasse humaine comprises).
+#[cfg(feature = "fauna-stats")]
+#[derive(Default, Clone, Copy)]
+pub struct Crowd {
+    pub herd_days: u64,
+    pub heads_sum: f64,
+    pub satiation_sum: f64,
+    /// Troupeaux-jours à satiété ≥ 1 : la natalité est déjà à son plafond.
+    pub satiated: u64,
+    pub potential_sum: f64,
+    /// Troupeaux-jours ayant un recensement la veille (le réalisé s'y calcule).
+    pub realized_n: u64,
+    pub realized_sum: f64,
+    /// Pondéré par l'effectif de la veille : `Σ pop·r / Σ pop` est le taux de
+    /// l'ensemble, confrontable à la série `tetes` du banc.
+    pub realized_w: f64,
+    pub realized_pop: f64,
+    /// Troupeaux recensés la veille dans cette classe et disparus depuis
+    /// (sous `HERD_MIN`) — le réalisé des survivants seuls serait biaisé.
+    pub vanished: u64,
 }
 
 /// Ce qui limite le fourrage d'un troupeau, par biome. **Le discriminateur du
@@ -907,6 +950,11 @@ pub struct FaunaStats {
     pub hunted: std::collections::BTreeSet<u64>,
     /// Troupeaux **distincts** ayant existé. Le complément donne le refuge.
     pub seen: std::collections::BTreeSet<u64>,
+    /// Recensement quotidien par classe de densité (M1-faune).
+    pub crowd: [Crowd; 8],
+    /// Le recensement de la veille : effectif (corrigé des fissions survenues
+    /// depuis) et classe, par troupeau.
+    pub census_prev: std::collections::BTreeMap<u64, (f32, usize)>,
 }
 
 #[cfg(feature = "fauna-stats")]
@@ -963,6 +1011,57 @@ impl FaunaStats {
             self.windows.push((t.path, net));
             *t = Track { window_start: pos, last: pos, path: 0.0, start_day: day };
         }
+    }
+
+    /// Une fission vient de couper ce troupeau en deux : son effectif de la
+    /// veille est ramené à la moitié restante, sans quoi le taux réalisé
+    /// lirait la scission comme une hécatombe de −0,69/j.
+    pub fn herd_fission(&mut self, id: u64) {
+        if let Some(prev) = self.census_prev.get_mut(&id) {
+            prev.0 *= 0.5;
+        }
+    }
+
+    /// Le recensement quotidien de M1-faune : pour chaque troupeau, les têtes à
+    /// moins de `HERD_CROWD_RADIUS` (lui compris), sa satiété et ses deux taux
+    /// nets. Quadratique en troupeaux, mais une fois par jour et sous feature.
+    /// `herds` = (id, position, effectif, satiété).
+    pub fn crowd_census(&mut self, herds: &[(u64, (f64, f64), f32, f32)]) {
+        let r2 = HERD_CROWD_RADIUS_TILES * HERD_CROWD_RADIUS_TILES;
+        let mut next = std::collections::BTreeMap::new();
+        for &(id, pos, pop, sat) in herds {
+            let heads: f32 = herds
+                .iter()
+                .filter(|h| (h.1.0 - pos.0).powi(2) + (h.1.1 - pos.1).powi(2) <= r2)
+                .map(|h| h.2)
+                .sum();
+            let i = CROWD_EDGES.iter().position(|&e| heads < e).unwrap_or(7);
+            let c = &mut self.crowd[i];
+            c.herd_days += 1;
+            c.heads_sum += f64::from(heads);
+            c.satiation_sum += f64::from(sat);
+            if sat >= 1.0 {
+                c.satiated += 1;
+            }
+            c.potential_sum +=
+                f64::from(HERB_BIRTH_PER_DAY * sat.clamp(0.0, 1.0) - HERB_DEATH_PER_DAY);
+            if let Some(&(prev, _)) = self.census_prev.get(&id)
+                && prev > 0.0
+            {
+                let r = f64::from(pop / prev).ln();
+                c.realized_n += 1;
+                c.realized_sum += r;
+                c.realized_w += f64::from(prev) * r;
+                c.realized_pop += f64::from(prev);
+            }
+            next.insert(id, (pop, i));
+        }
+        for (id, &(_, i)) in &self.census_prev {
+            if !next.contains_key(id) {
+                self.crowd[i].vanished += 1;
+            }
+        }
+        self.census_prev = next;
     }
 
     /// Le voisinage sondé par `best_pasture`, en moyenne et au pire.

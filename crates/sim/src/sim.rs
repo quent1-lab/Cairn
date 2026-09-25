@@ -1201,6 +1201,18 @@ impl Sim {
         for (x, y, population, species) in fissions {
             self.spawn_herd_species(x, y, population, species);
         }
+        // Recensement de densité (M1-faune) : une fois par jour, après prises,
+        // naissances et fissions — l'état que la veille comparera demain.
+        #[cfg(feature = "fauna-stats")]
+        if time.tick.is_multiple_of(TICKS_PER_DAY) {
+            let census: Vec<(u64, (f64, f64), f32, f32)> = self
+                .fauna
+                .query::<(&fauna::FaunaId, &Herd, &Position)>()
+                .iter()
+                .map(|(_, (id, h, pos))| (id.0, (pos.x, pos.y), h.population, h.satiation))
+                .collect();
+            self.fauna_stats.crowd_census(&census);
+        }
 
         self.end("4 faune", _ph);
         // 4 bis. Immigration de gibier, quotidienne : sans elle, une zone
