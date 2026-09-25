@@ -31,6 +31,23 @@
 # faune, à l'écologie ou au déplacement des agents.
 # ─────────────────────────────────────────────────────────────────────────────
 
+## [D] Objectif de sortie du chantier de dérive (acté 2026-09-25)
+#
+#   Scènes   : chronicle ET etincelle
+#   Seeds    : 42, 7, 1337, 2024
+#   Horizon  : 50 ans de jeu
+#   Critère  : tps ≥ 20 dans CHAQUE fenêtre annuelle (le minimum, pas la
+#              moyenne) · RSS < 1,5 Go · aucun effectif SANS BORNE à `derive`
+#   Machine  : la cible §8.3 elle-même (2 vCPU / 2,9 Go)
+#   Coût     : 50 ans à 20 tps ≈ 6 h ; 8 runs sur 2 vCPU ≈ 24 h, détachées
+#
+#   Hors périmètre : la charge à 5 000 agents (§8.2). On borne ici une
+#   CROISSANCE, à l'échelle actuelle de 30-90 humains.
+#
+#   Témoin de départ (seed 42, avant tout correctif) :
+#     chronicle : 60 tps an 1 · 20,7 an 19 · 10,2 an 20 · 0,2 an 21 (mort)
+#     etincelle : arrêtée à l'an 42, aucune écriture pendant les 8 dernières h
+
 ## [A] Débit nominal — client_render
 # cargo run --release -p cairn-client --example client_render -- <seed> <ticks>
 # → imprime « perf : tps=… ». Une chute nette entre deux lignes = régression.
