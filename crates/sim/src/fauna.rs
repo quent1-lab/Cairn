@@ -739,6 +739,7 @@ pub fn update_herds(
     threats: &[(f64, f64)],
     stats: &mut FaunaStats,
     range: &mut Rangeland,
+    fence: Option<&[(f64, f64)]>,
 ) -> (Vec<hecs::Entity>, Vec<Fission>) {
     // Sans la feature, `stats` est un type vide : le paramètre ne coûte rien et
     // évite une seconde signature.
@@ -795,6 +796,9 @@ pub fn update_herds(
         // biais mesuré était de +106 % sur les prédateurs, pour une confusion
         // d'unités entre « ticks » et « tours ».
         herd.flee_ticks = herd.flee_ticks.saturating_sub(1);
+        // Où il était avant de bouger : le bord de la faune se juge sur le pas
+        // entier du tick (fuite, pâture ou migration — un seul par tick).
+        let start = (pos.x, pos.y);
 
         // — Fuite : elle prime sur tout le reste, y compris la faim — mais
         //   seulement si la bête a encore du souffle.
@@ -925,6 +929,17 @@ pub fn update_herds(
                     prof[2] += t0.elapsed().as_nanos() as u64;
                 }
             }
+        }
+
+        // — Le bord de la faune (D′) : un troupeau sauvage ne franchit pas le
+        //   bord vers l'extérieur. Le pas est refusé, comme devant l'eau ; le
+        //   cheptel domestiqué, qui suit son clan, n'est pas concerné. —
+        if let Some(humans) = fence
+            && herd.anchor.is_none()
+            && crosses_perimeter(start, (pos.x, pos.y), humans)
+        {
+            pos.x = start.0;
+            pos.y = start.1;
         }
 
         // Domaine vital : chemin parcouru contre déplacement net, après que le
@@ -1480,6 +1495,49 @@ pub fn apply_kills(fauna: &mut hecs::World, kills: &[Kill]) {
 // densité de gibier nulle (`herd_grid=0`, y compris côté client) n'a
 // simplement personne à qui donner une chance de chasser. Le drapeau
 // explicite règle les deux cas sans deviner l'intention depuis l'état.
+
+/// **Bord de la faune** (chantier de dérive, D′). Le gibier est simulé autour
+/// des humains — l'immigration le fait naître à 1-4 km d'eux — et ce bord
+/// l'y **retient** : au-delà de cette distance de tout humain, un troupeau
+/// sauvage ne peut plus faire un pas qui l'éloigne davantage.
+///
+/// C'est un bord à **flux nul**, la condition qu'on pose en physique pour une
+/// région plongée dans un milieu homogène : elle revient à supposer qu'au-delà
+/// vit la même population à la même densité, qui renvoie autant de bêtes
+/// qu'elle en reçoit. Le bord **absorbant** essayé avant (D, annulé) vidait ce
+/// qu'il enclôt : les troupeaux fuient les humains, la fuite les poussait au
+/// bord, le bord les retirait (~5 par jour contre une immigration tous les six
+/// ou sept jours) — gibier éteint sur 3 seeds sur 4.
+///
+/// Sans aucun bord, une densité bornée (étape 4) n'empêchait pas le gibier de
+/// s'étendre : jusqu'à 430 mailles de 2 km en 540 jours, débit 2,5 à 5 tps.
+///
+/// **Une règle de périmètre, pas un grossissement temporel** (ce dernier est
+/// écarté pour la faune : six biais mesurés). 8 km : deux fois le rayon
+/// maximal d'immigration, quatre fois la portée de vue d'un chasseur.
+pub const FAUNA_PERIMETER_TILES: f64 = km_to_tiles(8.0);
+
+/// Au-delà de cette distance de tout humain, un troupeau sauvage est
+/// **abandonné** : les humains sont partis, le bord avec eux, et le troupeau
+/// quitte la simulation. Deux fois le bord, pour que seul un déplacement des
+/// humains puisse y laisser un troupeau — le bord interdit d'y aller seul.
+pub const FAUNA_ABANDON_TILES: f64 = 2.0 * FAUNA_PERIMETER_TILES;
+
+/// Carré de la distance de `pos` au plus proche humain (∞ sans humain).
+pub fn nearest_human_d2(pos: (f64, f64), humans: &[(f64, f64)]) -> f64 {
+    humans
+        .iter()
+        .map(|h| (h.0 - pos.0).powi(2) + (h.1 - pos.1).powi(2))
+        .fold(f64::INFINITY, f64::min)
+}
+
+/// Le pas de `from` à `to` franchit-il le bord vers l'extérieur ? Refusé s'il
+/// mène au-delà de `FAUNA_PERIMETER_TILES` **et** éloigne des humains ; un pas
+/// qui rentre, ou qui reste dedans, passe toujours.
+pub fn crosses_perimeter(from: (f64, f64), to: (f64, f64), humans: &[(f64, f64)]) -> bool {
+    let d2_to = nearest_human_d2(to, humans);
+    d2_to > FAUNA_PERIMETER_TILES * FAUNA_PERIMETER_TILES && d2_to > nearest_human_d2(from, humans)
+}
 
 /// Chance qu'un site candidat soit tenté par jour (indépendante du succès :
 /// la plupart des tentatives échouent simplement le test de distance dans

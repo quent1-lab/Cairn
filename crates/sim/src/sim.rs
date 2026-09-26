@@ -279,9 +279,11 @@ pub struct Sim {
     /// Production de fourrage des mailles de pâturage (cache pur du worldgen,
     /// voir `fauna::Rangeland`).
     pub rangeland: crate::fauna::Rangeland,
-    /// L'immigration de gibier (`fauna::daily_immigration`) est-elle active
-    /// pour cette simulation ? Vrai par défaut (le monde est censé être
-    /// habité) ; les scènes de test qui veulent isoler une mécanique de
+    /// Le monde est-il **ouvert** aux flux de faune ? L'immigration de gibier
+    /// et de prédateurs (`fauna::daily_immigration`), le bord qui retient le
+    /// gibier autour des humains (`fauna::FAUNA_PERIMETER_TILES`) et le retrait
+    /// des troupeaux qu'ils ont abandonnés (`fauna::FAUNA_ABANDON_TILES`). Vrai
+    /// par défaut (le monde est censé être habité) ; les scènes de test qui veulent isoler une mécanique de
     /// toute interférence de faune le mettent à faux explicitement — voir
     /// `sim::tests::scenario_setup`. Ce n'est plus déduit indirectement
     /// (l'ancienne garde `hunted_head > 0` ne se déclenchait jamais si la
@@ -1194,6 +1196,14 @@ impl Sim {
         self.end("4c menaces", _ph);
         let _ph = phase(); // 4d troupeaux
         let seed = self.world.seed();
+        // Le bord de la faune (D′) suit les humains : il n'existe que dans un
+        // monde ouvert et habité.
+        let fence_humans: Vec<(f64, f64)> = if self.allow_fauna_immigration {
+            humans.iter().map(|h| h.pos).collect()
+        } else {
+            Vec::new()
+        };
+        let fence = (!fence_humans.is_empty()).then_some(fence_humans.as_slice());
         // Les positions humaines seules (pas les meutes) : c'est la présence
         // d'un observateur qui décide de la finesse, pas celle d'un prédateur.
         let (dead_herds, fissions) = fauna::update_herds(
@@ -1205,6 +1215,7 @@ impl Sim {
             &threats,
             &mut self.fauna_stats,
             &mut self.rangeland,
+            fence,
         );
         for entity in dead_herds {
             let _ = self.fauna.despawn(entity);
@@ -1236,6 +1247,26 @@ impl Sim {
         // d'exécution, pas une heuristique déduite de l'état de la sim.
         if time.tick.is_multiple_of(TICKS_PER_DAY) && self.allow_fauna_immigration {
             let human_positions: Vec<(f64, f64)> = humans.iter().map(|h| h.pos).collect();
+            // Les abandonnés (D′) : le bord suit les humains ; un troupeau
+            // sauvage qu'ils ont laissé au-delà de deux fois le bord quitte la
+            // simulation. Le bord interdit d'y aller seul : seul un
+            // déplacement des humains peut l'y laisser. Le cheptel
+            // domestiqué appartient à un clan et reste, où qu'il soit.
+            if !human_positions.is_empty() {
+                let r2 = fauna::FAUNA_ABANDON_TILES * fauna::FAUNA_ABANDON_TILES;
+                let gone: Vec<hecs::Entity> = self
+                    .fauna
+                    .query::<(&Herd, &Position)>()
+                    .iter()
+                    .filter(|(_, (h, p))| {
+                        h.anchor.is_none() && fauna::nearest_human_d2((p.x, p.y), &human_positions) > r2
+                    })
+                    .map(|(e, _)| e)
+                    .collect();
+                for e in gone {
+                    let _ = self.fauna.despawn(e);
+                }
+            }
             let herd_positions: Vec<(f64, f64)> = self
                 .fauna
                 .query::<(&Herd, &Position)>()
@@ -1912,6 +1943,79 @@ mod tests {
             "{before:.0} {species:?} pour une maille qui en nourrit {:.0} ont crû jusqu'à {after:.0} \
              en 20 jours : rien ne freine la natalité quand le pays est surpeuplé",
             production / species.daily_ration_kg()
+        );
+    }
+
+    /// Une tuile de terre ferme proche de `home + (dx, 0)`, pour poser un
+    /// troupeau à une distance voulue de l'humain du foyer.
+    fn land_near(sim: &mut Sim, home: (i64, i64), dx: f64) -> (f64, f64) {
+        for k in 0..400 {
+            let (x, y) = (home.0 as f64 + dx + (k % 20) as f64 * 50.0, home.1 as f64 + (k / 20) as f64 * 50.0);
+            if sim.world.tile(x as i64, y as i64).is_walkable() {
+                return (x, y);
+            }
+        }
+        panic!("pas de terre à {dx} tuiles du foyer");
+    }
+
+    /// Distance, en tuiles, d'un point au plus proche humain.
+    fn nearest_human(sim: &Sim, p: (f64, f64)) -> f64 {
+        sim.agents
+            .query::<&Position>()
+            .iter()
+            .map(|(_, h)| (h.x - p.0).hypot(h.y - p.1))
+            .fold(f64::INFINITY, f64::min)
+    }
+
+    /// Chantier de dérive, D′ : **le bord de la faune renvoie**. Un troupeau
+    /// déjà à 9 km du seul humain, une meute collée à lui côté humain : il fuit
+    /// vers l'extérieur — sans bord, de 2 km d'un bond. Avec un bord à flux nul,
+    /// ce pas qui l'éloigne est refusé. (Le bord absorbant essayé avant, D,
+    /// retirait ces fuyards : 3 seeds sur 4 perdaient tout leur gibier.)
+    #[test]
+    fn le_bord_de_la_faune_renvoie_le_fuyard() {
+        let (mut sim, home) = scenario_setup(5, 1, 0);
+        sim.allow_fauna_immigration = true; // le monde ouvert
+        let (x, y) = land_near(&mut sim, home, cairn_core::km_to_tiles(9.0));
+        let id = sim.spawn_herd(x, y, 40.0);
+        sim.spawn_pack(x - 150.0, y, 6.0);
+        let pos_of = |sim: &Sim| -> (f64, f64) {
+            sim.fauna
+                .query::<(&FaunaId, &Position)>()
+                .iter()
+                .find(|(_, (i, _))| **i == id)
+                .map(|(_, (_, p))| (p.x, p.y))
+                .expect("le troupeau existe encore")
+        };
+        let before = nearest_human(&sim, pos_of(&sim));
+        sim.step();
+        let after = nearest_human(&sim, pos_of(&sim));
+        assert!(
+            after <= before + 50.0,
+            "au-delà du bord, le troupeau s'est encore éloigné de {:.1} km en un tick",
+            cairn_core::tiles_to_km(after - before)
+        );
+    }
+
+    /// Chantier de dérive, D′ : **les abandonnés sortent**. Un troupeau sauvage
+    /// à 20 km du seul humain — au-delà du double du bord : les humains sont
+    /// partis — quitte la simulation dans la journée ; un troupeau à 2 km reste.
+    #[test]
+    fn un_troupeau_abandonne_par_les_humains_sort_de_la_simulation() {
+        let (mut sim, home) = scenario_setup(5, 1, 0);
+        sim.allow_fauna_immigration = true;
+        let (nx, ny) = land_near(&mut sim, home, cairn_core::km_to_tiles(2.0));
+        let (fx, fy) = land_near(&mut sim, home, cairn_core::km_to_tiles(20.0));
+        let proche = sim.spawn_herd(nx, ny, 40.0);
+        let lointain = sim.spawn_herd(fx, fy, 40.0);
+        for _ in 0..TICKS_PER_DAY + 1 {
+            sim.step();
+        }
+        let vivants: Vec<FaunaId> = sim.fauna.query::<(&FaunaId, &Herd)>().iter().map(|(_, (id, _))| *id).collect();
+        assert!(vivants.contains(&proche), "le troupeau à 2 km d'un humain doit rester simulé");
+        assert!(
+            !vivants.contains(&lointain),
+            "un troupeau à 20 km de tout humain est encore simulé : l'aire de la faune n'a pas de borne"
         );
     }
 
