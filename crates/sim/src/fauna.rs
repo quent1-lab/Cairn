@@ -65,11 +65,26 @@ pub const HERB_SATIATION_EQUILIBRIUM: f32 = HERB_DEATH_PER_DAY / HERB_BIRTH_PER_
 
 pub const PACK_START: f32 = 5.0;
 pub const PACK_MIN: f32 = 1.0;
-/// Proies tuées par prédateur et par jour, quand le gibier est à portée.
-const PRED_KILL_PER_DAY: f32 = 0.18;
-/// Prédateurs entretenus par proie tuée (rendement trophique).
-const PRED_CONV: f32 = 0.55;
-/// Mortalité de fond des prédateurs, par jour.
+/// Proies tuées par prédateur et par jour, quand le gibier est à portée :
+/// ~15 à 25 ongulés par loup et par an. L'ancienne valeur (0,18, soit 65 par
+/// an) faisait croître une meute de ~8 % par jour — voir `PRED_CONV`.
+const PRED_KILL_PER_DAY: f32 = 0.05;
+/// Prédateurs entretenus par proie tuée (rendement trophique). Réglé pour que
+/// la croissance **maximale** d'une meute nourrie à volonté,
+/// `PRED_CONV × PRED_KILL_PER_DAY − PRED_DEATH_PER_DAY` ≈ 0,001/j, soit
+/// ~0,4 par an, celle d'une population de loups réelle.
+///
+/// Chantier de dérive, C1 : avec 0,55 × 0,18, cette croissance valait
+/// 0,079/j — huit fois celle du gibier, soixante fois celle d'un loup. Une
+/// fois le gibier borné par sa pâture (étape 4), il ne distançait plus des
+/// prédateurs montés à un ou deux milliers sur une centaine de km², et
+/// s'éteignait sur 3 runs sur 8.
+const PRED_CONV: f32 = 0.42;
+/// Mortalité des prédateurs, par jour. Elle tient lieu de **famine** plus que
+/// de mortalité de fond : une meute sans proie fond de moitié en ~35 jours.
+/// Corollaire du calibrage : une meute ne se maintient qu'à ≥ 0,048 prise par
+/// jour, soit presque toute sa capacité de chasse — un prédateur ne tient que
+/// là où le gibier abonde.
 const PRED_DEATH_PER_DAY: f32 = 0.020;
 
 // — Capacité de charge : le domaine vital (chantier de dérive, étape 4) —
@@ -1730,12 +1745,13 @@ mod tests {
         sim.allow_fauna_immigration = false; // sinon on ne saurait pas d'où vient la 2ᵉ
         let home = (0.0, 0.0);
         sim.spawn_pack(home.0, home.1, PACK_FISSION - 0.5);
-        // Du gibier sous son nez, pour qu'elle franchisse le seuil vite : la
-        // meute croît de ~8 %/jour quand elle mange à sa faim.
+        // Du gibier sous son nez, pour qu'elle franchisse le seuil : nourrie à
+        // sa faim, la meute croît de ~0,1 %/jour (C1, celle d'un loup réel),
+        // soit ~0,5 prédateur en trois semaines depuis 23,5.
         sim.spawn_herd(home.0 + 1.0, home.1, 400.0);
         assert_eq!(sim.fauna.query::<&Pack>().iter().count(), 1);
 
-        for _ in 0..24 * 4 {
+        for _ in 0..24 * 30 {
             sim.step();
         }
         let meutes = sim.fauna.query::<&Pack>().iter().count();
@@ -1752,11 +1768,34 @@ mod tests {
         assert!(pop > 5.0, "avec du gibier à volonté, la meute croît : {pop:.1}");
     }
 
+    /// Chantier de dérive, C1 : **une meute ne croît pas plus vite qu'une
+    /// population de loups**. Nourrie à volonté pendant un an, une vraie
+    /// population croît d'environ 0,3 à 0,5 par an (×1,35 à ×1,65) ; un plafond
+    /// à ×2 laisse de la marge sans admettre l'ancien calibrage, qui permettait
+    /// 0,079 par jour — ×10¹² en un an, soit un à deux milliers de loups sur une
+    /// centaine de km² mesurés à l'étape 4, contre 1 à 5 dans la nature.
+    #[test]
+    fn une_meute_ne_croit_pas_plus_vite_qu_un_loup() {
+        let mut pop = 5.0;
+        for _ in 0..24 * 360 {
+            let kills = pack_kills(pop, 1.0e6); // gibier à volonté
+            pop = pack_population_step(pop, kills);
+        }
+        let facteur = pop / 5.0;
+        assert!(
+            (1.2..=2.0).contains(&facteur),
+            "nourrie à volonté un an, la meute a été multipliée par {facteur:.3e} \
+             (réel : ×1,35 à ×1,65)"
+        );
+    }
+
     #[test]
     fn les_prises_sont_bornees_par_le_gibier_present() {
         // On ne tue pas plus de bêtes qu'il n'y en a : sinon l'effectif
         // passerait négatif et la meute se nourrirait de fantômes.
-        assert_eq!(pack_kills(100.0, 0.3), 0.3);
+        // 100 prédateurs peuvent prendre 0,21 bête par tick (C1) : il n'y en a
+        // que 0,1.
+        assert_eq!(pack_kills(100.0, 0.1), 0.1);
         assert!(pack_kills(2.0, 1000.0) < 1.0);
     }
 
