@@ -2019,6 +2019,53 @@ mod tests {
         );
     }
 
+    /// Chantier de dérive, C3 : **un territoire ne porte qu'une poignée de
+    /// prédateurs**. Dix meutes, 80 prédateurs sur le même kilomètre, du gibier
+    /// à sa capacité tout autour : un territoire réel (~200 km², 0,05 loup/km²
+    /// au plus) en nourrit une dizaine. Sans territoire, rien ne bornait le
+    /// prédateur sinon sa proie — mesuré sur 5 ans : 1,5 à 2 prédateurs par
+    /// km², et le gibier éteint sur 2 seeds sur 4 à l'an 4.
+    #[test]
+    fn un_territoire_ne_porte_qu_une_poignee_de_predateurs() {
+        let (mut sim, home) = scenario_setup(11, 0, 0);
+        let side = fauna::RANGE_ZONE_TILES;
+        let zone = fauna::range_zone((home.0 as f64, home.1 as f64));
+        let center = ((zone.0 as f64 + 0.5) * side, (zone.1 as f64 + 0.5) * side);
+        let species = fauna::Species::herbivore_for_biome(
+            sim.world.worldgen().biome(center.0 as i64, center.1 as i64),
+            &mut Pcg32::new(1, 1),
+        );
+        // Le gibier à la capacité de sa maille : il ne manque pas, il ne
+        // déborde pas.
+        let production = sim.rangeland.production(sim.world.worldgen(), zone);
+        let herds = (production / species.daily_ration_kg() / 60.0).ceil() as usize;
+        for i in 0..herds {
+            let angle = i as f64 * 0.7;
+            let r = 30.0 + (i % 8) as f64 * 40.0;
+            let (x, y) = (center.0 + angle.cos() * r, center.1 + angle.sin() * r);
+            if sim.world.tile(x as i64, y as i64).is_walkable() {
+                sim.spawn_herd_species(x, y, 60.0, species);
+            }
+        }
+        for i in 0..10 {
+            let angle = i as f64 * 0.63;
+            sim.spawn_pack(center.0 + angle.cos() * 200.0, center.1 + angle.sin() * 200.0, 8.0);
+        }
+        let predators = |sim: &Sim| -> f32 { sim.fauna.query::<&Pack>().iter().map(|(_, p)| p.population).sum() };
+        let before = predators(&sim);
+        // 60 jours : sans recrutement, la famine (0,02/j) laisse ~30 % des
+        // prédateurs ; sans territoire, bien nourris, ils croissent.
+        for _ in 0..60 * TICKS_PER_DAY {
+            sim.step();
+        }
+        let after = predators(&sim);
+        assert!(
+            after < 0.5 * before,
+            "{before:.0} prédateurs sur un même territoire en sont à {after:.0} après 60 jours : \
+             rien ne borne le prédateur sinon sa proie"
+        );
+    }
+
     /// La ligne droite entre `a` et `b` traverse-t-elle de l'eau ? (échantillon
     /// tous les 8 tuiles sur le baseline.)
     fn straight_blocked(sim: &Sim, a: (i64, i64), b: (i64, i64)) -> bool {

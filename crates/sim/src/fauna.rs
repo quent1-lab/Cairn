@@ -87,6 +87,54 @@ const PRED_CONV: f32 = 0.42;
 /// là où le gibier abonde.
 const PRED_DEATH_PER_DAY: f32 = 0.020;
 
+// — Le territoire des prédateurs (chantier de dérive, C3) —
+//
+// Rien ne bornait le prédateur sinon sa proie : même au rythme d'un loup (C1),
+// il montait à 1,5-2 par km² — cinquante à cent fois la densité réelle — et le
+// cycle proie-prédateur, ralenti mais non amorti, éteignait le gibier sur 2
+// seeds sur 4 à l'an 4. Un prédateur réel défend un territoire : c'est ce qui
+// borne sa densité indépendamment de sa proie, et ce qui amortit le couple.
+
+/// Rayon d'un territoire de prédateur : ~200 km², dans la fourchette réelle
+/// d'une meute de loups (100 à 1 000 km²).
+pub const PREDATOR_TERRITORY_TILES: f64 = km_to_tiles(8.0);
+
+/// Densité maximale de prédateurs, par km² : l'ordre de grandeur des plus
+/// fortes densités de loups observées, là où la proie abonde.
+const PREDATOR_MAX_DENSITY_KM2: f32 = 0.05;
+
+/// Prédateurs qu'un territoire peut porter : densité maximale × aire du disque
+/// (≈ 10). Aucune capacité inventée — deux grandeurs réelles.
+fn predators_per_territory() -> f32 {
+    let r_km = (PREDATOR_TERRITORY_TILES * cairn_core::TILE_METERS / 1000.0) as f32;
+    PREDATOR_MAX_DENSITY_KM2 * std::f32::consts::PI * r_km * r_km
+}
+
+/// Ce que le territoire fait à une meute, selon les prédateurs à moins de
+/// `PREDATOR_TERRITORY_TILES` (elle comprise). Renvoie (part qui mange, place
+/// laissée) :
+///
+/// - **sous la capacité**, tous mangent, et la croissance nette d'une meute
+///   bien nourrie est multipliée par la place laissée (1 − P/K) — la forme
+///   logistique, qui l'amène à ce que le territoire porte ;
+/// - **au-delà**, seule la part K/P a un territoire, donc accès à la proie ; le
+///   surplus décline au rythme de la famine. Un prédateur sans territoire est
+///   un prédateur sans proie — aucune constante de plus.
+///
+/// Deux formes essayées d'abord, et mesurées fausses : freiner le seul
+/// **recrutement** (la marge d'un loup, 0,001/j face à une famine de 0,02/j,
+/// passait sous la famine — équilibre à 0,5 prédateur par territoire au lieu
+/// de 10) ; et une logistique pure au-delà de la capacité (le surplus ne
+/// refluait qu'au rythme de la croissance d'un loup : ~560 jours de 80 à 20).
+pub fn territory(local_predators: f32) -> (f32, f32) {
+    let k = predators_per_territory();
+    if local_predators <= k {
+        (1.0, 1.0 - local_predators / k)
+    } else {
+        (k / local_predators, 0.0)
+    }
+}
+
 // — Capacité de charge : le domaine vital (chantier de dérive, étape 4) —
 //
 // La satiété de pâture (`satiation_from_forage`) ne freine à aucune densité :
@@ -496,9 +544,11 @@ const PACK_GIVE_UP_TILES: f64 = km_to_tiles(6.0);
 /// pas d'efficacité.
 ///
 /// Le seuil est bas devant celui des troupeaux (90) parce qu'une meute est
-/// naturellement petite : à 5 individus au départ (`PACK_START`), 24 représente
-/// déjà une population qui a prospéré plusieurs fois.
-pub const PACK_FISSION: f32 = 24.0;
+/// naturellement petite : 8, la taille d'une meute de loups réelle, qui
+/// essaime ses jeunes au-delà. Il doit rester **sous** ce qu'un territoire
+/// porte (~10, C3) : à 24 comme avant, une meute ne l'atteignait plus jamais et
+/// la fission disparaissait en silence.
+pub const PACK_FISSION: f32 = 8.0;
 
 /// Instantané d'un troupeau, pris avant les systèmes : c'est ce que lisent
 /// les chasseurs humains, les meutes et les autres troupeaux. Travailler sur
@@ -587,11 +637,16 @@ pub fn herd_population_step(population: f32, satiation: f32) -> f32 {
 
 /// Un tick de démographie de meute : elle croît de ses prises, décline sans.
 /// C'est l'équation prédateur de Lotka-Volterra — un prédateur sans proie
-/// s'éteint, ce qui borne la pression sur le gibier sans aucun plafond écrit.
-pub fn pack_population_step(population: f32, kills: f32) -> f32 {
+/// s'éteint — avec le territoire (C3) : quand la meute se nourrit assez pour
+/// croître, sa croissance nette est multipliée par `room`
+/// ([`territory`]) ; quand elle ne se nourrit pas assez, la famine agit
+/// seule.
+pub fn pack_population_step(population: f32, kills: f32, room: f32) -> f32 {
     let growth = PRED_CONV * kills;
     let decay = PRED_DEATH_PER_DAY * population * DT_DAYS;
-    (population + growth - decay).max(0.0)
+    let net = growth - decay;
+    let net = if net > 0.0 { net * room } else { net };
+    (population + net).max(0.0)
 }
 
 /// Proies qu'une meute de `population` prédateurs prélève en un tick, bornée
@@ -1345,6 +1400,15 @@ pub fn update_packs(
     let mut fissions = Vec::new();
     stats.herds_alive(herds);
 
+    // Les meutes telles qu'au début du tour : chacune juge son territoire sur
+    // la même photo, quel que soit l'ordre d'itération.
+    let territory2 = PREDATOR_TERRITORY_TILES * PREDATOR_TERRITORY_TILES;
+    let packs_now: Vec<((f64, f64), f32)> = fauna
+        .query::<(&Pack, &Position)>()
+        .iter()
+        .map(|(_, (p, pos))| ((pos.x, pos.y), p.population))
+        .collect();
+
     for (entity, (pack, pos)) in fauna.query_mut::<(&mut Pack, &mut Position)>() {
         // — Les meutes restent en simulation FINE, toujours.
         //
@@ -1427,7 +1491,15 @@ pub fn update_packs(
         // ensemble. Sans la feature, cette ligne n'existe pas.
         stats.encounter(pos, herds, pack.population, pack.last_kills);
 
-        pack.population = pack_population_step(pack.population, pack.last_kills);
+        // Le territoire (C3) : les prédateurs à moins de 8 km, elle comprise,
+        // sur la photo du début du tour.
+        let local: f32 = packs_now
+            .iter()
+            .filter(|(p, _)| (p.0 - pos.x).powi(2) + (p.1 - pos.y).powi(2) <= territory2)
+            .map(|(_, n)| n)
+            .sum();
+        let (share, room) = territory(local);
+        pack.population = pack_population_step(pack.population, pack.last_kills * share, room);
         if pack.population < PACK_MIN {
             doomed.push(entity);
         } else if pack.population > PACK_FISSION {
@@ -1787,7 +1859,7 @@ mod tests {
         let mut pop = 8.0;
         let mut jours = 0;
         while pop >= PACK_MIN && jours < 24 * 365 {
-            pop = pack_population_step(pop, 0.0);
+            pop = pack_population_step(pop, 0.0, 1.0);
             jours += 1;
         }
         assert!(pop < PACK_MIN, "une meute sans gibier doit disparaître");
@@ -1802,10 +1874,11 @@ mod tests {
         let mut sim = Sim::new(WorldSeed(42), 256);
         sim.allow_fauna_immigration = false; // sinon on ne saurait pas d'où vient la 2ᵉ
         let home = (0.0, 0.0);
-        sim.spawn_pack(home.0, home.1, PACK_FISSION - 0.5);
+        sim.spawn_pack(home.0, home.1, PACK_FISSION - 0.03);
         // Du gibier sous son nez, pour qu'elle franchisse le seuil : nourrie à
-        // sa faim, la meute croît de ~0,1 %/jour (C1, celle d'un loup réel),
-        // soit ~0,5 prédateur en trois semaines depuis 23,5.
+        // sa faim, seule sur son territoire, la meute croît de ~0,1 %/jour
+        // (C1) freiné par la place qui reste (C3) — ~0,002 prédateur par jour
+        // à 7,97, soit le seuil en une quinzaine de jours.
         sim.spawn_herd(home.0 + 1.0, home.1, 400.0);
         assert_eq!(sim.fauna.query::<&Pack>().iter().count(), 1);
 
@@ -1821,7 +1894,7 @@ mod tests {
         let mut pop = 5.0;
         for _ in 0..24 * 60 {
             let kills = pack_kills(pop, 1000.0); // gibier abondant
-            pop = pack_population_step(pop, kills);
+            pop = pack_population_step(pop, kills, 1.0);
         }
         assert!(pop > 5.0, "avec du gibier à volonté, la meute croît : {pop:.1}");
     }
@@ -1837,13 +1910,33 @@ mod tests {
         let mut pop = 5.0;
         for _ in 0..24 * 360 {
             let kills = pack_kills(pop, 1.0e6); // gibier à volonté
-            pop = pack_population_step(pop, kills);
+            pop = pack_population_step(pop, kills, 1.0);
         }
         let facteur = pop / 5.0;
         assert!(
             (1.2..=2.0).contains(&facteur),
             "nourrie à volonté un an, la meute a été multipliée par {facteur:.3e} \
              (réel : ×1,35 à ×1,65)"
+        );
+    }
+
+    /// C3, l'autre face du territoire : **une meute seule sur son territoire,
+    /// bien nourrie, croît jusqu'à ce qu'il porte** — pas au-delà, mais pas en
+    /// deçà non plus. Le territoire freine la multiplication ; il ne doit pas
+    /// faire passer la marge d'un loup (0,001/j) sous sa famine.
+    #[test]
+    fn une_meute_seule_croit_jusqu_a_ce_que_porte_son_territoire() {
+        let mut pop = 3.0;
+        for _ in 0..24 * 360 * 8 {
+            let kills = pack_kills(pop, 1.0e6);
+            let (share, room) = territory(pop);
+            pop = pack_population_step(pop, kills * share, room);
+        }
+        let k = predators_per_territory();
+        assert!(
+            (0.7 * k..=1.05 * k).contains(&pop),
+            "seule et nourrie à volonté huit ans, la meute compte {pop:.2} prédateurs \
+             pour un territoire qui en porte {k:.1}"
         );
     }
 
