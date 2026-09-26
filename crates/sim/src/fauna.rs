@@ -1481,31 +1481,6 @@ pub fn apply_kills(fauna: &mut hecs::World, kills: &[Kill]) {
 // simplement personne à qui donner une chance de chasser. Le drapeau
 // explicite règle les deux cas sans deviner l'intention depuis l'état.
 
-/// **Périmètre de simulation de la faune** (chantier de dérive, D) : un
-/// troupeau sauvage à plus de cette distance de **tout** humain sort de la
-/// simulation. C'est le pendant de l'immigration, qui fait naître les
-/// troupeaux à 1-4 km d'un humain : le gibier entre dans le champ et en sort,
-/// sans quoi une population à densité bornée (étape 4) s'étend quand même —
-/// mesuré sur `derive` : 18 → 310 mailles de 2 km occupées en 600 jours, débit
-/// 70 → 2 tps. Le monde est infini ; le front du gibier ne l'est pas moins.
-///
-/// **Une règle de périmètre, pas un grossissement temporel** — ce dernier est
-/// écarté pour la faune (six biais mesurés, voir `update_herds`). Même principe
-/// que l'ancrage de l'immigration, des feux et de la météo : on ne simule que
-/// ce que quelqu'un peut voir.
-///
-/// 8 km : deux fois le rayon maximal d'immigration (un troupeau né au bord
-/// n'est pas retiré aussitôt), quatre fois la portée de vue d'un chasseur.
-pub const FAUNA_PERIMETER_TILES: f64 = km_to_tiles(8.0);
-
-/// Le point `pos` est-il hors du périmètre de tout humain ? Fonction pure. Un
-/// monde **sans** humain n'a pas de périmètre (personne pour ancrer quoi que ce
-/// soit) : l'appelant ne l'invoque pas.
-pub fn beyond_perimeter(pos: (f64, f64), humans: &[(f64, f64)]) -> bool {
-    let r2 = FAUNA_PERIMETER_TILES * FAUNA_PERIMETER_TILES;
-    !humans.iter().any(|h| (h.0 - pos.0).powi(2) + (h.1 - pos.1).powi(2) <= r2)
-}
-
 /// Chance qu'un site candidat soit tenté par jour (indépendante du succès :
 /// la plupart des tentatives échouent simplement le test de distance dans
 /// une zone déjà giboyeuse — voir plus bas pourquoi c'est voulu).
