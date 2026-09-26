@@ -123,6 +123,15 @@ struct Sample {
     /// Distinguer « la simulation a plus de travail » de « le store rame » sans
     /// ce chiffre relevait de la divination.
     regen_per_day: f64,
+    /// **L'aire occupée** : nombre de mailles de `ZONE_KM` de côté contenant au
+    /// moins un troupeau. Une densité bornée ne borne pas un effectif si l'aire
+    /// grandit — et c'est l'aire, contre la capacité du store, qui fixe le
+    /// coût (M2-faune). Compter des mailles plutôt qu'un rayon : le rayon
+    /// quadratique moyen (`density`) est tiré par un seul troupeau égaré.
+    zones: usize,
+    /// Distance **médiane** des troupeaux à leur centroïde, en km — la mesure
+    /// d'étendue robuste aux égarés.
+    median_km: f64,
 }
 
 const SAMPLE_DAYS: u64 = 5;
@@ -259,8 +268,8 @@ fn main() {
     println!("  relevé tous les {SAMPLE_DAYS} j");
     println!("╚═════════════════════════════════════════════════════════════════════╝\n");
     println!(
-        "{:>5} {:>7} {:>8} {:>7} {:>8} {:>8} {:>8} {:>7} {:>8} {:>6} {:>9} {:>9} {:>8} {:>7}",
-        "jour", "troup.", "têtes", "meutes", "préd.", "trp/km²", "prises", "loin%", "disp.km", "pop", "regen/j", "marquées", "sur-cap", "tps"
+        "{:>5} {:>7} {:>8} {:>7} {:>8} {:>8} {:>8} {:>7} {:>8} {:>6} {:>9} {:>9} {:>8} {:>7} {:>6} {:>7}",
+        "jour", "troup.", "têtes", "meutes", "préd.", "trp/km²", "prises", "loin%", "disp.km", "pop", "regen/j", "marquées", "sur-cap", "tps", "zones", "méd.km"
     );
     let _ = std::io::stdout().flush();
 
@@ -326,6 +335,7 @@ fn main() {
         // des paramètres de départ : la faune migre, et c'est la densité du
         // moment qui gouverne la rencontre.
         let density = herd_density(&sim, herds);
+        let (zones, median_km) = herd_extent(&sim);
         let buckets = herds_by_distance(&sim);
         let far_pct = if herds == 0 {
             0.0
@@ -347,6 +357,8 @@ fn main() {
             regen_per_day,
             density,
             far_pct,
+            zones,
+            median_km,
             // `pred_ticks` compte des prédateurs-ticks ; ramené au jour, c'est
             // le nombre de prédateurs-jours sur la fenêtre.
             kills_per_pred_day: if pred_ticks > 0.0 {
@@ -358,7 +370,7 @@ fn main() {
         kills_window = 0.0;
         pred_ticks = 0.0;
         println!(
-            "{:>5} {:>7} {:>8.0} {:>7} {:>8.0} {:>8.2} {:>8.3} {:>6.0} {:>8.1} {:>6} {:>9.0} {:>9} {:>8} {:>7.1}",
+            "{:>5} {:>7} {:>8.0} {:>7} {:>8.0} {:>8.2} {:>8.3} {:>6.0} {:>8.1} {:>6} {:>9.0} {:>9} {:>8} {:>7.1} {:>6} {:>7.2}",
             s.day,
             s.herds,
             s.head,
@@ -372,7 +384,9 @@ fn main() {
             s.regen_per_day,
             s.marquees,
             s.sur_cap,
-            s.tps
+            s.tps,
+            s.zones,
+            s.median_km
         );
         // Un banc qui tourne des dizaines de minutes doit être lisible *pendant*
         // qu'il tourne : sans ce vidage, la sortie reste bloquée dans le tampon
@@ -841,6 +855,29 @@ fn herd_density(sim: &Sim, herds: usize) -> f64 {
     herds as f64 / area
 }
 
+/// Côté des mailles qui comptent l'aire occupée : l'échelle du domaine vital
+/// mesuré (1,5 km net sur 15 j) et du recensement de M1-faune.
+const ZONE_KM: f64 = 2.0;
+
+/// (mailles occupées, distance médiane au centroïde en km).
+fn herd_extent(sim: &Sim) -> (usize, f64) {
+    let side = km_to_tiles(ZONE_KM);
+    let pos: Vec<(f64, f64)> =
+        sim.fauna.query::<(&Herd, &Position)>().iter().map(|(_, (_, p))| (p.x, p.y)).collect();
+    if pos.is_empty() {
+        return (0, 0.0);
+    }
+    let zones: std::collections::BTreeSet<(i64, i64)> = pos
+        .iter()
+        .map(|p| ((p.0 / side).floor() as i64, (p.1 / side).floor() as i64))
+        .collect();
+    let n = pos.len() as f64;
+    let c = (pos.iter().map(|p| p.0).sum::<f64>() / n, pos.iter().map(|p| p.1).sum::<f64>() / n);
+    let mut d: Vec<f64> = pos.iter().map(|p| (p.0 - c.0).hypot(p.1 - c.1)).collect();
+    d.sort_by(|a, b| a.total_cmp(b));
+    (zones.len(), tiles_to_km(d[d.len() / 2]))
+}
+
 /// Répartition des troupeaux par distance au plus proche humain.
 ///
 /// **La mesure qui arbitre le LOD.** Un humain ne perçoit un troupeau qu'à
@@ -998,6 +1035,8 @@ fn verdict(samples: &[Sample], elapsed_s: f64, days: u64) {
         ("tuiles marquées", &|s: &Sample| s.marquees as f64, true),
         ("tuiles sur-cap", &|s: &Sample| s.sur_cap as f64, true),
         ("dispersion (km)", &|s: &Sample| s.spread_km, true),
+        ("aire (mailles)", &|s: &Sample| s.zones as f64, true),
+        ("rayon médian km", &|s: &Sample| s.median_km, true),
         ("population", &|s: &Sample| s.pop as f64, false),
     ] {
         let (min3, med3, max3) = stats(q3, f);
