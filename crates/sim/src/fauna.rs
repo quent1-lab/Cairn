@@ -72,6 +72,113 @@ const PRED_CONV: f32 = 0.55;
 /// Mortalité de fond des prédateurs, par jour.
 const PRED_DEATH_PER_DAY: f32 = 0.020;
 
+// — Capacité de charge : le domaine vital (chantier de dérive, étape 4) —
+//
+// La satiété de pâture (`satiation_from_forage`) ne freine à aucune densité :
+// mesuré sur 4 seeds (M1-faune), un troupeau trouve toujours une tuile pleine,
+// parce qu'une tête consomme 24 unités par jour quand une tuile de forêt en
+// repousse 4,2 — ce qui porte la capacité implicite à ~44 000 têtes/km², mille
+// fois celle d'une forêt réelle. La natalité montait donc au plafond partout.
+//
+// Le frein vient d'une seconde satiété, lue à l'échelle où un troupeau vit :
+// une **maille de 2 km** (domaine vital mesuré : 1,5 km net sur 15 j). Sa
+// production de fourrage se lit dans le **biome** — pas dans le store, qui est
+// le coût mesuré de la faune (M2-faune) — et sa demande est la somme des
+// rations des têtes qui y paissent, toutes espèces confondues (elles se
+// disputent le même fourrage). Aucune capacité n'est écrite : elle émerge du
+// rapport entre ce que le pays produit et ce que les bêtes mangent, deux
+// grandeurs réelles.
+
+/// Côté de la maille de pâturage, en tuiles (2 km).
+pub const RANGE_ZONE_TILES: f64 = km_to_tiles(2.0);
+
+/// Aire d'une maille, en km².
+const RANGE_ZONE_KM2: f32 = 4.0;
+
+/// Échantillons par côté pour estimer la production d'une maille (4 × 4, un
+/// tous les 500 m). Le biome varie à l'échelle du kilomètre ; seize lectures
+/// du worldgen par maille, une seule fois (mise en cache), suffisent.
+const RANGE_ZONE_SAMPLES: i64 = 4;
+
+/// g/m²/an → kg/km²/jour (10⁶ m²/km², 10⁻³ kg/g, 365 j/an).
+const G_M2_YR_TO_KG_KM2_DAY: f32 = 1000.0 / 365.0;
+
+/// Fourrage **accessible aux herbivores**, en grammes de matière sèche par m²
+/// et par an : productivité primaire nette du biome × part que les grands
+/// herbivores peuvent en brouter. Ordres de grandeur de la littérature
+/// (productivité : Whittaker & Likens ; part broutée : ~5 % en forêt, où
+/// l'essentiel est du bois hors d'atteinte, ~20-30 % dans les milieux
+/// herbacés), retenus comme point de départ, pas comme mesure.
+pub fn accessible_forage_g_m2_yr(biome: Biome) -> f32 {
+    use Biome::*;
+    match biome {
+        Ocean | Coast | Glacier => 0.0,
+        HotDesert | ColdDesert => 9.0,  // ~90 × 10 %
+        Tundra => 28.0,                 // ~140 × 20 %
+        Taiga => 40.0,                  // ~800 × 5 %
+        TemperateForest => 60.0,        // ~1 200 × 5 %
+        Steppe => 100.0,                // ~350 × 30 %
+        TropicalForest => 110.0,        // ~2 200 × 5 %
+        Grassland => 180.0,             // ~600 × 30 %
+        Savanna => 270.0,               // ~900 × 30 %
+    }
+}
+
+/// La maille de pâturage qui contient `pos`.
+pub fn range_zone(pos: (f64, f64)) -> (i64, i64) {
+    (
+        (pos.0 / RANGE_ZONE_TILES).floor() as i64,
+        (pos.1 / RANGE_ZONE_TILES).floor() as i64,
+    )
+}
+
+/// Satiété que la maille peut offrir : **0,5 × production / demande**. Le
+/// facteur est la satiété d'équilibre, si bien que la natalité compense
+/// exactement la mortalité quand la demande égale la production — l'effectif
+/// d'équilibre est la capacité du pays, pas le double. Non bornée à 1 : c'est
+/// la satiété de pâture qui plafonne quand le pays est vide.
+pub fn zone_satiation(production_kg: f32, demand_kg: f32) -> f32 {
+    if demand_kg <= 0.0 {
+        return f32::MAX;
+    }
+    HERB_SATIATION_EQUILIBRIUM * production_kg / demand_kg
+}
+
+/// Production de fourrage des mailles de pâturage, en kg/jour. Fonction pure
+/// du worldgen, donc mise en cache sans effet sur la trajectoire : le cache ne
+/// fait qu'éviter de relire seize fois le biome à chaque tick.
+#[derive(Default)]
+pub struct Rangeland {
+    production: std::collections::BTreeMap<(i64, i64), f32>,
+}
+
+impl Rangeland {
+    pub fn production(&mut self, worldgen: &cairn_worldgen::WorldGen, zone: (i64, i64)) -> f32 {
+        *self.production.entry(zone).or_insert_with(|| {
+            let step = RANGE_ZONE_TILES / RANGE_ZONE_SAMPLES as f64;
+            let mut sum = 0.0f32;
+            for j in 0..RANGE_ZONE_SAMPLES {
+                for i in 0..RANGE_ZONE_SAMPLES {
+                    let x = zone.0 as f64 * RANGE_ZONE_TILES + (i as f64 + 0.5) * step;
+                    let y = zone.1 as f64 * RANGE_ZONE_TILES + (j as f64 + 0.5) * step;
+                    sum += accessible_forage_g_m2_yr(worldgen.biome(x as i64, y as i64));
+                }
+            }
+            let mean = sum / (RANGE_ZONE_SAMPLES * RANGE_ZONE_SAMPLES) as f32;
+            mean * G_M2_YR_TO_KG_KM2_DAY * RANGE_ZONE_KM2
+        })
+    }
+
+    /// Mailles déjà évaluées (taille du cache).
+    pub fn len(&self) -> usize {
+        self.production.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.production.is_empty()
+    }
+}
+
 // — Déplacements (tuiles par tick, soit par heure) —
 
 /// Dérive d'un troupeau qui broute : ~80 m/h, un pâturage qui avance.
@@ -196,6 +303,19 @@ impl Species {
                 Grassland | Steppe | Savanna | TemperateForest | TropicalForest | Taiga => 0.6,
                 _ => 0.35,
             }
+        }
+    }
+
+    /// Ration quotidienne d'une tête, en kg de matière sèche : l'ordre de
+    /// grandeur réel (~2-3 % de la masse corporelle). Cerf ~120 kg, aurochs
+    /// ~700 kg, gazelle ~25 kg, renne ~100 kg. Nulle pour un prédateur : il ne
+    /// broute pas.
+    pub fn daily_ration_kg(self) -> f32 {
+        match self {
+            Species::Deer | Species::Reindeer => 3.0,
+            Species::Aurochs => 12.0,
+            Species::Gazelle => 1.0,
+            Species::Wolf | Species::CaveLion => 0.0,
         }
     }
 
@@ -594,6 +714,7 @@ fn migration_heading(world: &mut World, climate: &Climate, pos: (f64, f64), time
 /// `threats` = positions des humains et des meutes (tout ce qui fait fuir).
 /// Renvoie les entités à retirer et les scissions à créer — les mutations
 /// structurelles se font hors itération.
+#[allow(clippy::too_many_arguments)]
 pub fn update_herds(
     fauna: &mut hecs::World,
     world: &mut World,
@@ -602,6 +723,7 @@ pub fn update_herds(
     seed: WorldSeed,
     threats: &[(f64, f64)],
     stats: &mut FaunaStats,
+    range: &mut Rangeland,
 ) -> (Vec<hecs::Entity>, Vec<Fission>) {
     // Sans la feature, `stats` est un type vide : le paramètre ne coûte rien et
     // évite une seconde signature.
@@ -610,7 +732,21 @@ pub fn update_herds(
     let mut doomed = Vec::new();
     let mut fissions = Vec::new();
     #[cfg(feature = "profile")]
-    let mut prof = [0u64; 3];
+    let mut prof = [0u64; 4];
+
+    // La demande de chaque maille, sur l'état du début du tour : toutes les
+    // têtes qui y paissent, chacune à sa ration.
+    #[cfg(feature = "profile")]
+    let t0 = std::time::Instant::now();
+    let mut demand: std::collections::BTreeMap<(i64, i64), f32> = std::collections::BTreeMap::new();
+    for (_, (herd, pos)) in fauna.query::<(&Herd, &Position)>().iter() {
+        *demand.entry(range_zone((pos.x, pos.y))).or_insert(0.0) +=
+            herd.population * herd.species.daily_ration_kg();
+    }
+    #[cfg(feature = "profile")]
+    {
+        prof[3] += t0.elapsed().as_nanos() as u64;
+    }
 
     for (entity, (id, herd, pos)) in fauna.query_mut::<(&FaunaId, &mut Herd, &mut Position)>() {
         // — Pas de LOD sur les troupeaux. —
@@ -691,6 +827,21 @@ pub fn update_herds(
             #[cfg(feature = "profile")]
             {
                 prof[1] += t0.elapsed().as_nanos() as u64;
+            }
+            // Le pays, ensuite : la plus rare des deux satiétés commande. Une
+            // tuile pleine ne nourrit pas un troupeau dont la maille est
+            // surpeuplée.
+            #[cfg(feature = "profile")]
+            let t0 = std::time::Instant::now();
+            let zone = range_zone((pos.x, pos.y));
+            let zone_sat = zone_satiation(
+                range.production(world.worldgen(), zone),
+                demand.get(&zone).copied().unwrap_or(0.0),
+            );
+            herd.satiation = herd.satiation.min(zone_sat);
+            #[cfg(feature = "profile")]
+            {
+                prof[3] += t0.elapsed().as_nanos() as u64;
             }
 
             // — Mesure du fourrage. Bloc sous `cfg` et non appel no-op, parce
@@ -797,12 +948,14 @@ pub fn update_herds(
 /// Chronométrage interne de [`update_herds`] (M2-faune), sous `profile` :
 /// nanosecondes cumulées de la fuite (`nearest_threat`, balaie meutes +
 /// humains), de la pâture (`best_pasture` et la lecture de la tuile) et du
-/// broutage (`graze`, écritures). Le reste du tour — déplacements,
+/// broutage (`graze`, écritures) et de la satiété de maille (demande et
+/// production, étape 4). Le reste du tour — déplacements,
 /// démographie — s'obtient par différence avec la phase « 4d troupeaux ».
 /// Des atomiques plutôt qu'un paramètre : `fauna` ne connaît pas le profileur
 /// de `Sim`, et la simulation est mono-fil.
 #[cfg(feature = "profile")]
-pub static HERD_PROF: [std::sync::atomic::AtomicU64; 3] = [
+pub static HERD_PROF: [std::sync::atomic::AtomicU64; 4] = [
+    std::sync::atomic::AtomicU64::new(0),
     std::sync::atomic::AtomicU64::new(0),
     std::sync::atomic::AtomicU64::new(0),
     std::sync::atomic::AtomicU64::new(0),

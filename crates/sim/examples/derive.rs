@@ -436,7 +436,7 @@ fn write_daily(daily: &[(u64, f64, f64, usize, f64, usize)], seed: u64) {
 #[cfg(feature = "profile")]
 struct ProfDaily {
     prev: std::collections::BTreeMap<&'static str, u128>,
-    prev_herd: [u64; 3],
+    prev_herd: [u64; 4],
     prev_gen: u64,
     t: Instant,
     rows: Vec<String>,
@@ -460,7 +460,7 @@ impl ProfDaily {
         }
     }
 
-    fn herd_ns() -> [u64; 3] {
+    fn herd_ns() -> [u64; 4] {
         fauna::HERD_PROF.each_ref().map(|a| a.load(std::sync::atomic::Ordering::Relaxed))
     }
 
@@ -483,8 +483,8 @@ impl ProfDaily {
         for name in Self::PHASES {
             row += &format!(",{:.1}", ms(name, &now));
         }
-        for i in 0..3 {
-            row += &format!(",{:.1}", (herd[i] - self.prev_herd[i]) as f64 / 1e6);
+        for (now, prev) in herd.iter().zip(self.prev_herd) {
+            row += &format!(",{:.1}", (now - prev) as f64 / 1e6);
         }
         self.rows.push(row);
         self.prev = now;
@@ -498,7 +498,7 @@ impl ProfDaily {
         let mut out = String::from(
             "jour,troupeaux,meutes,predateurs,humains,tetes,regen,mur_ms,phases_ms,\
              deliberation,meutes_ms,prises,menaces,troupeaux_ms,immigration,ecologie,\
-             fuite,pature,broutage\n",
+             fuite,pature,broutage,zone\n",
         );
         for r in &self.rows {
             out += r;

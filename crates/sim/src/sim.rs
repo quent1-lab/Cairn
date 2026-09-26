@@ -276,6 +276,9 @@ pub struct Sim {
     /// toujours ; c'est le **type** qui est vide hors de la feature
     /// `fauna-stats`, ce qui évite de semer des `cfg` sur chaque site d'appel.
     pub fauna_stats: crate::fauna::FaunaStats,
+    /// Production de fourrage des mailles de pâturage (cache pur du worldgen,
+    /// voir `fauna::Rangeland`).
+    pub rangeland: crate::fauna::Rangeland,
     /// L'immigration de gibier (`fauna::daily_immigration`) est-elle active
     /// pour cette simulation ? Vrai par défaut (le monde est censé être
     /// habité) ; les scènes de test qui veulent isoler une mécanique de
@@ -409,6 +412,7 @@ impl Sim {
             #[cfg(feature = "profile")]
             prof: Profiler::default(),
             fauna_stats: Default::default(),
+            rangeland: Default::default(),
             allow_fauna_immigration: true,
             next_agent_id: 0,
             next_fauna_id: 0,
@@ -1200,6 +1204,7 @@ impl Sim {
             seed,
             &threats,
             &mut self.fauna_stats,
+            &mut self.rangeland,
         );
         for entity in dead_herds {
             let _ = self.fauna.despawn(entity);
@@ -1865,6 +1870,49 @@ mod tests {
             );
         }
         (sim, home)
+    }
+
+    /// Critère de l'étape 4 du chantier de dérive : **un pays surpeuplé ne fait
+    /// pas croître ses troupeaux**. Tous les troupeaux au centre d'une même
+    /// maille de pâturage, dix fois plus de bouches que sa production n'en
+    /// nourrit (quel que soit le biome tiré : l'effectif se règle sur la
+    /// production mesurée de la maille), sans prédateur ni humain. Sans
+    /// densité-dépendance, M1-faune a mesuré que la pâture ne freine à aucune
+    /// densité : l'effectif monte au plafond de 0,010/j. Ici, il doit baisser.
+    #[test]
+    fn un_pays_surpeuple_ne_fait_pas_croitre_ses_troupeaux() {
+        let (mut sim, home) = scenario_setup(11, 0, 0);
+        let side = fauna::RANGE_ZONE_TILES;
+        let zone = fauna::range_zone((home.0 as f64, home.1 as f64));
+        let center = ((zone.0 as f64 + 0.5) * side, (zone.1 as f64 + 0.5) * side);
+        let species = fauna::Species::herbivore_for_biome(
+            sim.world.worldgen().biome(center.0 as i64, center.1 as i64),
+            &mut Pcg32::new(1, 1),
+        );
+        let production = sim.rangeland.production(sim.world.worldgen(), zone);
+        let heads_needed = 10.0 * production / species.daily_ration_kg();
+        let herds = (heads_needed / 80.0).ceil().max(1.0) as usize;
+        for i in 0..herds {
+            let angle = i as f64 * 0.9;
+            let r = 20.0 + (i % 10) as f64 * 25.0; // ≤ 250 tuiles du centre
+            let (x, y) = (center.0 + angle.cos() * r, center.1 + angle.sin() * r);
+            if sim.world.tile(x as i64, y as i64).is_walkable() {
+                sim.spawn_herd_species(x, y, 80.0, species);
+            }
+        }
+        let heads = |sim: &Sim| -> f32 { sim.fauna.query::<&Herd>().iter().map(|(_, h)| h.population).sum() };
+        let before = heads(&sim);
+        assert!(before >= 0.9 * heads_needed, "semis incomplet : {before:.0} têtes sur {heads_needed:.0}");
+        for _ in 0..20 * TICKS_PER_DAY {
+            sim.step();
+        }
+        let after = heads(&sim);
+        assert!(
+            after < before,
+            "{before:.0} {species:?} pour une maille qui en nourrit {:.0} ont crû jusqu'à {after:.0} \
+             en 20 jours : rien ne freine la natalité quand le pays est surpeuplé",
+            production / species.daily_ration_kg()
+        );
     }
 
     /// La ligne droite entre `a` et `b` traverse-t-elle de l'eau ? (échantillon
