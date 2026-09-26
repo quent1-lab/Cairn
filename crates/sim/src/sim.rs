@@ -279,9 +279,11 @@ pub struct Sim {
     /// Production de fourrage des mailles de pâturage (cache pur du worldgen,
     /// voir `fauna::Rangeland`).
     pub rangeland: crate::fauna::Rangeland,
-    /// L'immigration de gibier (`fauna::daily_immigration`) est-elle active
-    /// pour cette simulation ? Vrai par défaut (le monde est censé être
-    /// habité) ; les scènes de test qui veulent isoler une mécanique de
+    /// Le monde est-il **ouvert** aux flux de faune ? L'immigration de gibier
+    /// et de prédateurs (`fauna::daily_immigration`), et son pendant sortant,
+    /// le périmètre (`fauna::FAUNA_PERIMETER_TILES` : le gibier sauvage hors de
+    /// vue de tout humain quitte la simulation). Vrai par défaut (le monde est
+    /// censé être habité) ; les scènes de test qui veulent isoler une mécanique de
     /// toute interférence de faune le mettent à faux explicitement — voir
     /// `sim::tests::scenario_setup`. Ce n'est plus déduit indirectement
     /// (l'ancienne garde `hunted_head > 0` ne se déclenchait jamais si la
@@ -1236,6 +1238,24 @@ impl Sim {
         // d'exécution, pas une heuristique déduite de l'état de la sim.
         if time.tick.is_multiple_of(TICKS_PER_DAY) && self.allow_fauna_immigration {
             let human_positions: Vec<(f64, f64)> = humans.iter().map(|h| h.pos).collect();
+            // Le flux sortant, d'abord (chantier de dérive, D) : le gibier
+            // sauvage hors de vue de tout humain quitte la simulation, comme
+            // il y entre près d'un humain. Le cheptel domestiqué appartient à
+            // un clan : il reste, où qu'il soit.
+            if !human_positions.is_empty() {
+                let gone: Vec<hecs::Entity> = self
+                    .fauna
+                    .query::<(&Herd, &Position)>()
+                    .iter()
+                    .filter(|(_, (h, p))| {
+                        h.anchor.is_none() && fauna::beyond_perimeter((p.x, p.y), &human_positions)
+                    })
+                    .map(|(e, _)| e)
+                    .collect();
+                for e in gone {
+                    let _ = self.fauna.despawn(e);
+                }
+            }
             let herd_positions: Vec<(f64, f64)> = self
                 .fauna
                 .query::<(&Herd, &Position)>()
@@ -1912,6 +1932,39 @@ mod tests {
             "{before:.0} {species:?} pour une maille qui en nourrit {:.0} ont crû jusqu'à {after:.0} \
              en 20 jours : rien ne freine la natalité quand le pays est surpeuplé",
             production / species.daily_ration_kg()
+        );
+    }
+
+    /// Chantier de dérive, D : **la faune n'est simulée que là où quelqu'un
+    /// peut la voir**. Un troupeau sauvage à 20 km du seul humain sort de la
+    /// simulation dans la journée ; un troupeau à 2 km reste. Sans ce
+    /// périmètre, mesuré sur `derive` : 18 → 310 mailles occupées en 600
+    /// jours, débit 70 → 2 tps.
+    #[test]
+    fn un_troupeau_hors_de_vue_de_tout_humain_sort_de_la_simulation() {
+        let (mut sim, home) = scenario_setup(5, 1, 0);
+        sim.allow_fauna_immigration = true; // le monde ouvert : flux entrant et sortant
+        let land_near = |sim: &mut Sim, dx: f64| -> (f64, f64) {
+            for k in 0..400 {
+                let (x, y) = (home.0 as f64 + dx + (k % 20) as f64 * 50.0, home.1 as f64 + (k / 20) as f64 * 50.0);
+                if sim.world.tile(x as i64, y as i64).is_walkable() {
+                    return (x, y);
+                }
+            }
+            panic!("pas de terre près de {dx}");
+        };
+        let (nx, ny) = land_near(&mut sim, cairn_core::km_to_tiles(2.0));
+        let (fx, fy) = land_near(&mut sim, cairn_core::km_to_tiles(20.0));
+        let proche = sim.spawn_herd(nx, ny, 40.0);
+        let lointain = sim.spawn_herd(fx, fy, 40.0);
+        for _ in 0..TICKS_PER_DAY + 1 {
+            sim.step();
+        }
+        let vivants: Vec<FaunaId> = sim.fauna.query::<(&FaunaId, &Herd)>().iter().map(|(_, (id, _))| *id).collect();
+        assert!(vivants.contains(&proche), "le troupeau à 2 km d'un humain doit rester simulé");
+        assert!(
+            !vivants.contains(&lointain),
+            "un troupeau à 20 km de tout humain est encore simulé : l'aire de la faune n'a pas de borne"
         );
     }
 
