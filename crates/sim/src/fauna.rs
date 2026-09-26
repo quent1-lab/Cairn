@@ -609,6 +609,8 @@ pub fn update_herds(
     let tick_seed = seed.derive(salt::FAUNA) ^ splitmix64(time.tick);
     let mut doomed = Vec::new();
     let mut fissions = Vec::new();
+    #[cfg(feature = "profile")]
+    let mut prof = [0u64; 3];
 
     for (entity, (id, herd, pos)) in fauna.query_mut::<(&FaunaId, &mut Herd, &mut Position)>() {
         // — Pas de LOD sur les troupeaux. —
@@ -645,7 +647,13 @@ pub fn update_herds(
 
         // — Fuite : elle prime sur tout le reste, y compris la faim — mais
         //   seulement si la bête a encore du souffle.
+        #[cfg(feature = "profile")]
+        let t0 = std::time::Instant::now();
         let threat = nearest_threat((pos.x, pos.y), threats, herd.species.flee_radius());
+        #[cfg(feature = "profile")]
+        {
+            prof[0] += t0.elapsed().as_nanos() as u64;
+        }
         let bolting = match threat {
             Some(t) if herd.flee_ticks == 0 => {
                 herd.state = HerdState::Fleeing;
@@ -668,6 +676,8 @@ pub fn update_herds(
             //   pas la migration, il pousse simplement le troupeau vers le
             //   voisin le plus vert. Une zone entièrement broutée fait donc
             //   fondre puis dériver le troupeau, sans stampede.
+            #[cfg(feature = "profile")]
+            let t0 = std::time::Instant::now();
             let (target, biomass) = best_pasture(world, &mut rng, (pos.x, pos.y), stats);
             // La satiété = l'herbe trouvée, PONDÉRÉE par l'adéquation du biome
             // à l'espèce (un cerf en plein désert broute mal) — c'est ce qui
@@ -678,6 +688,10 @@ pub fn update_herds(
                 crate::ecology::effective_capacity(&here_tile),
                 herd.species.habitat_factor(here_tile.biome),
             );
+            #[cfg(feature = "profile")]
+            {
+                prof[1] += t0.elapsed().as_nanos() as u64;
+            }
 
             // — Mesure du fourrage. Bloc sous `cfg` et non appel no-op, parce
             //   qu'il faut relire la tuile d'où vient l'herbe pour connaître sa
@@ -712,7 +726,13 @@ pub fn update_herds(
                         try_move(world, pos, (dx / len, dy / len), GRAZE_STEP_TILES.min(len));
                     }
                 }
+                #[cfg(feature = "profile")]
+                let t0 = std::time::Instant::now();
                 graze(world, (pos.x, pos.y), herd.population);
+                #[cfg(feature = "profile")]
+                {
+                    prof[2] += t0.elapsed().as_nanos() as u64;
+                }
             } else if winter {
                 // Seul l'hiver — la pâture gelée sur toute la bande — met le
                 // troupeau en route vers le chaud. Lentement.
@@ -731,7 +751,13 @@ pub fn update_herds(
                 if len > 1e-6 {
                     try_move(world, pos, (dx / len, dy / len), GRAZE_STEP_TILES.min(len));
                 }
+                #[cfg(feature = "profile")]
+                let t0 = std::time::Instant::now();
                 graze(world, (pos.x, pos.y), herd.population);
+                #[cfg(feature = "profile")]
+                {
+                    prof[2] += t0.elapsed().as_nanos() as u64;
+                }
             }
         }
 
@@ -761,8 +787,26 @@ pub fn update_herds(
             ));
         }
     }
+    #[cfg(feature = "profile")]
+    for (acc, ns) in HERD_PROF.iter().zip(prof) {
+        acc.fetch_add(ns, std::sync::atomic::Ordering::Relaxed);
+    }
     (doomed, fissions)
 }
+
+/// Chronométrage interne de [`update_herds`] (M2-faune), sous `profile` :
+/// nanosecondes cumulées de la fuite (`nearest_threat`, balaie meutes +
+/// humains), de la pâture (`best_pasture` et la lecture de la tuile) et du
+/// broutage (`graze`, écritures). Le reste du tour — déplacements,
+/// démographie — s'obtient par différence avec la phase « 4d troupeaux ».
+/// Des atomiques plutôt qu'un paramètre : `fauna` ne connaît pas le profileur
+/// de `Sim`, et la simulation est mono-fil.
+#[cfg(feature = "profile")]
+pub static HERD_PROF: [std::sync::atomic::AtomicU64; 3] = [
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+];
 
 /// Le troupeau broute : la tuile sous lui et ses quatre voisines. C'est ce
 /// qui laisse une traînée pâturée visible, et ce qui fait qu'un troupeau trop

@@ -280,6 +280,8 @@ fn main() {
     //   rapport qu'on lit pendant qu'il tourne. —
     let mut daily: Vec<(u64, f64, f64, usize, f64, usize)> = Vec::new();
     let mut kills_day = 0.0f64;
+    #[cfg(feature = "profile")]
+    let mut prof_daily = ProfDaily::new(&sim);
 
     for day in 1..=days {
         for _ in 0..TICKS_PER_DAY {
@@ -300,6 +302,8 @@ fn main() {
             let (head, predators, herds, packs) = census(&sim);
             daily.push((day, kills_day, f64::from(predators), packs, f64::from(head), herds));
             kills_day = 0.0;
+            #[cfg(feature = "profile")]
+            prof_daily.record(&sim, day, herds, packs, predators, head);
         }
         if !day.is_multiple_of(SAMPLE_DAYS) {
             continue;
@@ -386,6 +390,8 @@ fn main() {
 
     verdict(&samples, t_start.elapsed().as_secs_f64(), days);
     write_daily(&daily, seed);
+    #[cfg(feature = "profile")]
+    prof_daily.write(seed);
     fauna_stats_report(&sim);
     profile_report(&sim);
     utilization_report(&sim);
@@ -405,6 +411,89 @@ fn write_daily(daily: &[(u64, f64, f64, usize, f64, usize)], seed: u64) {
     match std::fs::write(&path, out) {
         Ok(()) => println!("\n  série quotidienne → {path}"),
         Err(e) => println!("\n  (série quotidienne non écrite : {e})"),
+    }
+}
+
+/// M2-faune — le coût **par jour** de chaque phase, apparié aux effectifs du
+/// jour. Le profil cumulé dit *où* passe le temps ; seule la série dit
+/// *comment il croît* avec l'effectif — une régression du temps des troupeaux
+/// sur H et H·(P+A) départage « coût par troupeau constant » de « coût par
+/// troupeau qui croît avec les voisins ».
+#[cfg(feature = "profile")]
+struct ProfDaily {
+    prev: std::collections::BTreeMap<&'static str, u128>,
+    prev_herd: [u64; 3],
+    prev_gen: u64,
+    t: Instant,
+    rows: Vec<String>,
+}
+
+#[cfg(feature = "profile")]
+impl ProfDaily {
+    /// Les phases relevées, dans l'ordre des colonnes du CSV.
+    const PHASES: [&'static str; 7] = [
+        "1 deliberation", "4a meutes", "4b prises", "4c menaces", "4d troupeaux",
+        "4b immigration", "5 ecologie",
+    ];
+
+    fn new(sim: &Sim) -> Self {
+        Self {
+            prev: sim.prof.rows.iter().map(|(k, v)| (*k, v.0)).collect(),
+            prev_herd: Self::herd_ns(),
+            prev_gen: sim.world.generated,
+            t: Instant::now(),
+            rows: Vec::new(),
+        }
+    }
+
+    fn herd_ns() -> [u64; 3] {
+        fauna::HERD_PROF.each_ref().map(|a| a.load(std::sync::atomic::Ordering::Relaxed))
+    }
+
+    fn record(&mut self, sim: &Sim, day: u64, herds: usize, packs: usize, pred: f32, head: f32) {
+        let now: std::collections::BTreeMap<&'static str, u128> =
+            sim.prof.rows.iter().map(|(k, v)| (*k, v.0)).collect();
+        let ms = |name: &str, now: &std::collections::BTreeMap<&'static str, u128>| {
+            let a = now.get(name).copied().unwrap_or(0);
+            let b = self.prev.get(name).copied().unwrap_or(0);
+            (a - b) as f64 / 1e6
+        };
+        let total: f64 = now.keys().map(|k| ms(k, &now)).sum();
+        let herd = Self::herd_ns();
+        let mut row = format!(
+            "{day},{herds},{packs},{pred:.1},{},{head:.0},{},{:.1},{total:.1}",
+            sim.population(),
+            sim.world.generated - self.prev_gen,
+            self.t.elapsed().as_secs_f64() * 1e3,
+        );
+        for name in Self::PHASES {
+            row += &format!(",{:.1}", ms(name, &now));
+        }
+        for i in 0..3 {
+            row += &format!(",{:.1}", (herd[i] - self.prev_herd[i]) as f64 / 1e6);
+        }
+        self.rows.push(row);
+        self.prev = now;
+        self.prev_herd = herd;
+        self.prev_gen = sim.world.generated;
+        self.t = Instant::now();
+    }
+
+    fn write(&self, seed: u64) {
+        let path = format!("out/derive_prof_{seed}.csv");
+        let mut out = String::from(
+            "jour,troupeaux,meutes,predateurs,humains,tetes,regen,mur_ms,phases_ms,\
+             deliberation,meutes_ms,prises,menaces,troupeaux_ms,immigration,ecologie,\
+             fuite,pature,broutage\n",
+        );
+        for r in &self.rows {
+            out += r;
+            out.push('\n');
+        }
+        match std::fs::write(&path, out) {
+            Ok(()) => println!("  profil quotidien → {path}"),
+            Err(e) => println!("  (profil quotidien non écrit : {e})"),
+        }
     }
 }
 

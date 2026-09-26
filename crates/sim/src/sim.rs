@@ -1151,12 +1151,14 @@ impl Sim {
 
         self.end("3t echanges", _ph);
         // 4. Faune. Les meutes chassent d'abord (sur l'instantané), puis
-        let _ph = phase(); // 4 faune
+        let _ph = phase(); // 4a meutes
         // toutes les prises — prédation et chasse humaine — sont appliquées
         // avant que les troupeaux ne fassent leurs petits : un troupeau
         // décimé ne doit pas engendrer comme s'il était intact.
         let (pred_kills, dead_packs, pack_fissions) =
             fauna::update_packs(&mut self.fauna, &self.world, &herds, &mut self.fauna_stats);
+        self.end("4a meutes", _ph);
+        let _ph = phase(); // 4b prises
         kills.extend(pred_kills);
         fauna::apply_kills(&mut self.fauna, &kills);
         for entity in dead_packs {
@@ -1169,6 +1171,8 @@ impl Sim {
             self.spawn_pack_species(f.pos.0, f.pos.1, f.population, f.species);
         }
 
+        self.end("4b prises", _ph);
+        let _ph = phase(); // 4c menaces
         // Ce qui fait fuir un troupeau : les prédateurs et les hommes.
         let mut threats: Vec<(f64, f64)> = self
             .fauna
@@ -1183,6 +1187,8 @@ impl Sim {
                 .map(|(_, pos)| (pos.x, pos.y)),
         );
 
+        self.end("4c menaces", _ph);
+        let _ph = phase(); // 4d troupeaux
         let seed = self.world.seed();
         // Les positions humaines seules (pas les meutes) : c'est la présence
         // d'un observateur qui décide de la finesse, pas celle d'un prédateur.
@@ -1214,7 +1220,7 @@ impl Sim {
             self.fauna_stats.crowd_census(&census);
         }
 
-        self.end("4 faune", _ph);
+        self.end("4d troupeaux", _ph);
         // 4 bis. Immigration de gibier, quotidienne : sans elle, une zone
         let _ph = phase(); // 4b immigration
         // qui perd tous ses troupeaux (chasse sous `HERD_MIN`, prédation
