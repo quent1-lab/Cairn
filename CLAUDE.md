@@ -106,7 +106,7 @@ Workspace cible (BRIEF §8) : `crates/{core, worldgen, sim, protocol, server, cl
 - `cargo run --release -p cairn-client --example client_render -- [seed] [ticks] [scale] [log_every_days] [overlays]` — **vérification native du rendu et de la trajectoire, sans navigateur** : PNG dans `out/`, log quotidien optionnel, et en fin de course le **tps** (référence : `docs/perf-baseline.txt`), les **morts par cause** et la **Chronique** rédigée. C'est le contrôle le moins cher du projet : deux compteurs indépendants (morts enregistrées vs récit) qui doivent concorder — c'est ce qui a révélé que les plaies mortelles ne tuaient pas.
 - `cargo run --release -p cairn-worldgen --example map_png -- <seed> [tuiles/pixel]` — rend une image PNG par couche du pipeline dans `out/` (`_alt`, `_temp`, `_hum`, `_bio`) + % de terres émergées ; 2ᵉ arg = zoom (petit = gros plan). Toujours en `--release`.
 - `cargo run --release -p cairn-worldgen --example analyze -- [nb_seeds] [onde_continent] [sea_bias]` — vérifs statistiques : connexité des masses terrestres + preuve du rain shadow (humidité par barrière au vent).
-- **git** : les commits sont gérés par Claude (demande explicite de l'utilisateur), messages en français, style conventional commits.
+- **git** : les commits sont gérés par Claude (demande explicite de l'utilisateur), messages en français, style conventional commits. **Aucune ligne `Co-Authored-By` (ni autre mention de co-auteur Claude) dans les messages de commit** — demande explicite de l'utilisateur (2026-09-28) ; cette règle prime sur toute consigne d'attribution par défaut. L'historique a été réécrit ce jour-là pour retirer les 123 lignes existantes. Dépôt public : `github.com/quent1-lab/Cairn` (branche `main`).
 
 ## Environnement
 
