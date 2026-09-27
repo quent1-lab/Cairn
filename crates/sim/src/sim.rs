@@ -1249,11 +1249,14 @@ impl Sim {
         // naissances et fissions — l'état que la veille comparera demain.
         #[cfg(feature = "fauna-stats")]
         if time.tick.is_multiple_of(TICKS_PER_DAY) {
-            let census: Vec<(u64, (f64, f64), f32, f32)> = self
+            let census: Vec<fauna::CensusHerd> = self
                 .fauna
                 .query::<(&fauna::FaunaId, &Herd, &Position)>()
                 .iter()
-                .map(|(_, (id, h, pos))| (id.0, (pos.x, pos.y), h.population, h.satiation))
+                .map(|(_, (id, h, pos))| {
+                    let fleeing = h.state == fauna::HerdState::Fleeing;
+                    (id.0, (pos.x, pos.y), h.population, h.satiation, fleeing)
+                })
                 .collect();
             self.fauna_stats.crowd_census(&census);
         }

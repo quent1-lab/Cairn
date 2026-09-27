@@ -719,6 +719,39 @@ fn fauna_stats_report(sim: &Sim) {
         "\n  Taux réalisé de l'ensemble (pondéré, toutes classes) : {:.4}/j",
         w / wp.max(1e-9)
     );
+    // — Les troupeaux en fuite. Leur satiété n'est pas recalculée pendant la
+    //   fuite : un troupeau toujours menacé garde celle de sa naissance et
+    //   échappe au frein de la maille. On la compare, classe par classe, à
+    //   celle des troupeaux au calme. —
+    println!("\n  ── TROUPEAUX EN FUITE AU RECENSEMENT ──");
+    println!(
+        "{:>12} {:>9} {:>10} {:>12} {:>12}",
+        "têtes/2 km", "fuite %", "têtes %", "sat. fuite", "sat. calme"
+    );
+    let mut bas = 0.0f32;
+    for (i, c) in st.crowd.iter().enumerate() {
+        let haut = cairn_sim::fauna::CROWD_EDGES[i];
+        if c.herd_days > 0 {
+            let label = if haut.is_infinite() { format!("{bas:.0}+") } else { format!("{bas:.0}-{haut:.0}") };
+            let calm = c.herd_days - c.fleeing;
+            println!(
+                "{label:>12} {:>8.1}% {:>9.1}% {:>12.3} {:>12.3}",
+                c.fleeing as f64 / c.herd_days as f64 * 100.0,
+                c.fleeing_pop / c.pop_sum.max(1e-9) * 100.0,
+                c.fleeing_sat_sum / c.fleeing.max(1) as f64,
+                (c.satiation_sum - c.fleeing_sat_sum) / calm.max(1) as f64,
+            );
+        }
+        bas = haut;
+    }
+    let sp = st.streak_pop;
+    let tot: f64 = sp.iter().sum();
+    if tot > 0.0 {
+        println!(
+            "  têtes en fuite, par durée de fuite ininterrompue : 1 j {:.1} % · 2-6 j {:.1} % · 7-29 j {:.1} % · ≥ 30 j {:.1} %",
+            sp[0] / tot * 100.0, sp[1] / tot * 100.0, sp[2] / tot * 100.0, sp[3] / tot * 100.0
+        );
+    }
     println!("  À confronter au taux de la série `tetes` (qui compte en plus les");
     println!("  naissances de troupeaux par immigration et les disparitions).");
     println!("╚═════════════════════════════════════════════════════════════════════╝");

@@ -1158,6 +1158,11 @@ impl FaunaStats {
     pub fn herd_fission(&mut self, _id: u64) {}
 }
 
+/// Un troupeau au recensement quotidien : (identifiant, position, effectif,
+/// satiété, en fuite).
+#[cfg(feature = "fauna-stats")]
+pub type CensusHerd = (u64, (f64, f64), f32, f32, bool);
+
 /// Rayon du recensement de densité autour d'un troupeau (M1-faune) : 2 km, à
 /// l'échelle du domaine vital mesuré (1,5 km net sur 15 j). C'est la zone dont
 /// la pâture nourrit ce troupeau — donc celle où une densité-dépendance, si
@@ -1196,6 +1201,14 @@ pub struct Crowd {
     /// Troupeaux recensés la veille dans cette classe et disparus depuis
     /// (sous `HERD_MIN`) — le réalisé des survivants seuls serait biaisé.
     pub vanished: u64,
+    /// — Les troupeaux EN FUITE au recensement. Leur satiété n'est pas
+    ///   recalculée pendant la fuite : si un troupeau fuit sans cesse, il garde
+    ///   celle de sa naissance (1,0) et échappe au frein de la maille. Ces
+    ///   champs mesurent l'hypothèse au lieu de la déduire. —
+    pub pop_sum: f64,
+    pub fleeing: u64,
+    pub fleeing_pop: f64,
+    pub fleeing_sat_sum: f64,
 }
 
 /// Ce qui limite le fourrage d'un troupeau, par biome. **Le discriminateur du
@@ -1290,6 +1303,11 @@ pub struct FaunaStats {
     /// Le recensement de la veille : effectif (corrigé des fissions survenues
     /// depuis) et classe, par troupeau.
     pub census_prev: std::collections::BTreeMap<u64, (f32, usize)>,
+    /// Jours de fuite consécutifs au recensement, par troupeau.
+    pub flee_streak: std::collections::BTreeMap<u64, u32>,
+    /// Têtes des troupeaux en fuite, par durée de fuite ininterrompue :
+    /// 1 jour, 2-6, 7-29, 30 et plus.
+    pub streak_pop: [f64; 4],
 }
 
 #[cfg(feature = "fauna-stats")]
@@ -1361,10 +1379,11 @@ impl FaunaStats {
     /// moins de `HERD_CROWD_RADIUS` (lui compris), sa satiété et ses deux taux
     /// nets. Quadratique en troupeaux, mais une fois par jour et sous feature.
     /// `herds` = (id, position, effectif, satiété).
-    pub fn crowd_census(&mut self, herds: &[(u64, (f64, f64), f32, f32)]) {
+    pub fn crowd_census(&mut self, herds: &[CensusHerd]) {
         let r2 = HERD_CROWD_RADIUS_TILES * HERD_CROWD_RADIUS_TILES;
         let mut next = std::collections::BTreeMap::new();
-        for &(id, pos, pop, sat) in herds {
+        let mut streaks = std::collections::BTreeMap::new();
+        for &(id, pos, pop, sat, fleeing) in herds {
             let heads: f32 = herds
                 .iter()
                 .filter(|h| (h.1.0 - pos.0).powi(2) + (h.1.1 - pos.1).powi(2) <= r2)
@@ -1380,6 +1399,21 @@ impl FaunaStats {
             }
             c.potential_sum +=
                 f64::from(HERB_BIRTH_PER_DAY * sat.clamp(0.0, 1.0) - HERB_DEATH_PER_DAY);
+            c.pop_sum += f64::from(pop);
+            if fleeing {
+                c.fleeing += 1;
+                c.fleeing_pop += f64::from(pop);
+                c.fleeing_sat_sum += f64::from(sat);
+                let streak = self.flee_streak.get(&id).copied().unwrap_or(0) + 1;
+                streaks.insert(id, streak);
+                let k = match streak {
+                    1 => 0,
+                    2..=6 => 1,
+                    7..=29 => 2,
+                    _ => 3,
+                };
+                self.streak_pop[k] += f64::from(pop);
+            }
             if let Some(&(prev, _)) = self.census_prev.get(&id)
                 && prev > 0.0
             {
@@ -1397,6 +1431,7 @@ impl FaunaStats {
             }
         }
         self.census_prev = next;
+        self.flee_streak = streaks;
     }
 
     /// Le voisinage sondé par `best_pasture`, en moyenne et au pire.
