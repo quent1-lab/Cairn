@@ -1223,6 +1223,28 @@ impl Sim {
         for (x, y, population, species) in fissions {
             self.spawn_herd_species(x, y, population, species);
         }
+        // La fusion, pendant de la fission (chantier de dérive, E) : une fois
+        // par jour, deux troupeaux sauvages de même espèce qui se voient se
+        // rejoignent — voir `fauna::merge_plan`.
+        if time.tick.is_multiple_of(TICKS_PER_DAY) {
+            let views: Vec<(hecs::Entity, fauna::MergeView)> = self
+                .fauna
+                .query::<(&FaunaId, &Herd, &Position)>()
+                .iter()
+                .map(|(e, (id, h, p))| {
+                    let wild = h.anchor.is_none() && h.tameness <= 0.0;
+                    (e, (id.0, (p.x, p.y), h.population, h.species, wild))
+                })
+                .collect();
+            let plan_input: Vec<fauna::MergeView> = views.iter().map(|(_, v)| *v).collect();
+            for (absorber, absorbed) in fauna::merge_plan(&plan_input) {
+                let gained = views[absorbed].1.2;
+                if let Ok(mut h) = self.fauna.get::<&mut Herd>(views[absorber].0) {
+                    h.population += gained;
+                }
+                let _ = self.fauna.despawn(views[absorbed].0);
+            }
+        }
         // Recensement de densité (M1-faune) : une fois par jour, après prises,
         // naissances et fissions — l'état que la veille comparera demain.
         #[cfg(feature = "fauna-stats")]
@@ -2063,6 +2085,39 @@ mod tests {
             after < 0.5 * before,
             "{before:.0} prédateurs sur un même territoire en sont à {after:.0} après 60 jours : \
              rien ne borne le prédateur sinon sa proie"
+        );
+    }
+
+    /// Chantier de dérive, E : **deux troupeaux sauvages qui se voient se
+    /// rejoignent**, tant que le total reste sous la fission. Pendant de la
+    /// fission : sous la densité-dépendance, un troupeau ne grossit plus
+    /// jusqu'à 90 têtes, et les moitiés issues des fissions passées ne se
+    /// rejoignaient jamais — mesuré sur 5 ans : 622 troupeaux de 34 têtes, 4 tps.
+    /// Deux espèces différentes, ou un total qui déclencherait la fission, ne
+    /// fusionnent pas.
+    #[test]
+    fn deux_troupeaux_qui_se_voient_se_rejoignent() {
+        let (mut sim, home) = scenario_setup(5, 0, 0);
+        let (x, y) = land_near(&mut sim, home, 0.0);
+        let sp = fauna::Species::Aurochs;
+        let a = sim.spawn_herd_species(x, y, 30.0, sp);
+        let b = sim.spawn_herd_species(x + 50.0, y, 30.0, sp);
+        // Un troupeau d'une autre espèce, tout près : il reste à part.
+        let c = sim.spawn_herd_species(x, y + 50.0, 30.0, fauna::Species::Deer);
+        // Deux gros troupeaux voisins, loin des premiers : réunis, ils
+        // dépasseraient le seuil de fission — ils restent à part.
+        let d = sim.spawn_herd_species(x + 3000.0, y, 60.0, sp);
+        let e = sim.spawn_herd_species(x + 3050.0, y, 60.0, sp);
+        for _ in 0..TICKS_PER_DAY + 1 {
+            sim.step();
+        }
+        let vivants: Vec<FaunaId> = sim.fauna.query::<(&FaunaId, &Herd)>().iter().map(|(_, (id, _))| *id).collect();
+        let presents = [a, b].iter().filter(|id| vivants.contains(id)).count();
+        assert_eq!(presents, 1, "deux troupeaux d'aurochs à 100 m, 60 têtes à eux deux, doivent n'en faire qu'un");
+        assert!(vivants.contains(&c), "un troupeau d'une autre espèce ne fusionne pas");
+        assert!(
+            vivants.contains(&d) && vivants.contains(&e),
+            "deux troupeaux dont la réunion dépasserait la fission restent séparés"
         );
     }
 

@@ -1046,6 +1046,59 @@ pub static HERD_PROF: [std::sync::atomic::AtomicU64; 4] = [
     std::sync::atomic::AtomicU64::new(0),
 ];
 
+/// Un troupeau tel que le voit la passe de fusion : (identifiant stable,
+/// position, effectif, espèce, sauvage). « Sauvage » = ni ancré à un foyer ni
+/// en cours d'apprivoisement : le cheptel appartient à un clan, et fondre un
+/// troupeau qu'on apprivoise diluerait le travail de l'éleveur.
+pub type MergeView = (u64, (f64, f64), f32, Species, bool);
+
+/// **Fusion des troupeaux** (chantier de dérive, E) — le pendant de la
+/// fission. Deux troupeaux sauvages de même espèce qui **se voient** (distance
+/// ≤ rayon d'alerte de l'espèce) se rejoignent, si leur total reste sous
+/// `HERD_FISSION` — au-delà, la fission le défairait aussitôt.
+///
+/// Pourquoi : sous la densité-dépendance (étape 4), un troupeau ne grossit plus
+/// jusqu'à la fission, et les moitiés issues des fissions passées ne se
+/// rejoignaient jamais. Les têtes plafonnaient, les **entités** montaient — et
+/// le coût suit les entités (M2-faune) : 622 troupeaux de 34 têtes, 4 tps.
+///
+/// Appariement glouton dans l'ordre des identifiants, au plus proche (à
+/// égalité, le plus petit identifiant) : déterministe. Au plus une fusion par
+/// troupeau et par passe. Renvoie des couples (absorbeur, absorbé), en indices
+/// de `herds` ; l'absorbeur est le plus gros (à égalité, le plus petit id).
+pub fn merge_plan(herds: &[MergeView]) -> Vec<(usize, usize)> {
+    let mut order: Vec<usize> = (0..herds.len()).collect();
+    order.sort_by_key(|&i| herds[i].0);
+    let mut taken = vec![false; herds.len()];
+    let mut plan = Vec::new();
+    for &i in &order {
+        let (id_i, pos_i, pop_i, sp_i, wild_i) = herds[i];
+        if taken[i] || !wild_i {
+            continue;
+        }
+        let r2 = sp_i.flee_radius() * sp_i.flee_radius();
+        let mut best: Option<(f64, u64, usize)> = None;
+        for &j in &order {
+            let (id_j, pos_j, pop_j, sp_j, wild_j) = herds[j];
+            if j == i || taken[j] || !wild_j || sp_j != sp_i || pop_i + pop_j > HERD_FISSION {
+                continue;
+            }
+            let d2 = (pos_i.0 - pos_j.0).powi(2) + (pos_i.1 - pos_j.1).powi(2);
+            if d2 <= r2 && best.is_none_or(|(bd, bid, _)| d2 < bd || (d2 == bd && id_j < bid)) {
+                best = Some((d2, id_j, j));
+            }
+        }
+        if let Some((_, id_j, j)) = best {
+            taken[i] = true;
+            taken[j] = true;
+            let pop_j = herds[j].2;
+            let i_absorbs = pop_i > pop_j || (pop_i == pop_j && id_i < id_j);
+            plan.push(if i_absorbs { (i, j) } else { (j, i) });
+        }
+    }
+    plan
+}
+
 /// Le troupeau broute : la tuile sous lui et ses quatre voisines. C'est ce
 /// qui laisse une traînée pâturée visible, et ce qui fait qu'un troupeau trop
 /// gros épuise sa propre pâture.
