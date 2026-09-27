@@ -179,6 +179,14 @@ impl Chunk {
         self.touched.insert((lx as u8, ly as u8));
     }
 
+    /// Retire une tuile des tuiles notées mutées. Réservé à une tuile revenue
+    /// **exactement** à son baseline : elle n'a plus rien à dire à la
+    /// repousse, et une éviction la régénérerait à l'identique (voir
+    /// `ecology::daily_regrowth`).
+    pub(crate) fn unmark_touched(&mut self, lx: usize, ly: usize) {
+        self.touched.remove(&(lx as u8, ly as u8));
+    }
+
     /// Accès mutable à la tuile locale. Réservé au [`World`](crate::World),
     /// qui doit marquer le chunk sale — passer par `World::tile_mut`.
     pub(crate) fn tile_mut(&mut self, lx: usize, ly: usize, world: &WorldGen) -> &mut Tile {

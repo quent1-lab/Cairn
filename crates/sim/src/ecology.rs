@@ -155,18 +155,25 @@ pub fn daily_regrowth(
             let mut cibles: Vec<(u8, u8)> = chunk.touched().iter().copied().collect();
             cibles.sort_unstable_by_key(|&(lx, ly)| (ly, lx));
             for (lx, ly) in cibles {
+                let (lx, ly) = (lx as usize, ly as usize);
                 regrow_tile(
-                    chunk,
-                    worldgen,
-                    lx as usize,
-                    ly as usize,
-                    oy,
-                    climate,
-                    time,
-                    weather_factor,
-                    elapsed,
-                    &mut rng,
+                    chunk, worldgen, lx, ly, oy, climate, time, weather_factor, elapsed, &mut rng,
                 );
+                // — Revenue au baseline exact, la tuile quitte `touched`. Elle
+                //   n'avait plus rien à faire ici : à capacité, `regrow_tile`
+                //   en sort avant tout tirage, `snapshot_delta` l'ignorait déjà
+                //   et `clear_dirty_if_pristine` la tenait déjà pour propre.
+                //   Mais elle coûtait chaque jour autant qu'une tuile qui
+                //   repousse (200 à 400 ns : le coût est l'accès, pas le
+                //   calcul) — et c'était la moitié des tuiles marquées. Si un
+                //   troupeau la broute de nouveau, `World::tile_mut` la
+                //   remarque. —
+                let t = chunk.tile_ready(lx, ly);
+                if t.biomass == crate::tile::baseline_biomass(t.biome)
+                    && t.soil_fertility == crate::tile::baseline_fertility(t.biome)
+                {
+                    chunk.unmark_touched(lx, ly);
+                }
             }
         }
         world.clear_dirty_if_pristine(coord);
@@ -470,6 +477,36 @@ mod tests {
             pousse,
             "la pousse due à la pluie a été perdue à l'éviction : \
              la tuile n'était pas dans l'instantané"
+        );
+    }
+
+    /// Chantier de l'écologie, H : **une tuile revenue au baseline n'est plus
+    /// visitée**. Broutée un peu, elle repousse jusqu'à son baseline exact ;
+    /// elle doit alors quitter `Chunk::touched`. Mesuré avant : ~50 % des tuiles
+    /// marquées sont au baseline, et chacune coûte 200 à 400 ns par jour à la
+    /// repousse — qui n'a rien à y faire.
+    #[test]
+    fn une_tuile_revenue_au_baseline_n_est_plus_visitee() {
+        let mut world = World::new(WorldSeed(42), 64);
+        let climate = Climate::new(world.worldgen().temperature.latitude());
+        let time = SimTime { tick: 180 * cairn_core::TICKS_PER_DAY };
+        let (x, y) = tuile_qui_pousse(&mut world, time, &climate);
+        let baseline = crate::tile::baseline_biomass(world.tile(x, y).biome);
+        world.tile_mut(x, y).biomass = baseline - 3;
+        // Une voisine rasée garde le chunk sale pendant tout le test : on ne
+        // mesure pas le nettoyage du chunk, mais celui de la tuile.
+        world.tile_mut(x ^ 1, y ^ 1).biomass = 0;
+        let mut t = time;
+        for _ in 0..60 {
+            daily_regrowth(&mut world, &climate, t, &[], &[], 1);
+            t.tick += cairn_core::TICKS_PER_DAY;
+        }
+        assert_eq!(world.tile(x, y).biomass, baseline, "la tuile n'a pas repoussé : le test ne prouverait rien");
+        let coord = crate::chunk::ChunkCoord { x: x.div_euclid(CHUNK_SIZE), y: y.div_euclid(CHUNK_SIZE) };
+        let local = (x.rem_euclid(CHUNK_SIZE) as u8, y.rem_euclid(CHUNK_SIZE) as u8);
+        assert!(
+            !world.chunk(coord).touched().contains(&local),
+            "revenue à son baseline, la tuile est encore marquée : la repousse la visitera chaque jour pour rien"
         );
     }
 
