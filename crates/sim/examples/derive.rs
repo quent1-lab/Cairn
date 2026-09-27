@@ -92,6 +92,11 @@ struct Sample {
     /// l'éviction masquait jusqu'à 5099f8c en rendant la tuile au baseline.
     marquees: usize,
     sur_cap: usize,
+    /// Parmi les marquées : exactement à capacité (rien à repousser), et
+    /// revenues au baseline exact (une éviction les régénérerait à
+    /// l'identique). Chantier de l'écologie.
+    au_plafond: usize,
+    au_baseline: usize,
     spread_km: f64,
     pop: usize,
     tps: f64,
@@ -268,8 +273,8 @@ fn main() {
     println!("  relevé tous les {SAMPLE_DAYS} j");
     println!("╚═════════════════════════════════════════════════════════════════════╝\n");
     println!(
-        "{:>5} {:>7} {:>8} {:>7} {:>8} {:>8} {:>8} {:>7} {:>8} {:>6} {:>9} {:>9} {:>8} {:>7} {:>6} {:>7}",
-        "jour", "troup.", "têtes", "meutes", "préd.", "trp/km²", "prises", "loin%", "disp.km", "pop", "regen/j", "marquées", "sur-cap", "tps", "zones", "méd.km"
+        "{:>5} {:>7} {:>8} {:>7} {:>8} {:>8} {:>8} {:>7} {:>8} {:>6} {:>9} {:>9} {:>8} {:>7} {:>6} {:>7} {:>8} {:>6}",
+        "jour", "troup.", "têtes", "meutes", "préd.", "trp/km²", "prises", "loin%", "disp.km", "pop", "regen/j", "marquées", "sur-cap", "tps", "zones", "méd.km", "plafond%", "base%"
     );
     let _ = std::io::stdout().flush();
 
@@ -330,7 +335,7 @@ fn main() {
         // faune mais du **sol** qu'elle broute, et c'est ce qui les rend utiles
         // — une divergence d'effectif et une dérive de la végétation ne se
         // confondent pas si on les lit séparément.
-        let recensement = sim.world.biomass_census();
+        let recensement = sim.world.touched_census();
         // Densité **mesurée** sur l'étendue réelle des troupeaux, pas déduite
         // des paramètres de départ : la faune migre, et c'est la densité du
         // moment qui gouverne la rencontre.
@@ -349,8 +354,10 @@ fn main() {
             head,
             predators,
             dirty: sim.world.dirty_count(),
-            marquees: recensement.0,
-            sur_cap: recensement.1,
+            marquees: recensement.marked,
+            sur_cap: recensement.above_cap,
+            au_plafond: recensement.at_cap,
+            au_baseline: recensement.at_baseline,
             spread_km: spread(&sim),
             pop: sim.population(),
             tps,
@@ -370,7 +377,7 @@ fn main() {
         kills_window = 0.0;
         pred_ticks = 0.0;
         println!(
-            "{:>5} {:>7} {:>8.0} {:>7} {:>8.0} {:>8.2} {:>8.3} {:>6.0} {:>8.1} {:>6} {:>9.0} {:>9} {:>8} {:>7.1} {:>6} {:>7.2}",
+            "{:>5} {:>7} {:>8.0} {:>7} {:>8.0} {:>8.2} {:>8.3} {:>6.0} {:>8.1} {:>6} {:>9.0} {:>9} {:>8} {:>7.1} {:>6} {:>7.2} {:>8.1} {:>6.1}",
             s.day,
             s.herds,
             s.head,
@@ -386,7 +393,9 @@ fn main() {
             s.sur_cap,
             s.tps,
             s.zones,
-            s.median_km
+            s.median_km,
+            s.au_plafond as f64 / s.marquees.max(1) as f64 * 100.0,
+            s.au_baseline as f64 / s.marquees.max(1) as f64 * 100.0
         );
         // Un banc qui tourne des dizaines de minutes doit être lisible *pendant*
         // qu'il tourne : sans ce vidage, la sortie reste bloquée dans le tampon

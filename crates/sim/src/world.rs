@@ -65,6 +65,19 @@ struct ChunkDelta {
     tiles: Vec<(u8, u8, u8, u8)>,
 }
 
+/// Recensement des tuiles marquées (voir [`World::touched_census`]).
+#[derive(Debug, Default, Clone, Copy)]
+pub struct TouchedCensus {
+    /// Tuiles marquées des chunks sales résidents.
+    pub marked: usize,
+    /// Au-dessus de leur capacité de temps sec (surplus d'une averse).
+    pub above_cap: usize,
+    /// Exactement à leur capacité : la repousse n'a rien à y faire.
+    pub at_cap: usize,
+    /// Parmi elles, revenues au baseline exact (biomasse et fertilité).
+    pub at_baseline: usize,
+}
+
 pub struct World {
     worldgen: WorldGen,
     /// Chunks résidents. `BTreeMap` et non `HashMap` : ordre d'itération
@@ -376,18 +389,37 @@ impl World {
     /// marquées) et déterministe (`BTreeSet`) — à appeler au relevé, pas au
     /// tick.
     pub fn biomass_census(&self) -> (usize, usize) {
-        let (mut marquees, mut au_dessus) = (0usize, 0usize);
+        let c = self.touched_census();
+        (c.marked, c.above_cap)
+    }
+
+    /// Ce que valent les tuiles **marquées** des chunks sales résidents — celles
+    /// que la repousse quotidienne visite une à une. Mesure du chantier de
+    /// l'écologie : une tuile revenue exactement à son baseline (biomasse et
+    /// fertilité d'origine) n'a plus rien à faire, et une éviction la
+    /// régénérerait à l'identique ; si elle reste marquée, la repousse la
+    /// visite chaque jour pour rien.
+    pub fn touched_census(&self) -> TouchedCensus {
+        let mut c = TouchedCensus::default();
         for coord in &self.dirty {
             let Some(chunk) = self.chunks.get(coord) else { continue };
             for &(lx, ly) in chunk.touched() {
-                marquees += 1;
+                c.marked += 1;
                 let t = chunk.tile_ready(lx as usize, ly as usize);
-                if t.biomass > crate::ecology::effective_capacity(t) {
-                    au_dessus += 1;
+                let cap = crate::ecology::effective_capacity(t);
+                if t.biomass > cap {
+                    c.above_cap += 1;
+                } else if t.biomass == cap {
+                    c.at_cap += 1;
+                    if t.biomass == crate::tile::baseline_biomass(t.biome)
+                        && t.soil_fertility == crate::tile::baseline_fertility(t.biome)
+                    {
+                        c.at_baseline += 1;
+                    }
                 }
             }
         }
-        (marquees, au_dessus)
+        c
     }
 
     /// Évince les chunks les moins récemment accédés jusqu'à revenir sous la
