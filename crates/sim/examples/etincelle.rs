@@ -94,12 +94,26 @@ fn main() {
     // plusieurs jours peut être interrompu (machine éteinte), et sa sortie doit
     // rester exploitable jusqu'à la dernière ligne écrite.
     let mut told = 0usize;
+    // Le débit de chaque période de rapport : l'objectif de sortie du chantier
+    // de dérive (≥ 20 tps dans chaque fenêtre annuelle) se juge aussi ici, et
+    // ce banc ne l'affichait pas. Une ligne à part, pour ne pas décaler les
+    // colonnes du rapport.
+    let mut window = (std::time::Instant::now(), 0u64);
     for _ in 0..total_ticks {
         sim.step();
+        window.1 += 1;
         if sim.time.tick.is_multiple_of(TICKS_PER_DAY) {
             let day = sim.time.tick / TICKS_PER_DAY;
             if day.is_multiple_of(report_days) {
                 report(&sim, day);
+                let secs = window.0.elapsed().as_secs_f64().max(1e-6);
+                println!(
+                    "     [débit] {:.1} tps sur la période · {} troupeaux · {} meutes",
+                    window.1 as f64 / secs,
+                    sim.fauna.query::<&cairn_sim::Herd>().iter().count(),
+                    sim.fauna.query::<&cairn_sim::Pack>().iter().count(),
+                );
+                window = (std::time::Instant::now(), 0);
                 for event in &sim.chronicle[told..] {
                     println!(
                         "     {}",
