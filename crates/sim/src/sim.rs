@@ -2121,6 +2121,27 @@ mod tests {
         );
     }
 
+    /// Chantier de dérive, F : **l'abandon suit le bord de près**. Un troupeau
+    /// laissé à 12 km du seul humain — au-delà du bord de 8 km, bien au-delà de
+    /// sa marge — sort de la simulation. Avec un abandon à 16 km, il restait :
+    /// l'aire utile de la faune montait à ~200 mailles au lieu des ~50 qu'on
+    /// voulait borner (mesuré sur 5 ans : 117 mailles et 353 troupeaux sur 42).
+    #[test]
+    fn un_troupeau_laisse_loin_derriere_le_bord_sort_de_la_simulation() {
+        let (mut sim, home) = scenario_setup(5, 1, 0);
+        sim.allow_fauna_immigration = true;
+        let (x, y) = land_near(&mut sim, home, cairn_core::km_to_tiles(12.0));
+        let lointain = sim.spawn_herd(x, y, 40.0);
+        for _ in 0..TICKS_PER_DAY + 1 {
+            sim.step();
+        }
+        let vivants: Vec<FaunaId> = sim.fauna.query::<(&FaunaId, &Herd)>().iter().map(|(_, (id, _))| *id).collect();
+        assert!(
+            !vivants.contains(&lointain),
+            "un troupeau à 12 km de tout humain est encore simulé : l'abandon laisse une couronne trop large"
+        );
+    }
+
     /// La ligne droite entre `a` et `b` traverse-t-elle de l'eau ? (échantillon
     /// tous les 8 tuiles sur le baseline.)
     fn straight_blocked(sim: &Sim, a: (i64, i64), b: (i64, i64)) -> bool {

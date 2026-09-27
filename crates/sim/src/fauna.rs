@@ -1644,9 +1644,17 @@ pub const FAUNA_PERIMETER_TILES: f64 = km_to_tiles(8.0);
 
 /// Au-delà de cette distance de tout humain, un troupeau sauvage est
 /// **abandonné** : les humains sont partis, le bord avec eux, et le troupeau
-/// quitte la simulation. Deux fois le bord, pour que seul un déplacement des
-/// humains puisse y laisser un troupeau — le bord interdit d'y aller seul.
-pub const FAUNA_ABANDON_TILES: f64 = 2.0 * FAUNA_PERIMETER_TILES;
+/// quitte la simulation. Le bord interdit d'y aller seul : seul un
+/// déplacement des humains peut y laisser un troupeau.
+///
+/// 1,25 fois le bord (10 km) : une marge de 2 km, le temps qu'un humain qui
+/// erre d'un ou deux kilomètres revienne, sans que les troupeaux arrêtés au
+/// bord soient retirés à son premier pas. D′ l'avait fixé à deux fois le bord
+/// (16 km) : l'aire utile montait alors à ~200 mailles au lieu de ~50, ce que
+/// la prédation masquait tant que le gibier restait bas (mesuré après C3 et E :
+/// 117 mailles et 353 troupeaux sur seed 42, débit décroissant d'année en
+/// année jusqu'à 7,6 tps).
+pub const FAUNA_ABANDON_TILES: f64 = 1.25 * FAUNA_PERIMETER_TILES;
 
 /// Carré de la distance de `pos` au plus proche humain (∞ sans humain).
 pub fn nearest_human_d2(pos: (f64, f64), humans: &[(f64, f64)]) -> f64 {
