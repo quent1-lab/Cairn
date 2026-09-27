@@ -2124,6 +2124,63 @@ mod tests {
         );
     }
 
+    /// Chantier de dérive, G : **un troupeau qui fuit n'échappe pas au frein de
+    /// sa maille**. Dix fois plus de bouches que la maille n'en nourrit, et une
+    /// menace posée à chaque tick sur chaque troupeau : ils fuient sans cesse.
+    /// Mesuré sur `derive` (seed 42) : 57 à 90 % des têtes des amas les plus
+    /// denses fuyaient depuis plus de 30 jours, satiété 0,95 contre 0,005 au
+    /// calme — un million de têtes à l'an 5. Ici, l'effectif doit baisser.
+    #[test]
+    fn un_troupeau_qui_fuit_n_echappe_pas_au_frein_de_sa_maille() {
+        let (mut sim, home) = scenario_setup(11, 0, 0);
+        let side = fauna::RANGE_ZONE_TILES;
+        let zone = fauna::range_zone((home.0 as f64, home.1 as f64));
+        let center = ((zone.0 as f64 + 0.5) * side, (zone.1 as f64 + 0.5) * side);
+        let species = fauna::Species::herbivore_for_biome(
+            sim.world.worldgen().biome(center.0 as i64, center.1 as i64),
+            &mut Pcg32::new(1, 1),
+        );
+        let production = sim.rangeland.production(sim.world.worldgen(), zone);
+        // 40 têtes par troupeau : loin de la fission, qui ne doit pas s'en mêler.
+        let herds = (10.0 * production / species.daily_ration_kg() / 40.0).ceil() as usize;
+        for i in 0..herds {
+            let angle = i as f64 * 0.9;
+            let r = 20.0 + (i % 10) as f64 * 25.0;
+            let (x, y) = (center.0 + angle.cos() * r, center.1 + angle.sin() * r);
+            if sim.world.tile(x as i64, y as i64).is_walkable() {
+                sim.spawn_herd_species(x, y, 40.0, species);
+            }
+        }
+        let heads = |sim: &Sim| -> f32 { sim.fauna.query::<&Herd>().iter().map(|(_, h)| h.population).sum() };
+        let before = heads(&sim);
+        let seed = sim.world.seed();
+        for _ in 0..30 * TICKS_PER_DAY {
+            // Une menace sur chaque troupeau, à chaque tick : ils fuient sans fin.
+            let threats: Vec<(f64, f64)> =
+                sim.fauna.query::<(&Herd, &Position)>().iter().map(|(_, (_, p))| (p.x, p.y)).collect();
+            let time = sim.time;
+            fauna::update_herds(
+                &mut sim.fauna,
+                &mut sim.world,
+                &sim.climate,
+                time,
+                seed,
+                &threats,
+                &mut sim.fauna_stats,
+                &mut sim.rangeland,
+                None,
+            );
+            sim.time.tick += 1;
+        }
+        let after = heads(&sim);
+        assert!(
+            after < before,
+            "{before:.0} têtes en fuite perpétuelle dans une maille qui en nourrit {:.0} \\
+             ont crû jusqu'à {after:.0} en 30 jours : la fuite fait échapper au frein de la maille",
+            production / species.daily_ration_kg()
+        );
+    }
+
     /// La ligne droite entre `a` et `b` traverse-t-elle de l'eau ? (échantillon
     /// tous les 8 tuiles sur le baseline.)
     fn straight_blocked(sim: &Sim, a: (i64, i64), b: (i64, i64)) -> bool {

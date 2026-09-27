@@ -902,21 +902,6 @@ pub fn update_herds(
             {
                 prof[1] += t0.elapsed().as_nanos() as u64;
             }
-            // Le pays, ensuite : la plus rare des deux satiétés commande. Une
-            // tuile pleine ne nourrit pas un troupeau dont la maille est
-            // surpeuplée.
-            #[cfg(feature = "profile")]
-            let t0 = std::time::Instant::now();
-            let zone = range_zone((pos.x, pos.y));
-            let zone_sat = zone_satiation(
-                range.production(world.worldgen(), zone),
-                demand.get(&zone).copied().unwrap_or(0.0),
-            );
-            herd.satiation = herd.satiation.min(zone_sat);
-            #[cfg(feature = "profile")]
-            {
-                prof[3] += t0.elapsed().as_nanos() as u64;
-            }
 
             // — Mesure du fourrage. Bloc sous `cfg` et non appel no-op, parce
             //   qu'il faut relire la tuile d'où vient l'herbe pour connaître sa
@@ -1000,6 +985,28 @@ pub fn update_herds(
         // Domaine vital : chemin parcouru contre déplacement net, après que le
         // troupeau a bougé (fuite, pâture ou migration confondues).
         stats.herd_step(id.0, (pos.x, pos.y), time.tick / cairn_core::TICKS_PER_DAY);
+
+        // — Le pays : la plus rare des deux satiétés commande, **que le
+        //   troupeau ait brouté ou fui**. Une tuile pleine ne nourrit pas un
+        //   troupeau dont la maille est surpeuplée — et fuir n'en dispense pas.
+        //   Appliqué d'abord à la seule pâture, ce plafond laissait un fuyard
+        //   chronique garder sa satiété de naissance (1,0) : mesuré sur seed
+        //   42, 57 à 90 % des têtes des amas les plus denses en fuite depuis
+        //   plus de 30 jours, satiété 0,95 contre 0,005 au calme — un million
+        //   de têtes à l'an 5. La maille se lit à la position de début de
+        //   tour, celle qui a servi à compter sa demande. —
+        #[cfg(feature = "profile")]
+        let t0 = std::time::Instant::now();
+        let zone = range_zone(start);
+        let zone_sat = zone_satiation(
+            range.production(world.worldgen(), zone),
+            demand.get(&zone).copied().unwrap_or(0.0),
+        );
+        herd.satiation = herd.satiation.min(zone_sat);
+        #[cfg(feature = "profile")]
+        {
+            prof[3] += t0.elapsed().as_nanos() as u64;
+        }
 
         // — Démographie : la satiété commande. `steps` fois quand le troupeau
         //   est simulé grossièrement — on rattrape le temps sauté, on ne le
