@@ -110,6 +110,9 @@ pub struct World {
     /// création du monde — ce que coûte la génération des chunks (M4 : 66 à
     /// 73 % de chaque chunk généré).
     pub humidity_computed: u64,
+    /// Recherches de sources réellement calculées (`chunk::springs_for`)
+    /// depuis la création du monde.
+    pub springs_computed: u64,
     humidity_cache: BTreeMap<(i64, i64), f64>,
     /// Horloge logique : incrémentée à chaque accès.
     clock: u64,
@@ -175,6 +178,7 @@ impl World {
             springs: BTreeMap::new(),
             last_regrowth: BTreeMap::new(),
             humidity_computed: 0,
+            springs_computed: 0,
             humidity_cache: BTreeMap::new(),
             clock: 0,
             capacity: capacity.max(1),
@@ -316,7 +320,11 @@ impl World {
         self.clock += 1;
         if !self.chunks.contains_key(&coord) {
             let corners = Chunk::corner_coords(coord).map(|(x, y)| self.corner_humidity(x, y));
-            let mut chunk = Chunk::from_corners(coord, &self.worldgen, corners);
+            // Les sources, par le cache que `nearest_spring` tient déjà : une
+            // fonction pure de la coordonnée, que la génération recalculait à
+            // chaque régénération (~120 µs, M4 après I).
+            let springs = self.springs_of(coord).to_vec();
+            let mut chunk = Chunk::from_parts(coord, &self.worldgen, corners, springs);
             if let Some(delta) = self.deltas.remove(&coord) {
                 for (lx, ly, biomass, soil_fertility) in delta.tiles {
                     // Réappliquer un delta **calcule** ces tuiles-là : il n'y
@@ -527,7 +535,16 @@ impl World {
             // construction — un test le garantit) ; sinon calcul rapide.
             let list = match self.chunks.get(&coord) {
                 Some(chunk) => chunk.springs.clone(),
-                None => crate::chunk::springs_for(&self.worldgen, coord),
+                None => {
+                    self.springs_computed += 1;
+                    #[cfg(feature = "profile")]
+                    let t0 = std::time::Instant::now();
+                    let list = crate::chunk::springs_for(&self.worldgen, coord);
+                    #[cfg(feature = "profile")]
+                    crate::chunk::CHUNK_PROF[1]
+                        .fetch_add(t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+                    list
+                }
             };
             self.springs.insert(coord, list);
         }
@@ -655,6 +672,27 @@ mod tests {
             world.humidity_computed, avant,
             "régénérer un chunk déjà vu a recalculé {} coins d'humidité",
             world.humidity_computed - avant
+        );
+    }
+
+    /// Chantier du coût d'un troupeau, J : **un chunk régénéré ne recalcule
+    /// pas ses sources**. Mesuré après I (M4) : la recherche des sources fait
+    /// ~120 µs sur les ~650 d'un chunk généré. C'est une fonction pure de la
+    /// coordonnée du chunk, et le monde en tient déjà un cache pour
+    /// `nearest_spring` : la génération doit le lire.
+    #[test]
+    fn un_chunk_regenere_ne_recalcule_pas_ses_sources() {
+        let mut world = World::new(WorldSeed(42), 4);
+        let _ = world.tile(100, 200);
+        for cx in 50..80 {
+            world.chunk(ChunkCoord { x: cx, y: cx });
+        }
+        assert!(world.evicted > 0, "le chunk observé aurait dû être évincé");
+        let avant = world.springs_computed;
+        let _ = world.tile(100, 200);
+        assert_eq!(
+            world.springs_computed, avant,
+            "régénérer un chunk déjà vu a recalculé ses sources"
         );
     }
 

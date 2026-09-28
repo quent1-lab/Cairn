@@ -102,8 +102,7 @@ impl Chunk {
         [(x0, y0), (x0 + CHUNK_SIZE, y0), (x0, y0 + CHUNK_SIZE), (x0 + CHUNK_SIZE, y0 + CHUNK_SIZE)]
     }
 
-    /// Génère le chunk à partir de ses coins d'humidité déjà connus — le
-    /// chemin du [`World`](crate::World), qui les garde en cache.
+    /// Génère le chunk à partir de ses coins d'humidité déjà connus.
     pub fn from_corners(coord: ChunkCoord, world: &WorldGen, humidity_corners: [f64; 4]) -> Self {
         #[cfg(feature = "profile")]
         let t1 = std::time::Instant::now();
@@ -112,6 +111,20 @@ impl Chunk {
         // bit-identique par un test, et c'est ce qui permet de ne plus calculer
         // les 4 096 tuiles ici.
         let springs = springs_for(world, coord);
+        #[cfg(feature = "profile")]
+        CHUNK_PROF[1].fetch_add(t1.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+        Self::from_parts(coord, world, humidity_corners, springs)
+    }
+
+    /// Génère le chunk à partir de ses coins d'humidité et de ses sources déjà
+    /// connus — le chemin du [`World`](crate::World), qui garde les deux en
+    /// cache : ce sont des fonctions pures de la coordonnée.
+    pub fn from_parts(
+        coord: ChunkCoord,
+        world: &WorldGen,
+        humidity_corners: [f64; 4],
+        springs: Vec<(u8, u8)>,
+    ) -> Self {
         #[cfg(feature = "profile")]
         let t2 = std::time::Instant::now();
         let chunk = Self {
@@ -126,7 +139,6 @@ impl Chunk {
         #[cfg(feature = "profile")]
         {
             use std::sync::atomic::Ordering::Relaxed;
-            CHUNK_PROF[1].fetch_add((t2 - t1).as_nanos() as u64, Relaxed);
             CHUNK_PROF[2].fetch_add(t2.elapsed().as_nanos() as u64, Relaxed);
             CHUNK_PROF[5].fetch_add(1, Relaxed);
         }
