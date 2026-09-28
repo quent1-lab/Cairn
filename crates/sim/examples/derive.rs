@@ -446,6 +446,7 @@ fn write_daily(daily: &[(u64, f64, f64, usize, f64, usize)], seed: u64) {
 struct ProfDaily {
     prev: std::collections::BTreeMap<&'static str, u128>,
     prev_herd: [u64; 4],
+    prev_herd_regen: u64,
     prev_gen: u64,
     t: Instant,
     rows: Vec<String>,
@@ -463,6 +464,7 @@ impl ProfDaily {
         Self {
             prev: sim.prof.rows.iter().map(|(k, v)| (*k, v.0)).collect(),
             prev_herd: Self::herd_ns(),
+            prev_herd_regen: 0,
             prev_gen: sim.world.generated,
             t: Instant::now(),
             rows: Vec::new(),
@@ -495,6 +497,9 @@ impl ProfDaily {
         for (now, prev) in herd.iter().zip(self.prev_herd) {
             row += &format!(",{:.1}", (now - prev) as f64 / 1e6);
         }
+        let herd_regen = sim.prof.counts.get("4d regen").copied().unwrap_or(0);
+        row += &format!(",{}", herd_regen - self.prev_herd_regen);
+        self.prev_herd_regen = herd_regen;
         self.rows.push(row);
         self.prev = now;
         self.prev_herd = herd;
@@ -507,7 +512,7 @@ impl ProfDaily {
         let mut out = String::from(
             "jour,troupeaux,meutes,predateurs,humains,tetes,regen,mur_ms,phases_ms,\
              deliberation,meutes_ms,prises,menaces,troupeaux_ms,immigration,ecologie,\
-             fuite,pature,broutage,zone\n",
+             fuite,pature,broutage,zone,regen_troupeaux\n",
         );
         for r in &self.rows {
             out += r;

@@ -325,10 +325,17 @@ fn phase() -> Phase {
 pub struct Profiler {
     /// nom → (nanosecondes cumulées, nombre d'appels)
     pub rows: std::collections::BTreeMap<&'static str, (u128, u64)>,
+    /// nom → compteur cumulé (événements, pas du temps) : par exemple les
+    /// chunks régénérés pendant une phase.
+    pub counts: std::collections::BTreeMap<&'static str, u64>,
 }
 
 #[cfg(feature = "profile")]
 impl Profiler {
+    pub fn count(&mut self, name: &'static str, n: u64) {
+        *self.counts.entry(name).or_insert(0) += n;
+    }
+
     pub fn add(&mut self, name: &'static str, d: std::time::Duration) {
         let e = self.rows.entry(name).or_insert((0, 0));
         e.0 += d.as_nanos();
@@ -1195,6 +1202,10 @@ impl Sim {
 
         self.end("4c menaces", _ph);
         let _ph = phase(); // 4d troupeaux
+        // Les chunks que les troupeaux font régénérer : le coût du store qu'ils
+        // paient, à séparer de leur coût propre (chantier du coût d'un troupeau).
+        #[cfg(feature = "profile")]
+        let generated_before = self.world.generated;
         let seed = self.world.seed();
         // Le bord de la faune (D′) suit les humains : il n'existe que dans un
         // monde ouvert et habité.
@@ -1217,6 +1228,8 @@ impl Sim {
             &mut self.rangeland,
             fence,
         );
+        #[cfg(feature = "profile")]
+        self.prof.count("4d regen", self.world.generated - generated_before);
         for entity in dead_herds {
             let _ = self.fauna.despawn(entity);
         }
