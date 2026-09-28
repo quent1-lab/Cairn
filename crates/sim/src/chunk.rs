@@ -87,15 +87,24 @@ impl Chunk {
     /// **partagés** avec les chunks voisins, le champ reste continu d'un chunk
     /// à l'autre — aucune couture.
     pub fn generate(coord: ChunkCoord, world: &WorldGen) -> Self {
-        let (x0, y0) = coord.origin();
         #[cfg(feature = "profile")]
         let t0 = std::time::Instant::now();
-        let humidity_corners = [
-            world.humidity(x0, y0),
-            world.humidity(x0 + CHUNK_SIZE, y0),
-            world.humidity(x0, y0 + CHUNK_SIZE),
-            world.humidity(x0 + CHUNK_SIZE, y0 + CHUNK_SIZE),
-        ];
+        let corners = Self::corner_coords(coord).map(|(x, y)| world.humidity(x, y));
+        #[cfg(feature = "profile")]
+        CHUNK_PROF[0].fetch_add(t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+        Self::from_corners(coord, world, corners)
+    }
+
+    /// Les quatre coins d'humidité d'un chunk, en coordonnées de tuiles, dans
+    /// l'ordre de `humidity_corners`. Un coin est partagé par quatre chunks.
+    pub fn corner_coords(coord: ChunkCoord) -> [(i64, i64); 4] {
+        let (x0, y0) = coord.origin();
+        [(x0, y0), (x0 + CHUNK_SIZE, y0), (x0, y0 + CHUNK_SIZE), (x0 + CHUNK_SIZE, y0 + CHUNK_SIZE)]
+    }
+
+    /// Génère le chunk à partir de ses coins d'humidité déjà connus — le
+    /// chemin du [`World`](crate::World), qui les garde en cache.
+    pub fn from_corners(coord: ChunkCoord, world: &WorldGen, humidity_corners: [f64; 4]) -> Self {
         #[cfg(feature = "profile")]
         let t1 = std::time::Instant::now();
         // Les sources par le chemin rapide (préfiltre par hachage) plutôt qu'en
@@ -117,7 +126,6 @@ impl Chunk {
         #[cfg(feature = "profile")]
         {
             use std::sync::atomic::Ordering::Relaxed;
-            CHUNK_PROF[0].fetch_add((t1 - t0).as_nanos() as u64, Relaxed);
             CHUNK_PROF[1].fetch_add((t2 - t1).as_nanos() as u64, Relaxed);
             CHUNK_PROF[2].fetch_add(t2.elapsed().as_nanos() as u64, Relaxed);
             CHUNK_PROF[5].fetch_add(1, Relaxed);

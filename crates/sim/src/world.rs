@@ -65,6 +65,12 @@ struct ChunkDelta {
     tiles: Vec<(u8, u8, u8, u8)>,
 }
 
+/// Plafond du cache d'humidité, en coins (~50 octets chacun avec la clé et le
+/// nœud de l'arbre, soit ~50 Mo au plus). Un coin sert quatre chunks : c'est
+/// l'équivalent de ~1 million de chunks déjà vus, soixante fois la capacité
+/// résidente de `chronicle`.
+const HUMIDITY_CACHE_MAX: usize = 1_000_000;
+
 /// Recensement des tuiles marquées (voir [`World::touched_census`]).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct TouchedCensus {
@@ -100,6 +106,11 @@ pub struct World {
     /// Jour de la dernière repousse par chunk (LOD de la flore). Quelques
     /// octets par chunk sale, sans commune mesure avec un chunk résident.
     pub last_regrowth: BTreeMap<ChunkCoord, u64>,
+    /// Coins d'humidité réellement calculés (advection sur ~256 km) depuis la
+    /// création du monde — ce que coûte la génération des chunks (M4 : 66 à
+    /// 73 % de chaque chunk généré).
+    pub humidity_computed: u64,
+    humidity_cache: BTreeMap<(i64, i64), f64>,
     /// Horloge logique : incrémentée à chaque accès.
     clock: u64,
     /// Nombre maximal de chunks résidents.
@@ -163,6 +174,8 @@ impl World {
             deltas: BTreeMap::new(),
             springs: BTreeMap::new(),
             last_regrowth: BTreeMap::new(),
+            humidity_computed: 0,
+            humidity_cache: BTreeMap::new(),
             clock: 0,
             capacity: capacity.max(1),
             generated: 0,
@@ -259,6 +272,42 @@ impl World {
         &self.chunks[&coord]
     }
 
+    /// L'humidité d'un coin de la grille des chunks — en cache.
+    ///
+    /// C'est une fonction pure de la coordonnée : la garder après l'éviction
+    /// du chunk ne change rien à la simulation (même valeur, au bit près),
+    /// seulement le temps. Mesuré (M4) : ces quatre coins faisaient 66 à 73 %
+    /// du coût d'un chunk généré, et les troupeaux font régénérer des chunks
+    /// par milliers. Un coin est partagé par quatre chunks voisins, d'où la clé
+    /// par coin plutôt que par chunk.
+    ///
+    /// Borné à `HUMIDITY_CACHE_MAX` coins : au-delà, on le vide. Brutal, mais
+    /// sans effet sur la trajectoire — un coin oublié se recalcule à
+    /// l'identique — et suffisant tant que l'ensemble de travail d'un monde
+    /// tient largement sous le plafond.
+    fn corner_humidity(&mut self, x: i64, y: i64) -> f64 {
+        if let Some(&h) = self.humidity_cache.get(&(x, y)) {
+            return h;
+        }
+        if self.humidity_cache.len() >= HUMIDITY_CACHE_MAX {
+            self.humidity_cache.clear();
+        }
+        self.humidity_computed += 1;
+        #[cfg(feature = "profile")]
+        let t0 = std::time::Instant::now();
+        let h = self.worldgen.humidity(x, y);
+        #[cfg(feature = "profile")]
+        crate::chunk::CHUNK_PROF[0]
+            .fetch_add(t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+        self.humidity_cache.insert((x, y), h);
+        h
+    }
+
+    /// Coins d'humidité actuellement en cache.
+    pub fn humidity_cache_len(&self) -> usize {
+        self.humidity_cache.len()
+    }
+
     /// Charge le chunk s'il est absent, note l'accès pour le LRU, évince au
     /// besoin. Séparé de [`chunk`](Self::chunk) parce que la génération
     /// paresseuse oblige les lectures de tuile à emprunter `chunks` en mutable :
@@ -266,7 +315,8 @@ impl World {
     fn ensure_resident(&mut self, coord: ChunkCoord) {
         self.clock += 1;
         if !self.chunks.contains_key(&coord) {
-            let mut chunk = Chunk::generate(coord, &self.worldgen);
+            let corners = Chunk::corner_coords(coord).map(|(x, y)| self.corner_humidity(x, y));
+            let mut chunk = Chunk::from_corners(coord, &self.worldgen, corners);
             if let Some(delta) = self.deltas.remove(&coord) {
                 for (lx, ly, biomass, soil_fertility) in delta.tiles {
                     // Réappliquer un delta **calcule** ces tuiles-là : il n'y
@@ -583,6 +633,29 @@ mod tests {
         }
         let apres = world.tile(100, 200);
         assert_eq!(avant, apres);
+    }
+
+    /// Chantier du coût d'un troupeau, I : **un chunk régénéré ne recalcule
+    /// pas son humidité**. Mesuré (M4) : les quatre coins d'humidité font 66 à
+    /// 73 % du coût d'un chunk généré, ~1,2 ms sur ~1,8 — et les troupeaux font
+    /// régénérer des chunks par milliers. L'humidité d'un coin est une fonction
+    /// pure de sa coordonnée : la recalculer ne sert à rien.
+    #[test]
+    fn un_chunk_regenere_ne_recalcule_pas_son_humidite() {
+        let mut world = World::new(WorldSeed(42), 4);
+        let a = world.tile(100, 200);
+        for cx in 50..80 {
+            world.chunk(ChunkCoord { x: cx, y: cx });
+        }
+        assert!(world.evicted > 0, "le chunk observé aurait dû être évincé");
+        let avant = world.humidity_computed;
+        let b = world.tile(100, 200);
+        assert_eq!(a, b, "régénéré, le chunk doit être identique");
+        assert_eq!(
+            world.humidity_computed, avant,
+            "régénérer un chunk déjà vu a recalculé {} coins d'humidité",
+            world.humidity_computed - avant
+        );
     }
 
     #[test]

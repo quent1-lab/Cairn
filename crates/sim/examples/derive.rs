@@ -418,6 +418,11 @@ fn main() {
     fauna_stats_report(&sim);
     profile_report(&sim);
     chunk_report();
+    println!(
+        "  cache d'humidité : {} coins · {} coins calculés depuis le début",
+        sim.world.humidity_cache_len(),
+        sim.world.humidity_computed
+    );
     utilization_report(&sim);
 }
 
