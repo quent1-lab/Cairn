@@ -417,6 +417,7 @@ fn main() {
     prof_daily.write(seed);
     fauna_stats_report(&sim);
     profile_report(&sim);
+    chunk_report();
     utilization_report(&sim);
 }
 
@@ -799,6 +800,28 @@ fn profile_report(sim: &Sim) {
 
 #[cfg(not(feature = "profile"))]
 fn profile_report(_sim: &Sim) {}
+
+/// M4 — ce que coûte un chunk généré, poste par poste (sous `profile`).
+#[cfg(feature = "profile")]
+fn chunk_report() {
+    use std::sync::atomic::Ordering::Relaxed;
+    let v: Vec<u64> = cairn_sim::chunk::CHUNK_PROF.iter().map(|a| a.load(Relaxed)).collect();
+    let n = v[5].max(1) as f64;
+    println!("\n╔══ M4 — CE QUE COÛTE UN CHUNK GÉNÉRÉ ═══════════════════════════════╗");
+    println!("  {} chunks générés · {} tuiles calculées à la demande ({:.1} par chunk)", v[5], v[4], v[4] as f64 / n);
+    println!("  humidité des 4 coins : {:>8.1} µs par chunk", v[0] as f64 / n / 1e3);
+    println!("  sources              : {:>8.1} µs par chunk", v[1] as f64 / n / 1e3);
+    println!("  allocation           : {:>8.1} µs par chunk", v[2] as f64 / n / 1e3);
+    println!(
+        "  tuiles à la demande  : {:>8.1} µs par chunk ({:.2} µs par tuile)",
+        v[3] as f64 / n / 1e3,
+        v[3] as f64 / v[4].max(1) as f64 / 1e3
+    );
+    println!("╚═════════════════════════════════════════════════════════════════════╝");
+}
+
+#[cfg(not(feature = "profile"))]
+fn chunk_report() {}
 
 /// Mesure M1 — le taux d'utilisation des chunks. Ne s'affiche que sous la
 /// feature `chunk-stats` :

@@ -29,6 +29,21 @@ impl ChunkCoord {
     }
 }
 
+/// Chronométrage de la génération des chunks (sous `profile`), pour la mesure
+/// M4 : ce que coûte un chunk régénéré. Nanosecondes cumulées de l'humidité
+/// des quatre coins [0], des sources [1], de l'allocation [2], du calcul des
+/// tuiles à la demande [3] ; nombre de tuiles calculées [4] et de chunks
+/// générés [5]. Des atomiques : `Chunk` ne connaît pas le profileur de `Sim`.
+#[cfg(feature = "profile")]
+pub static CHUNK_PROF: [std::sync::atomic::AtomicU64; 6] = [
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+    std::sync::atomic::AtomicU64::new(0),
+];
+
 pub struct Chunk {
     pub coord: ChunkCoord,
     tiles: Vec<Tile>,
@@ -73,18 +88,24 @@ impl Chunk {
     /// à l'autre — aucune couture.
     pub fn generate(coord: ChunkCoord, world: &WorldGen) -> Self {
         let (x0, y0) = coord.origin();
+        #[cfg(feature = "profile")]
+        let t0 = std::time::Instant::now();
         let humidity_corners = [
             world.humidity(x0, y0),
             world.humidity(x0 + CHUNK_SIZE, y0),
             world.humidity(x0, y0 + CHUNK_SIZE),
             world.humidity(x0 + CHUNK_SIZE, y0 + CHUNK_SIZE),
         ];
+        #[cfg(feature = "profile")]
+        let t1 = std::time::Instant::now();
         // Les sources par le chemin rapide (préfiltre par hachage) plutôt qu'en
         // sous-produit de la génération complète : `springs_for` est garanti
         // bit-identique par un test, et c'est ce qui permet de ne plus calculer
         // les 4 096 tuiles ici.
         let springs = springs_for(world, coord);
-        Self {
+        #[cfg(feature = "profile")]
+        let t2 = std::time::Instant::now();
+        let chunk = Self {
             coord,
             tiles: vec![Tile::UNCOMPUTED; CHUNK_AREA],
             ready: Box::new([0u64; 64]),
@@ -92,7 +113,16 @@ impl Chunk {
             spring_seed: world.seed().derive(salt::SPRINGS),
             springs,
             touched: BTreeSet::new(),
+        };
+        #[cfg(feature = "profile")]
+        {
+            use std::sync::atomic::Ordering::Relaxed;
+            CHUNK_PROF[0].fetch_add((t1 - t0).as_nanos() as u64, Relaxed);
+            CHUNK_PROF[1].fetch_add((t2 - t1).as_nanos() as u64, Relaxed);
+            CHUNK_PROF[2].fetch_add(t2.elapsed().as_nanos() as u64, Relaxed);
+            CHUNK_PROF[5].fetch_add(1, Relaxed);
         }
+        chunk
     }
 
     /// Calcule la tuile locale (lx, ly) depuis le baseline — fonction **pure**
@@ -143,8 +173,16 @@ impl Chunk {
         if self.ready[word] & mask != 0 {
             return;
         }
+        #[cfg(feature = "profile")]
+        let t0 = std::time::Instant::now();
         self.tiles[bit] = self.compute_tile(lx, ly, world);
         self.ready[word] |= mask;
+        #[cfg(feature = "profile")]
+        {
+            use std::sync::atomic::Ordering::Relaxed;
+            CHUNK_PROF[3].fetch_add(t0.elapsed().as_nanos() as u64, Relaxed);
+            CHUNK_PROF[4].fetch_add(1, Relaxed);
+        }
     }
 
     /// Tuile locale (lx, ly), avec 0 ≤ lx, ly < 64 — calculée à la demande.
