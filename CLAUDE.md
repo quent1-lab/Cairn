@@ -38,6 +38,13 @@ Chacune vient d'une erreur réelle, pas d'un principe. Elles priment sur l'intui
    5. **Valider** l'hypothèse et **relever les voisins** dans la carte : presque chaque correction a révélé la suivante.
    6. **Reboucher** : reporter dans la carte le résultat — y compris les hypothèses réfutées et les corrections annulées, qui sont des connaissances.
 
+10. **Corriger des mécanismes, jamais des résultats** (validée par l'utilisateur, 2026-09-29, née du débat sur le feu : j'avais vu le feu absent en pays tempéré et voulu le rendre possible — c'était le faciliter ; le même mécanisme le rendait trivial en pays froid).
+    - **Les critères du BRIEF valident, ils ne calibrent pas.** Jamais une constante réglée pour atteindre un critère (« un clan sur trois a le feu ») : ce serait scripter le résultat par une autre porte.
+    - **Un défaut se regarde aux deux bouts de sa distribution** — là où l'effet manque et là où il est trop facile — avant de choisir un sens. Ne voir qu'un bout mène à « faciliter ».
+    - **La nature reste la nature.** Un phénomène naturel a une fréquence par surface et par climat ; le hasard de rencontrer un matériau ou un événement reste du hasard ; le périmètre de simulation (ce qu'on ne simule que près des humains) ne doit pas changer ce qu'un humain en perçoit.
+    - **Une porte tout ou rien doit correspondre à une impossibilité physique**, sinon c'est un facteur : le BRIEF est écrit en produits de facteurs.
+    - **Au moindre doute, demander.** Sur un mécanisme, sur ce qu'il devrait faire, ou sur ce qui bloque : demander à l'utilisateur sa vision avant de trancher seul. On va trouver beaucoup de bugs et d'incohérences de ce genre ; c'est lui qui porte l'intention du monde.
+
 ## État courant
 
 **Phase 6 — partie serveur.** Fait : `crates/protocol` (types partagés, terrain non transmis car fonction pure de la seed). Reste : serveur détaché, WebSocket, client réseau, `inspect`, persistance, déploiement. **Suspendu** le temps du chantier de dérive.
@@ -91,6 +98,8 @@ Le verdict refondu (194d769) le confirme sur **4 seeds sur 4** : l'amplitude de 
 **Lecture objective du code : [docs/CODE.md](docs/CODE.md)** — ce que le programme fait, domaine par domaine et tick par tick, lu dans le code (2026-09-29) ; sa section 3 corrige la carte de session (notamment : la pression totale n'est lue par aucun système ; le feu exige une pression de froid ; un humain sans clan n'invente pas). **Carte du modèle et du chantier : [docs/CARTE.md](docs/CARTE.md)** — graphe logique (ce qui cause quoi), graphe fonctionnel (ce que chaque tick exécute et ce qu'il coûte), corrections et résultats, points ouverts. À lire en premier pour reprendre le chantier de dérive.
 
 Historique complet, incrément par incrément : **[docs/JOURNAL.md](docs/JOURNAL.md)**.
+
+**Carnet de bord : [docs/CARNET.md](docs/CARNET.md)** (demande de l'utilisateur, 2026-09-29). Un récit, pas un log : comment notre façon de penser le projet change — découvertes de pensée (les siennes et les miennes), erreurs, réussites, avancées, blocages. Sérieux mais agréable à lire, en prose (compétence de rédaction). **N'y écrire que quand quelque chose a vraiment bougé, ou quand il le demande** — jamais une entrée par échange.
 
 ## Architecture
 
