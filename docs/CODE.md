@@ -141,10 +141,25 @@ Chaque ligne suit la boucle de la règle 9 de `CLAUDE.md`. Statut : **hypothèse
 | D7 | Un chunk évincé rattrape sa repousse d'un coup, à minuit | Déterminisme : le monde ne doit pas dépendre de la capacité du store | bug | — | — | mesuré (70 % des tuiles broutées diffèrent à 30 j entre deux capacités) |
 | D8 | Documentation d'`exposure.rs` périmée ; `springs_for` contourne le cache d'humidité | — | documentation / coût | — | — | à nettoyer |
 | D9 | Incendies, météo et immigration de la faune : **une tentative par jour pour tout le monde**, placée près d'un humain tiré au hasard (le lieu tiré filtre ensuite par climat et combustible) | La nature : un phénomène naturel a une fréquence par surface et par climat | modèle (artefact du périmètre de simulation) | Ce qu'un peuple voit (incendies, averses, gibier qui arrive) dépend du nombre et de la répartition des humains : un peuple seul reçoit tout, dix peuples se partagent la même quantité | Une fréquence par peuple indépendante du nombre de peuples | hypothèse |
+| D10 | La nourriture ne contraint jamais les humains : faim +1/48 par heure, 0,02 de faim par unité de biomasse, soit ~25 unités par jour ; une tuile de forêt en repousse ~4,2 : ~6 tuiles (24 m²) nourrissent un humain, une capacité implicite de ~40 000 humains/km² — le même défaut de calibrage que les 44 000 cerfs/km² | BRIEF §9 phase 3 : « 50 → 300 en 100 ans sans explosion malthusienne (l'écologie doit la borner) » ; §1 : « la nécessité est la mère de l'invention » | modèle (calibrage) | La faim ne régule ni la population ni l'invention : D4 (famine muette) en est un symptôme, et la croissance humaine n'a d'autre frein que la soif et la vieillesse | Des morts de faim, ou une famine active, dans une population qui croît | **mesuré** (revalidation, 4 seeds × 50 ans : 0 mort de faim, faim moyenne 0,10-0,21 ; seed 1337 : 40 → 435 habitants, croissance qui s'accélère ; seed 42 : effondrement 49 → 13 par la soif) |
 
 Le chantier de dérive (performance), ses mesures et ses corrections sont tenus dans [CARTE.md](CARTE.md). Il a porté presque entièrement sur l'aval de la carte (faune, store) ; D1 à D4 sont en amont.
 
-## 5. Ce que la lecture laisse en question
+## 5. L'ordre des chantiers (règles 9 et 10, 2026-09-29)
+
+Un chantier ne passe que si l'objectif qui le **valide** est atteignable aujourd'hui ; sinon on prend le suivant. L'amont de la carte passe avant l'aval.
+
+| Chantier | Ce qui le validerait | Atteignable aujourd'hui ? | Verdict |
+|---|---|---|---|
+| **D10** — la nourriture ne contraint pas les humains (D4 en est un symptôme) | BRIEF phase 3 : 50 → 300 en 100 ans, bornée par l'écologie ; famine active par moments | Oui : runs de 100 ans sur les seeds où la population reste groupée (plusieurs heures), 4 seeds | **premier** — le plus en amont des défauts mesurés ; il commande la taille des populations, la famine, et une part du coût |
+| **D2** — les humains sans clan se dispersent | BRIEF phase 4 : « un clan affamé s'effondre, ses survivants rejoignent d'autres clans ou en fondent un nouveau » | Oui : 50 ans suffisent (seed 2024 : 84 % hors clan à l'an 15, dispersés 18 ans ; seed 42 : 100 % hors clan de l'an 25 à 35) | **deuxième** — dépend de D10 (un clan qui ne peut pas avoir faim ne s'effondre pas pour la raison que dit le BRIEF) |
+| **D9** — fréquences naturelles rattachées aux humains | Fréquence par peuple indépendante du nombre de peuples | Oui : bancs courts | en parallèle possible — amont de D1, peu d'effet sur les échecs actuels |
+| **D7** — l'éviction change le monde | Trajectoire identique entre deux capacités | Oui : banc `eviction` | avant la phase 6 (persistance), pas avant |
+| **D1**, **D3** — feu, cuivre | BRIEF phase 5 : feu chez un clan sur trois en **500 ans** ; bronze ⇒ route | **Non** : 500 ans et beaucoup de clans, hors de portée du débit actuel ; D9 en amont | bloqués — mesures d'observation seulement |
+| Performance (objectif de dérive) | ≥ 20 tps chaque année, 50 ans, 4 seeds, 2 scènes | Mesurable, mais ses échecs viennent de D10 (populations sans borne) et de D2 (dispersion) | **après D10 et D2** — ne pas optimiser le coût d'un comportement que le modèle ne devrait pas produire |
+| D6 (rivières), D5/D8 (nettoyage) | — | — | à décider / à nettoyer au passage |
+
+## 6. Ce que la lecture laisse en question
 
 
 Ces points ne se tranchent pas en lisant ; ils demandent de confronter le code aux mesures (étape suivante).

@@ -122,6 +122,7 @@ html { scroll-behavior: smooth; }
     <a href="#humains">Humains</a>
     <a href="#fonctions">Tick</a>
     <a href="#defauts">Défauts</a>
+    <a href="#ordre">Ordre</a>
     <a href="#corrections">Chantier</a>
     <a href="#objectif">Objectif</a>
     <a href="#methode">Méthode</a>
@@ -379,8 +380,9 @@ html { scroll-behavior: smooth; }
 
   <section id="defauts">
     <div class="kicker"><h2>Défauts et hypothèses tirés du code</h2><span class="mono">de l'amont vers l'aval</span></div>
-    <p>Chaque défaut est un écart entre le code et une référence : l'intention du BRIEF, ou la réalité modélisée. D1 à D4 sont en amont du chantier de performance, et aucun n'a encore été mesuré.</p>
+    <p>Chaque défaut est un écart entre le code et une référence : l'intention du BRIEF, ou la réalité modélisée. D10 et D1 à D4 sont en amont du chantier de performance.</p>
     <ol class="chrono">
+      <li><span class="idx">D10</span><span class="chip ok">mesuré</span><div><h3>La nourriture ne contraint jamais les humains</h3><p>Un humain mange ~25 unités de biomasse par jour ; une tuile de forêt en repousse ~4,2. Six tuiles de 4 m² nourrissent un humain : une capacité implicite de ~40 000 humains par km², le même défaut que les 44 000 cerfs. Mesuré sur 4 seeds × 50 ans : <b>aucune mort de faim</b>, faim moyenne 0,10 à 0,21, une population qui passe de 40 à 435 en s'accélérant, une autre qui s'effondre par la soif. Le BRIEF veut une croissance bornée par l'écologie (phase 3). La famine muette (D4) en est un symptôme.</p></div></li>
       <li><span class="idx">D1</span><span class="chip me">hypothèse</span><div><h3>Le feu dépend de deux mécanismes qui ne sont pas naturels</h3><p>Une porte de froid tout ou rien (probabilité exactement nulle sans gel), et des incendies dont la fréquence ne suit ni la surface ni le climat (D9). Résultat : le feu en un ou deux ans en pays froid, jamais en pays tempéré. Le BRIEF fait de la pression un facteur (« <i>presque</i> rien ») et fixe un plancher sur 500 ans. <b>Une correction ne facilitera pas le feu</b> : elle viserait des fréquences naturelles, la découverte des matériaux restant du hasard. Deux mesures d'abord, aucune correction ; porte ou facteur, c'est une décision de conception.</p></div></li>
       <li><span class="idx">D2</span><span class="chip me">hypothèse</span><div><h3>Un humain sans clan erre sans rappel et n'invente pas</h3><p>Seule force de rappel : l'humain le plus proche. Hypothèse : la dispersion humaine, et la faune qu'elle entraîne, naît des non-affiliés qui forment des paires loin de tout. Réfuté si la dispersion est portée par des membres de clans.</p></div></li>
       <li><span class="idx">D3</span><span class="chip me">hypothèse</span><div><h3>Voir du cuivre, c'est marcher sur sa tuile</h3><p>Le BRIEF parle d'avoir vu un affleurement ; le code exige d'avoir foulé la tuile de 2 m. Hypothèse : le cuivre est quasi inatteignable. Réfuté si les expositions au cuivre sont fréquentes là où un gisement est à portée.</p></div></li>
@@ -390,6 +392,25 @@ html { scroll-behavior: smooth; }
       <li><span class="idx">D9</span><span class="chip me">hypothèse</span><div><h3>Ce que voit un peuple dépend du nombre de peuples</h3><p>Incendies, météo et immigration de la faune : une seule tentative par jour pour tout le monde, placée près d'un humain tiré au hasard. Un peuple seul reçoit tous les incendies ; dix peuples se partagent les mêmes. Un phénomène naturel devrait avoir une fréquence par surface et par climat.</p></div></li>
       <li><span class="idx">D5 · D8</span><span class="chip ko">à nettoyer</span><div><h3>Code mort et documentation périmée</h3><p>La pression totale n'est lue que par les tests ; la documentation de l'exposition dit que rien ne déclenche le feu ; la recherche des sources recalcule l'humidité sans passer par son cache.</p></div></li>
     </ol>
+  </section>
+
+
+  <section id="ordre">
+    <div class="kicker"><h2>L'ordre des chantiers</h2><span class="mono">règles 9 et 10</span></div>
+    <p>Un chantier ne passe que si l'objectif qui le valide est atteignable aujourd'hui ; sinon on prend le suivant. L'amont de la carte passe avant l'aval, et on n'optimise pas le coût d'un comportement que le modèle ne devrait pas produire.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Chantier</th><th>Ce qui le validerait</th><th>Atteignable ?</th><th>Place</th></tr></thead>
+        <tbody>
+          <tr><td>D10 · nourriture</td><td>50 → 300 habitants en 100 ans, bornés par l'écologie ; famine active par moments</td><td>oui, runs de 100 ans</td><td><span class="chip ok">premier</span></td></tr>
+          <tr><td>D2 · humains sans clan</td><td>les survivants d'un clan effondré en rejoignent un autre ou en fondent un</td><td>oui, 50 ans suffisent</td><td><span class="chip ok">deuxième</span></td></tr>
+          <tr><td>D9 · fréquences naturelles</td><td>ce qu'un peuple voit ne dépend pas du nombre de peuples</td><td>oui, bancs courts</td><td><span class="chip me">en parallèle</span></td></tr>
+          <tr><td>D7 · éviction</td><td>même trajectoire entre deux capacités</td><td>oui</td><td><span class="chip me">avant la phase 6</span></td></tr>
+          <tr><td>Performance</td><td>≥ 20 tps chaque année, 50 ans, 4 seeds</td><td>ses échecs viennent de D10 et D2</td><td><span class="chip me">après D10, D2</span></td></tr>
+          <tr><td>D1 · D3 · feu, cuivre</td><td>feu chez un clan sur trois en 500 ans ; bronze ⇒ route</td><td>non : 500 ans hors de portée</td><td><span class="chip ko">bloqués</span></td></tr>
+        </tbody>
+      </table>
+    </div>
   </section>
 
   <section id="corrections">
