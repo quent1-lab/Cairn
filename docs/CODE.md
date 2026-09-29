@@ -126,7 +126,25 @@ Le **store** (`World`) est traversé par toutes ces étapes : chaque lecture de 
 
 ---
 
-## 4. Ce que la lecture laisse en question
+## 4. Défauts et hypothèses tirés de la lecture
+
+Chaque ligne suit la boucle de la règle 9 de `CLAUDE.md`. Statut : **hypothèse** (posée, pas encore mesurée), **mesuré** (une mesure l'a établi), **corrigé**, **réfuté**. L'ordre suit la carte, de l'amont vers l'aval.
+
+| # | Défaut lu dans le code | Référence violée | Nature | Hypothèse | Ce qui la réfuterait | Statut |
+|---|---|---|---|---|---|---|
+| D1 | Le feu exige une pression de froid ; le froid ne monte que sous 0 °C ressenti | BRIEF §5.3 : « foudre → feu observé → maîtrise du feu », sans condition de froid ; critère §9 : le feu découvert par au moins un clan sur trois en 500 ans | modèle | Un foyer qui ne gèle jamais ne démarre jamais l'arbre technologique, quelle que soit sa vie | Un clan d'un foyer sans gel qui découvre le feu | hypothèse (prouvable par un test) |
+| D2 | Un humain sans clan n'a ni pression ni insight, et n'est rappelé que vers l'humain le plus proche | BRIEF §5.1 : le clan est une conséquence ; rien n'y interdit à un isolé d'errer, mais rien ne le ramène vers un peuple | modèle | La dispersion humaine (et la faune qu'elle entraîne) naît des non-affiliés, qui forment des paires ou des petits groupes loin de tout | Une dispersion portée par des membres de clans | hypothèse |
+| D3 | Voir un gisement exige de poser le pied sur sa tuile (2 m) | BRIEF §5.2 : « a déjà VU » un affleurement | modèle | Le cuivre est quasi inatteignable par la marche ordinaire | Des expositions au cuivre fréquentes là où un gisement est à portée | hypothèse |
+| D4 | La famine n'agit qu'au-delà de 0,5 de faim moyenne | BRIEF §5.2 : la famine est une pression | modèle (calibrage) | La composante famine ne s'active presque jamais | Une composante famine non nulle sur une part notable des jours-clan | hypothèse (mesure partielle : faim moyenne max 0,19 sur `chronicle`, 2026-09-22) |
+| D5 | `ClanPressure::total` n'est lue que par les tests | — | code mort | Aucun effet sur la simulation | — | à nettoyer |
+| D6 | L'hydrologie n'est pas simulée ; l'eau douce = sources aléatoires | BRIEF §2.2 (rivières, lacs, deltas) et §5.3 (« feu + argile + rivière → poterie ») | modèle (choix) | Pas de rivière pour structurer l'habitat humain | — | à décider |
+| D7 | Un chunk évincé rattrape sa repousse d'un coup, à minuit | Déterminisme : le monde ne doit pas dépendre de la capacité du store | bug | — | — | mesuré (70 % des tuiles broutées diffèrent à 30 j entre deux capacités) |
+| D8 | Documentation d'`exposure.rs` périmée ; `springs_for` contourne le cache d'humidité | — | documentation / coût | — | — | à nettoyer |
+
+Le chantier de dérive (performance), ses mesures et ses corrections sont tenus dans [CARTE.md](CARTE.md). Il a porté presque entièrement sur l'aval de la carte (faune, store) ; D1 à D4 sont en amont.
+
+## 5. Ce que la lecture laisse en question
+
 
 Ces points ne se tranchent pas en lisant ; ils demandent de confronter le code aux mesures (étape suivante).
 
