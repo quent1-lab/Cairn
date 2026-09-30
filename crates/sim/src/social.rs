@@ -102,7 +102,7 @@
 //! l'instant présent — chasser et cueillir rechargent directement la faim de
 //! l'individu, sans jamais rien laisser derrière. `Clan::stock` change ça
 //! *a minima* : une chasse fructueuse nourrit rarement pile ce qu'il fallait
-//! (`HUNT_NUTRITION` est une bête tuée, pas une portion calibrée) — le
+//! (une prise est une bête entière, `sim::meat_hunger`, pas une portion) — le
 //! surplus, qui partait auparavant dans le `.max(0.0)` de la faim déjà à
 //! zéro, est désormais **porté** par le chasseur (`Carrying`, `sim::execute`,
 //! bras `Hunt`) puis rapporté au foyer de son clan pour y rejoindre le stock

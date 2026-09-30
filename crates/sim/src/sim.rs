@@ -67,17 +67,25 @@ const WALK_SAMPLE_TILES: f64 = 8.0;
 const EAT_HUNGER_PER_TICK: f32 = 0.3;
 /// Valeur nutritive d'une unité de biomasse, en points de faim.
 const NUTRITION_PER_BIOMASS: f32 = 0.02;
+/// Énergie d'un point de faim. La faim monte de 0,5 par jour (`HUNGER_PER_TICK`) :
+/// un point, c'est deux rations quotidiennes d'un adulte actif, ~2 500 kcal
+/// chacune (FAO/OMS, dépense d'un chasseur-cueilleur).
+pub(crate) const KCAL_PER_HUNGER: f64 = 5_000.0;
 /// Portée d'une mise à mort : le chasseur doit être à ~200 m du troupeau.
 const HUNT_REACH_TILES: f64 = cairn_core::km_to_tiles(0.2);
 /// Têtes prélevées par chasse réussie.
 const HUNT_YIELD_HEAD: f32 = 1.0;
-/// Ce qu'une prise retire de faim : une bête nourrit bien mieux que des
-/// baies — c'est tout l'intérêt du risque et du trajet.
-const HUNT_NUTRITION: f32 = 0.7;
+/// Ce qu'une bête de `species` retire de faim, en points : son énergie
+/// comestible (`Species::edible_kcal`). Un cerf vaut ~14 points, un mois de
+/// nourriture pour une personne : bien plus qu'un chasseur n'en mange, d'où
+/// le surplus rapporté au clan.
+fn meat_hunger(species: fauna::Species) -> f32 {
+    (f64::from(species.edible_kcal()) / KCAL_PER_HUNGER) as f32
+}
 /// Plafond du stock commun d'un clan, par membre : quelques portions de
-/// réserve, pas un grenier sans fond. `HUNT_NUTRITION` vaut jusqu'à ~0,88
-/// (au meilleur skill) — 3 portions, c'est de quoi absorber un mauvais jour
-/// de chasse pour chaque membre, pas accumuler indéfiniment. `pub` (même
+/// réserve, pas un grenier sans fond — 3 points, six jours de nourriture par
+/// membre, de quoi absorber un mauvais jour de chasse, pas accumuler
+/// indéfiniment. `pub` (même
 /// patron que `memory::MEMORY_CELL_TILES`) : le client en a besoin pour
 /// afficher un stock relatif à son plafond plutôt qu'un nombre nu.
 pub const STOCK_CAP_PER_MEMBER: f32 = 3.0;
@@ -117,7 +125,7 @@ const WOUND_HEAL_PER_TICK: f32 = 1.0 / (24.0 * 14.0);
 /// Têtes prélevées **durablement** sur un cheptel à chaque tour de garde
 /// (domestication, `crate::pastoral`) : bien moins que la croissance d'un
 /// troupeau protégé, pour qu'il se refasse (traite/abattage mesuré). La
-/// nourriture obtenue (au taux d'une prise, `HUNT_NUTRITION`) va au stock
+/// nourriture obtenue (la viande de ces têtes, `meat_hunger`) va au stock
 /// commun, pas dans le ventre de l'éleveur.
 const HERD_HARVEST_HEAD: f32 = 0.3;
 
@@ -671,6 +679,7 @@ impl Sim {
                 entity,
                 pos: (pos.x, pos.y),
                 population: herd.population,
+                species: herd.species,
                 tameness: herd.tameness,
             })
             .collect()
@@ -1415,9 +1424,10 @@ fn execute(
             return None;
         }
         behavior.activity = Activity::Hunting;
-        // Un bon chasseur tire plus d'une bête (dépeçage, choix de la proie) —
-        // et chaque mise à mort forge le geste bien plus qu'une heure d'affût.
-        let nutrition = HUNT_NUTRITION * (0.75 + 0.5 * agent_skills.hunting);
+        // Un bon chasseur tire tout de sa bête (dépeçage, rien de perdu), un
+        // novice en gâche un quart — et chaque mise à mort forge le geste bien
+        // plus qu'une heure d'affût.
+        let nutrition = meat_hunger(prey.species) * (0.75 + 0.25 * agent_skills.hunting);
         skills::practice(
             &mut agent_skills.hunting,
             skills::hunt_cap(traits),
@@ -1493,8 +1503,9 @@ fn execute(
         behavior.activity = Activity::Farming; // même geste pastoral que le champ
         skills::practice(&mut agent_skills.foraging, skills::forage_cap(traits), 1.0);
         if let Some(clan_id) = clan {
-            *clan_stock.entry(clan_id).or_insert(0.0) += HERD_HARVEST_HEAD * HUNT_NUTRITION;
-            crate::food_stats::fed(crate::food_stats::Source::Herd, HERD_HARVEST_HEAD * HUNT_NUTRITION);
+            let meat = HERD_HARVEST_HEAD * meat_hunger(cheptel.species);
+            *clan_stock.entry(clan_id).or_insert(0.0) += meat;
+            crate::food_stats::fed(crate::food_stats::Source::Herd, meat);
         }
         behavior.task = None;
         return Some(Kill { herd: cheptel.entity, head: HERD_HARVEST_HEAD });
@@ -2932,8 +2943,8 @@ mod tests {
     }
 
     /// L'incrément 3 de la Phase 4 (stock commun, BRIEF §5.1) : une chasse
-    /// fructueuse nourrit rarement pile ce qu'il fallait — `HUNT_NUTRITION`
-    /// est une bête tuée, pas une portion calibrée. Le surplus, qui partait
+    /// fructueuse nourrit rarement pile ce qu'il fallait — une prise est une
+    /// bête entière (`meat_hunger`), pas une portion calibrée. Le surplus, qui partait
     /// auparavant dans le `.max(0.0)` de la faim déjà comblée, charge
     /// désormais `Carrying` — **pas** le stock directement : la viande doit
     /// encore être rapportée au foyer (voir le test suivant). Test au niveau
@@ -2967,6 +2978,7 @@ mod tests {
                 entity: hecs::Entity::DANGLING,
                 pos: (pos.x, pos.y),
                 population: 20.0,
+                species: fauna::Species::Deer,
                 tameness: 0.0,
             };
 
@@ -2999,6 +3011,15 @@ mod tests {
         assert!(
             carrying.0 > 0.0,
             "le surplus (nutrition au-delà de la faim comblée) doit être porté par le chasseur"
+        );
+        // D10 : une bête tuée est une bête entière. Un cerf de ~120 kg donne
+        // ~60 kg comestibles, ~72 000 kcal, un mois de nourriture ; même un
+        // novice qui en gâche un quart en tire plus de deux semaines (7 points).
+        let fed = 0.3 + carrying.0;
+        assert!(
+            fed >= 7.0,
+            "un cerf tué ne rapporte que {fed:.2} point de faim, {:.1} jour de nourriture",
+            fed / 0.5
         );
         assert_eq!(
             clan_stock.get(&clan_id).copied().unwrap_or(0.0),
@@ -3373,6 +3394,7 @@ mod tests {
             entity: hecs::Entity::DANGLING,
             pos: homef,
             population: 20.0,
+            species: fauna::Species::Aurochs,
             tameness: 0.8, // franchement domestiqué
         };
         let mut pos = Position { x: homef.0, y: homef.1 };

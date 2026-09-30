@@ -82,9 +82,10 @@ const MIN_CARRYING_WORTH_TRIP: f32 = 0.05;
 /// Assez pour peser dans le softmax sans écraser la soif ou la faim : on rentre
 /// chez soi, on ne fuit pas — et un besoin vital passe toujours avant.
 const INTRUSION_URGENCY: f32 = 0.30;
-/// Ce qu'une chasse au meilleur skill peut charger d'un coup (voir
-/// `HUNT_NUTRITION` dans `sim.rs`) : sert à normaliser l'urgence du retour,
-/// pas une limite dure — porter plus ne fait qu'accentuer le plafond.
+/// Charge à partir de laquelle le retour au foyer est pleinement urgent : sert
+/// à normaliser l'urgence, pas une limite dure. Une bête entière (`meat_hunger`
+/// dans `sim.rs`, ~14 points pour un cerf) la dépasse de loin : qui porte une
+/// prise rentre.
 const CARRYING_FULL_LOAD: f32 = 0.9;
 /// Seuil de faim sous lequel un agriculteur peut consacrer du temps au champ :
 /// on cultive **au calme** (surplus de temps), pas quand on meurt de faim — la

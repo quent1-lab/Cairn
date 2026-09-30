@@ -395,6 +395,23 @@ impl Species {
         }
     }
 
+    /// Énergie comestible d'une bête, en kcal : masse vivante × part
+    /// consommable (~50 % chez les grands ongulés : viande, graisse, abats,
+    /// moelle ; White 1953) × ~1 200 kcal/kg (gibier cru maigre, USDA — bas de
+    /// fourchette, la graisse le relèverait). Masses vivantes moyennes : cerf
+    /// élaphe ~120 kg, renne ~110 kg, aurochs ~700 kg, gazelle ~25 kg. Nul
+    /// pour les prédateurs, qu'on ne chasse pas pour les manger.
+    pub fn edible_kcal(self) -> f32 {
+        let live_kg = match self {
+            Species::Deer => 120.0,
+            Species::Reindeer => 110.0,
+            Species::Aurochs => 700.0,
+            Species::Gazelle => 25.0,
+            Species::Wolf | Species::CaveLion => 0.0,
+        };
+        live_kg * 0.5 * 1_200.0
+    }
+
     /// **Dangerosité** — le risque à l'affronter, dans [0, 1]. Zéro pour la
     /// plupart des proies ; élevé pour les fauves. Sert au futur incrément
     /// « éleveur » : un humain qui chasse un prédateur pour protéger son gibier
@@ -560,6 +577,8 @@ pub struct HerdView {
     pub entity: hecs::Entity,
     pub pos: (f64, f64),
     pub population: f32,
+    /// L'espèce : c'est elle qui dit ce qu'une prise rapporte.
+    pub species: Species,
     /// Apprivoisement (0 = sauvage) : un troupeau bien apprivoisé est le
     /// **cheptel** qu'un éleveur va garder (`TaskKind::Herd`).
     pub tameness: f32,
