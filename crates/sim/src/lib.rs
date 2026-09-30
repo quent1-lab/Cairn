@@ -34,6 +34,7 @@ pub mod exposure;
 pub mod faith;
 pub mod fauna;
 pub mod fire;
+pub mod food_stats;
 pub mod memory;
 pub mod names;
 pub mod pastoral;

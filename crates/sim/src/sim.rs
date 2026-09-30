@@ -1429,9 +1429,14 @@ fn execute(
         // rapporter au foyer (`Carrying`, `TaskKind::BringSurplusHome`),
         // sans quoi la viande se téléporterait depuis le lieu de la chasse.
         let surplus = (nutrition - phys.hunger).max(0.0);
+        crate::food_stats::fed(crate::food_stats::Source::HuntEaten, nutrition.min(phys.hunger));
+        crate::food_stats::event(crate::food_stats::Event::Kills, 1);
         phys.hunger = (phys.hunger - nutrition).max(0.0);
         if surplus > 0.0 && clan.is_some() {
             carrying.0 += surplus;
+            crate::food_stats::fed(crate::food_stats::Source::HuntCarried, surplus);
+        } else {
+            crate::food_stats::fed(crate::food_stats::Source::HuntWasted, surplus);
         }
         behavior.task = None;
         return Some(Kill { herd: prey.entity, head: HUNT_YIELD_HEAD });
@@ -1489,6 +1494,7 @@ fn execute(
         skills::practice(&mut agent_skills.foraging, skills::forage_cap(traits), 1.0);
         if let Some(clan_id) = clan {
             *clan_stock.entry(clan_id).or_insert(0.0) += HERD_HARVEST_HEAD * HUNT_NUTRITION;
+            crate::food_stats::fed(crate::food_stats::Source::Herd, HERD_HARVEST_HEAD * HUNT_NUTRITION);
         }
         behavior.task = None;
         return Some(Kill { herd: cheptel.entity, head: HERD_HARVEST_HEAD });
@@ -1568,6 +1574,13 @@ fn execute(
             let wanted = (phys.hunger.min(bite) / NUTRITION_PER_BIOMASS).ceil() as u8;
             let taken = wanted.min(tile.biomass);
             tile.biomass -= taken;
+            crate::food_stats::fed(
+                crate::food_stats::Source::Forage,
+                (f32::from(taken) * NUTRITION_PER_BIOMASS).min(phys.hunger),
+            );
+            crate::food_stats::event(crate::food_stats::Event::BiomassTaken, u64::from(taken));
+            crate::food_stats::event(crate::food_stats::Event::ForageHours, 1);
+            crate::food_stats::event(crate::food_stats::Event::ForageShort, u64::from(taken < wanted));
             phys.hunger = (phys.hunger - f32::from(taken) * NUTRITION_PER_BIOMASS).max(0.0);
             if phys.hunger <= 0.05 || tile.biomass == 0 {
                 behavior.task = None; // rassasié, ou tuile épuisée
@@ -1596,6 +1609,7 @@ fn execute(
             {
                 let taken = stock.min(phys.hunger);
                 *stock -= taken;
+                crate::food_stats::fed(crate::food_stats::Source::Stock, taken);
                 phys.hunger = (phys.hunger - taken).max(0.0);
             }
             behavior.task = None; // un puisage, puis on redélibère

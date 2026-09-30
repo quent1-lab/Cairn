@@ -283,6 +283,7 @@ pub(crate) fn nurse_infants(sim: &mut Sim) {
                 _ => Activity::Idle,
             };
             if has_milk {
+                crate::food_stats::fed(crate::food_stats::Source::Milk, NURSE_RELIEF.min(phys.hunger));
                 phys.hunger = (phys.hunger - NURSE_RELIEF).max(0.0);
                 phys.thirst = (phys.thirst - NURSE_RELIEF).max(0.0);
             }

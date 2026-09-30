@@ -18,6 +18,9 @@ profile = []
 # est un type vide et ses appels s'évaporent — elle ajoute une boucle sur les
 # troupeaux par meute et par tick, ce qui doublerait le coût du tour de meute.
 fauna-stats = []
+# Télémétrie de l'alimentation humaine (défaut D10) : d'où vient chaque point
+# de faim retiré. Hors de cette feature, les appels sont vides.
+food-stats = []
 
 [dependencies]
 cairn-core.workspace = true
@@ -29,3 +32,7 @@ ron.workspace = true
 [dev-dependencies]
 image.workspace = true
 rayon.workspace = true
+
+[[example]]
+name = "nourriture"
+required-features = ["food-stats"]
