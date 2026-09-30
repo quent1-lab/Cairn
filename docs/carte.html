@@ -482,7 +482,7 @@ html { scroll-behavior: smooth; }
     <p>La lecture du code décide de ce qu'on traite, pas le chantier en cours : on ne règle pas le coût d'un comportement que le modèle de base ne devrait pas produire. Chaque tour de boucle revient à cette carte, réfutations comprises.</p>
     <figure>
       <div class="fig">
-        <svg viewBox="0 0 1000 250" role="img" aria-label="Boucle : lire, classer, prédire, mesurer, figer un témoin et voir le test échouer, corriger sans scripter, valider en relevant les voisins, reboucher dans la carte.">
+        <svg viewBox="0 0 1000 250" role="img" aria-label="Boucle : lire, classer, prédire, mesurer, figer un témoin et voir le test échouer, corriger sans scripter, valider en relevant les voisins, chercher ce qu'on a manqué, reboucher dans la carte.">
           <defs>
             <marker id="ar4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
           </defs>
@@ -492,17 +492,19 @@ html { scroll-behavior: smooth; }
           <rect class="n" x="770" y="30" width="210" height="74" rx="8"/><text class="tb" x="786" y="58">4 · Mesurer</text><text class="tm" x="786" y="80">régime affiché, 4 seeds</text>
           <rect class="n" x="770" y="150" width="210" height="74" rx="8"/><text class="tb" x="786" y="178">5 · Témoin, test rouge</text><text class="tm" x="786" y="200">correction non scriptée</text>
           <rect class="n" x="520" y="150" width="200" height="74" rx="8"/><text class="tb" x="536" y="178">6 · Valider</text><text class="tm" x="536" y="200">l'hypothèse et les voisins</text>
-          <rect class="n-store" x="270" y="150" width="200" height="74" rx="8"/><text class="tb" x="286" y="178">7 · Reboucher</text><text class="tm" x="286" y="200">la carte, réfutations comprises</text>
+          <rect class="n" x="270" y="150" width="200" height="74" rx="8"/><text class="tb" x="286" y="178">7 · Qu'a-t-on manqué ?</text><text class="tm" x="286" y="200">nommer ce qui n'est pas couvert</text>
+          <rect class="n-store" x="20" y="150" width="200" height="74" rx="8"/><text class="tb" x="36" y="178">8 · Reboucher</text><text class="tm" x="36" y="200">la carte, réfutations comprises</text>
           <line class="a" x1="220" y1="67" x2="266" y2="67" marker-end="url(#ar4)"/>
           <line class="a" x1="470" y1="67" x2="516" y2="67" marker-end="url(#ar4)"/>
           <line class="a" x1="720" y1="67" x2="766" y2="67" marker-end="url(#ar4)"/>
           <line class="a" x1="875" y1="104" x2="875" y2="146" marker-end="url(#ar4)"/>
           <line class="a" x1="770" y1="187" x2="724" y2="187" marker-end="url(#ar4)"/>
           <line class="a" x1="520" y1="187" x2="474" y2="187" marker-end="url(#ar4)"/>
-          <polyline class="a" points="270,187 120,187 120,108" marker-end="url(#ar4)"/>
+          <line class="a" x1="270" y1="187" x2="224" y2="187" marker-end="url(#ar4)"/>
+          <line class="a" x1="120" y1="150" x2="120" y2="108" marker-end="url(#ar4)"/>
         </svg>
       </div>
-      <figcaption>Une prédiction réfutée ou une correction annulée retourne aussi à la carte : sans cela, une autre session la retentera.</figcaption>
+      <figcaption>L'étape 7 est la question de Quentin : « est-ce que je suis passé à côté de quelque chose ? ». On y répond en nommant au moins une chose, jamais par « non ». Une prédiction réfutée ou une correction annulée retourne aussi à la carte : sans cela, une autre session la retentera.</figcaption>
     </figure>
   </section>
 
