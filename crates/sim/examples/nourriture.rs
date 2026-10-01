@@ -102,6 +102,12 @@ fn main() {
     let mut traces_printed = 0;
     // D12 — la natalité : jours-femme féconde par première porte fermée.
     let mut gates: BTreeMap<&'static str, u64> = BTreeMap::new();
+    // D13 — la violence : chaque jour, pour chaque paire de clans, le critère de
+    // rareté de `social::update_relations` recalculé à part (gibier à 4,5 km du
+    // milieu des foyers, par bouche, contre 3 têtes), et la tension.
+    // (paires-jours, en contact, rares, tension ≥ 0,4, somme des tensions)
+    let mut pairs = (0u64, 0u64, 0u64, 0u64, 0.0f64);
+    let mut seen_events = 0usize;
     for day in 1..=total_days {
         if first_clan_day.is_none() && !sim.clans.is_empty() {
             first_clan_day = Some(day - 1);
@@ -206,6 +212,42 @@ fn main() {
             }
         }
         human_days += sim.population() as f64;
+        // Les paires de clans, une fois par jour.
+        {
+            let residence = cairn_sim::social::RESIDENCE_RADIUS_TILES;
+            let herds: Vec<(f64, f64, f32)> = sim
+                .fauna
+                .query::<(&fauna::Herd, &Position)>()
+                .iter()
+                .map(|(_, (h, p))| (p.x, p.y, h.population))
+                .collect();
+            for i in 0..sim.clans.len() {
+                for j in (i + 1)..sim.clans.len() {
+                    let (a, b) = (&sim.clans[i], &sim.clans[j]);
+                    pairs.0 += 1;
+                    let dist = (a.home.0 - b.home.0).hypot(a.home.1 - b.home.1);
+                    let contact = dist <= 2.0 * residence;
+                    if contact {
+                        pairs.1 += 1;
+                        let mid = ((a.home.0 + b.home.0) / 2.0, (a.home.1 + b.home.1) / 2.0);
+                        let game: f32 = herds
+                            .iter()
+                            .filter(|h| (h.0 - mid.0).hypot(h.1 - mid.1) <= residence)
+                            .map(|h| h.2)
+                            .sum();
+                        let mouths = (a.members.len() + b.members.len()).max(1) as f32;
+                        if game / mouths < 3.0 {
+                            pairs.2 += 1;
+                        }
+                    }
+                    let t = sim.clan_relations.tension_between(a.id, b.id);
+                    if t >= 0.4 {
+                        pairs.3 += 1;
+                    }
+                    pairs.4 += f64::from(t);
+                }
+            }
+        }
         // Les portes de la conception, relevées une fois par jour.
         {
             let tick_now = sim.time.tick;
@@ -380,6 +422,28 @@ fn main() {
                 );
             }
             gates.clear();
+            {
+                let (mut raids, mut killed, mut mutual) = (0u32, 0usize, 0u32);
+                for e in &sim.chronicle[seen_events..] {
+                    if let cairn_sim::EventKind::Raid { casualties, mutual: m, .. } = e.kind {
+                        raids += 1;
+                        killed += casualties;
+                        mutual += u32::from(m);
+                    }
+                }
+                seen_events = sim.chronicle.len();
+                if pairs.0 > 0 || raids > 0 {
+                    println!(
+                        "      violence : {} paires-jours de clans, {:.0} % en contact, {:.0} % en contact ET rares, {:.0} % au-dessus du seuil de razzia (tension moyenne {:.2}) ; {raids} affrontements ({mutual} mêlées), {killed} tués",
+                        pairs.0,
+                        100.0 * pairs.1 as f64 / pairs.0.max(1) as f64,
+                        100.0 * pairs.2 as f64 / pairs.0.max(1) as f64,
+                        100.0 * pairs.3 as f64 / pairs.0.max(1) as f64,
+                        pairs.4 / pairs.0.max(1) as f64,
+                    );
+                }
+                pairs = (0, 0, 0, 0, 0.0);
+            }
             if !deaths_by_age.is_empty() {
                 let txt: Vec<String> =
                     deaths_by_age.iter().map(|((c, cause), n)| format!("{c} {cause} {n}")).collect();
