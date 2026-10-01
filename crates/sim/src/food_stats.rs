@@ -40,6 +40,10 @@ pub enum Event {
     ForageShort = 2,
     /// Bêtes tuées par des humains.
     Kills = 3,
+    /// Heures passées sur une tâche de chasse (approche comprise).
+    HuntHours = 4,
+    /// Heures passées à portée d'une bête, où la mise à mort se tente.
+    HuntReachHours = 5,
 }
 
 #[cfg(feature = "food-stats")]
@@ -47,7 +51,7 @@ mod imp {
     use std::sync::atomic::{AtomicU64, Ordering};
     /// Faim en millionièmes de point.
     pub static HUNGER: [AtomicU64; 9] = [const { AtomicU64::new(0) }; 9];
-    pub static EVENTS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
+    pub static EVENTS: [AtomicU64; 6] = [const { AtomicU64::new(0) }; 6];
 
     pub fn fed(source: super::Source, hunger: f32) {
         let v = (f64::from(hunger.max(0.0)) * 1e6) as u64;
@@ -56,12 +60,12 @@ mod imp {
     pub fn event(e: super::Event, n: u64) {
         EVENTS[e as usize].fetch_add(n, Ordering::Relaxed);
     }
-    pub fn take() -> ([f64; 9], [u64; 4]) {
+    pub fn take() -> ([f64; 9], [u64; 6]) {
         let mut h = [0.0; 9];
         for (i, a) in HUNGER.iter().enumerate() {
             h[i] = a.swap(0, Ordering::Relaxed) as f64 / 1e6;
         }
-        let mut e = [0; 4];
+        let mut e = [0; 6];
         for (i, a) in EVENTS.iter().enumerate() {
             e[i] = a.swap(0, Ordering::Relaxed);
         }
@@ -85,6 +89,6 @@ pub fn event(_event: Event, _n: u64) {
 
 /// Lit et remet à zéro : (faim retirée par source, événements).
 #[cfg(feature = "food-stats")]
-pub fn take() -> ([f64; 9], [u64; 4]) {
+pub fn take() -> ([f64; 9], [u64; 6]) {
     imp::take()
 }

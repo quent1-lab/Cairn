@@ -146,6 +146,21 @@ fn resolve_shares(sim: &mut Sim, shares: &[Share]) {
     }
 }
 
+/// Chance, pour un chasseur moyen, de tuer dans l'heure quand il est à portée.
+/// Un chasseur hadza abat un gros animal une fois par ~29 jours de chasse
+/// (1-3 % des jours, arc seul) ; les Ju/'hoansi rapportent de la viande sur
+/// moins de 27 % des jours, petit gibier compris. 2 % par heure à portée donne
+/// ~11 % sur six heures de poursuite : le milieu de cette fourchette.
+const HUNT_SUCCESS_PER_HOUR: f32 = 0.02;
+
+/// L'approche de `hunter`, à portée au tick `tick`, tue-t-elle ? Tirage
+/// déterministe (seed, tick, chasseur), chance `HUNT_SUCCESS_PER_HOUR` que la
+/// compétence double au mieux.
+fn hunt_succeeds(seed: WorldSeed, tick: u64, hunter: AgentId, skill: f32) -> bool {
+    let mut rng = Pcg32::new(seed.derive(crate::salt::HUNT) ^ cairn_core::splitmix64(tick), hunter.0);
+    rng.next_f32() < HUNT_SUCCESS_PER_HOUR * (0.5 + skill)
+}
+
 /// Portée d'une mise à mort : le chasseur doit être à ~200 m du troupeau.
 const HUNT_REACH_TILES: f64 = cairn_core::km_to_tiles(0.2);
 /// Têtes prélevées par chasse réussie.
@@ -1529,6 +1544,7 @@ fn execute(
     // c'est ce qui fait que le chasseur *suit* le gibier au lieu de courir
     // vers l'herbe où il broutait il y a quatre heures.
     if task.kind == TaskKind::Hunt {
+        crate::food_stats::event(crate::food_stats::Event::HuntHours, 1);
         let Some(prey) = closest_herd(pos, herds) else {
             behavior.task = None; // le troupeau est mort ou hors de vue
             behavior.activity = Activity::Idle;
@@ -1543,6 +1559,14 @@ fn execute(
             return None;
         }
         behavior.activity = Activity::Hunting;
+        // À portée ne veut pas dire tué : la bête flaire, détale, la flèche
+        // manque. Chaque heure d'approche a sa chance, que le savoir-faire
+        // double ou divise (`HUNT_SUCCESS_PER_HOUR`). Manquée, la chasse
+        // continue : la tâche reste, on suit toujours le troupeau.
+        crate::food_stats::event(crate::food_stats::Event::HuntReachHours, 1);
+        if !hunt_succeeds(world.seed(), tick, id, agent_skills.hunting) {
+            return None;
+        }
         // Un bon chasseur tire tout de sa bête (dépeçage, rien de perdu), un
         // novice en gâche un quart — et chaque mise à mort forge le geste bien
         // plus qu'une heure d'affût.
@@ -2077,6 +2101,37 @@ mod tests {
 
     /// Prépare le monde sans le faire tourner : `agents` humains et `herds`
     /// troupeaux serrés autour de la même clairière. Renvoie aussi le foyer.
+    /// Comme [`scenario_setup`], mais au foyer des bancs (`scenario::find_home`,
+    /// une source à portée) : pour les expériences de plusieurs semaines, où la
+    /// scène standard, sans eau connue, tue de soif avant que le reste ne joue.
+    fn scenario_au_foyer(seed: u64, agents: u32, herds: u32) -> (Sim, (i64, i64)) {
+        let mut sim = Sim::new(WorldSeed(seed), 2048);
+        sim.allow_fauna_immigration = false;
+        sim.allow_wildfires = false;
+        let seed_point =
+            (cairn_core::km_to_tiles(1500.0) as i64, cairn_core::km_to_tiles(2100.0) as i64);
+        let home = crate::scenario::find_home(&mut sim, seed_point);
+        let (mut placed, mut k) = (0, 0i64);
+        while placed < agents && k < 10_000 {
+            let (x, y) = (home.0 + (k % 20) * 6 - 60, home.1 + (k / 20) * 6 - 60);
+            k += 1;
+            if sim.world.tile(x, y).is_walkable() {
+                sim.spawn_agent(x as f64 + 0.5, y as f64 + 0.5);
+                placed += 1;
+            }
+        }
+        assert_eq!(placed, agents, "semis incomplet autour de {home:?}");
+        for i in 0..herds {
+            let angle = i as f64 * 1.7;
+            sim.spawn_herd(
+                home.0 as f64 + angle.cos() * 300.0,
+                home.1 as f64 + angle.sin() * 300.0,
+                fauna::HERD_START,
+            );
+        }
+        (sim, home)
+    }
+
     fn scenario_setup(seed: u64, agents: u32, herds: u32) -> (Sim, (i64, i64)) {
         // Capacité large : à 512 chunks, 60 agents dispersés dépassent le
         // working set et le LRU thrash (mesuré : 0,8 tick/s contre 15).
@@ -2173,6 +2228,13 @@ mod tests {
                 KCAL_PER_DAY / (gathered / 360.0)
             );
         }
+    }
+
+    /// Le premier tick où l'approche d'`hunter` tue : les tests qui vérifient
+    /// ce qu'une prise **rapporte** (et non combien on en fait) chassent à
+    /// ce tick-là.
+    fn tick_de_prise(sim: &Sim, hunter: AgentId, skill: f32) -> u64 {
+        (0..).find(|&t| hunt_succeeds(sim.world.seed(), t, hunter, skill)).unwrap()
     }
 
     /// Une tuile de terre ferme proche de `home + (dx, 0)`, pour poser un
@@ -2568,11 +2630,22 @@ mod tests {
     /// La zone se vide des deux façons — on en tue, et les autres décampent.
     #[test]
     fn la_surchasse_effondre_le_gibier_local() {
-        let jours = 24 * 15;
+        // Trente jours et non quinze : la mise à mort est incertaine depuis D10
+        // (~10 % par journée de chasse). Au-delà, les troupeaux quittent d'eux-mêmes les 3 km
+        // même sans chasseur (mesuré : 100 → 0 à 90 jours), et le témoin ne
+        // témoigne plus de rien.
+        let jours = 24 * 30;
         let cheptel = |agents: u32| {
-            let (mut sim, home) = scenario_setup(42, agents, 4);
+            let (mut sim, home) = scenario_au_foyer(42, agents, 4);
             let depart = local_herbivores(&sim, home, 3.0);
             for _ in 0..jours {
+                // La surchasse suppose une pression de chasse : des chasseurs
+                // qui ont faim et ne portent rien (D10 : repus ou pourvus, on ne
+                // chasse plus).
+                for (_, (phys, carrying)) in sim.agents.query_mut::<(&mut Physiology, &mut Carrying)>() {
+                    phys.hunger = phys.hunger.max(0.9);
+                    carrying.0 = 0.0;
+                }
                 sim.step();
             }
             (depart, local_herbivores(&sim, home, 3.0), sim.hunted_head)
@@ -2600,24 +2673,24 @@ mod tests {
 
     #[test]
     fn la_chasse_nourrit_mieux_que_la_cueillette() {
-        // Un chasseur au contact du gibier doit rassasier, et le troupeau
-        // doit le payer : c'est le couplage « chassent quand ils ont faim ».
-        let (mut sim, _) = scenario_setup(42, 20, 3);
-        for (_, phys) in sim.agents.query_mut::<&mut Physiology>() {
-            phys.hunger = 0.9; // affamés : la chasse doit dominer
-        }
-        for _ in 0..24 * 3 {
+        // Des affamés près du gibier chassent, et le troupeau le paie : c'est le
+        // couplage « chassent quand ils ont faim ». Depuis que la mise à mort
+        // est incertaine (~10 % par journée de chasse, D10) et qu'un chasseur
+        // qui porte de la viande ne repart pas, on les garde affamés trente
+        // jours : c'est la faim qui est l'expérience, pas l'état initial. Trente
+        // et non dix : mesuré, ~9 heures à portée par jour pour le groupe, à
+        // ~1,7 % l'heure, soit ~0,16 prise par jour — zéro prise en trente jours
+        // a moins de 1 % de chances. Au foyer des bancs : sans source à portée,
+        // la soif tuait les deux tiers des chasseurs avant la fin.
+        let (mut sim, _) = scenario_au_foyer(42, 20, 3);
+        for _ in 0..24 * 30 {
+            for (_, (phys, carrying)) in sim.agents.query_mut::<(&mut Physiology, &mut Carrying)>() {
+                phys.hunger = phys.hunger.max(0.9);
+                carrying.0 = 0.0;
+            }
             sim.step();
         }
-        assert!(sim.hunted_head > 0.0, "des affamés près du gibier doivent chasser");
-        let faim: f32 = sim
-            .agents
-            .query::<&Physiology>()
-            .iter()
-            .map(|(_, p)| p.hunger)
-            .sum::<f32>()
-            / sim.population().max(1) as f32;
-        assert!(faim < 0.8, "la chasse doit faire retomber la faim (moyenne {faim:.2})");
+        assert!(sim.hunted_head > 0.0, "des affamés près du gibier doivent chasser et tuer");
     }
 
     #[test]
@@ -3149,6 +3222,7 @@ mod tests {
             };
 
         let mut shares = Vec::new();
+        let tick = tick_de_prise(&sim, AgentId(0), skills.hunting);
         let kill = execute(
             &mut sim.world,
             &mut routes,
@@ -3171,7 +3245,7 @@ mod tests {
             &mut Vec::new(),
             &mut Vec::new(),
             &mut shares,
-            0,
+            tick,
         );
 
         assert!(kill.is_some(), "le troupeau est à portée : la chasse doit réussir");
@@ -3225,13 +3299,14 @@ mod tests {
                 species: fauna::Species::Deer,
                 tameness: 0.0,
             };
+            let tick = tick_de_prise(&sim, AgentId(9_999), Skills::default().hunting);
             let mut shares = Vec::new();
             execute(
                 &mut sim.world, &mut BTreeMap::new(), &mut PATH_REQUESTS_PER_TICK.clone(),
                 AgentId(9_999), &mut pos, &mut phys, &mut behavior, &[herd], &[], &[], 1.0,
                 &traits, &mut Skills::default(), None, &mut BTreeMap::new(),
                 &mut Carrying::default(), &mut Prestige::default(), &mut Vec::new(),
-                &mut Vec::new(), &mut Vec::new(), &mut shares, 0,
+                &mut Vec::new(), &mut Vec::new(), &mut shares, tick,
             );
             resolve_shares(&mut sim, &shares);
             sim.agents
@@ -3381,6 +3456,7 @@ mod tests {
             species: fauna::Species::Deer,
             tameness: 0.0,
         };
+        let tick = tick_de_prise(&sim, AgentId(0), Skills::default().hunting);
         let mut run = |task: Option<Task>, phys: &mut Physiology, carrying: &mut Carrying, pos: &mut Position| {
             let mut behavior = Behavior { task, ..Behavior::default() };
             execute(
@@ -3388,7 +3464,7 @@ mod tests {
                 AgentId(0), pos, phys, &mut behavior, &[herd], &[], &[], 1.0, &traits,
                 &mut Skills::default(), None, &mut BTreeMap::new(), carrying,
                 &mut Prestige::default(), &mut Vec::new(), &mut Vec::new(), &mut Vec::new(),
-                &mut Vec::new(), 0,
+                &mut Vec::new(), tick,
             );
         };
         run(Some(Task { kind: TaskKind::Hunt, target: home }), &mut phys, &mut carrying, &mut pos);

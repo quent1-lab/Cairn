@@ -128,4 +128,6 @@ pub(crate) mod salt {
     /// son salt comme les autres : deux consommateurs qui le partageraient
     /// seraient corrélés le jour où l'un des deux compterait vraiment.
     pub const NAMES: u64 = 1016;
+    /// Issue d'une approche de chasse : la bête est-elle tuée cette heure-ci ?
+    pub const HUNT: u64 = 1019;
 }

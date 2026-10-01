@@ -223,6 +223,12 @@ fn main() {
                 total / hd, fed[0] / hd, fed[1] / hd, fed[8] / hd, fed[7] / hd, fed[4] / hd, fed[6] / hd
             );
             println!(
+                "      chasse : {} h de chasse, {} h à portée, {} prises — {:.1} % des heures à portée, {:.3} prise par heure de chasse",
+                ev[4], ev[5], ev[3],
+                100.0 * ev[5] as f64 / ev[4].max(1) as f64,
+                ev[3] as f64 / ev[4].max(1) as f64
+            );
+            println!(
                 "      gibier : {track_pct:.1} % des heures d'affamés à pister, {hunt_pct:.1} % à chasser ; {:.0} % se souviennent d'un troupeau",
                 100.0 * remembering as f64 / pop as f64
             );
