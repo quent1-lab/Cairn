@@ -599,22 +599,26 @@ mod tests {
                 }
             }
             let outcome = sim.invoke(Intervention::Revelation { agent }).unwrap();
+            // Le feu, et non « un savoir quelconque » : un savoir-faire sans
+            // matériau (la conservation des aliments) se révèle à qui n'a rien
+            // vu, et c'est cohérent — la révélation ne lève que les conditions
+            // humaines.
+            let fire = sim.tech_tree.id_of("fire_mastery").unwrap();
             let sait = sim
                 .agents
                 .query::<(&AgentId, &Knowledge)>()
                 .iter()
                 .find(|(_, (a, _))| **a == agent)
-                .map(|(_, (_, k))| k.iter().count())
+                .map(|(_, (_, k))| k.has(fire))
                 .unwrap();
             (outcome, sait)
         };
 
-        let (sans, rien) = inspire(false);
-        assert_eq!(rien, 0, "sans avoir rien vu, l'inspiré ne comprend rien");
-        assert_eq!(sans.touched, 0);
+        let (_, rien) = inspire(false);
+        assert!(!rien, "sans avoir rien vu, l'inspiré ne comprend pas le feu");
 
         let (avec, su) = inspire(true);
-        assert_eq!(su, 1, "avec le silex et le bois sous les yeux, il comprend");
+        assert!(su, "avec le silex et le bois sous les yeux, il comprend le feu");
         assert_eq!(avec.touched, 1, "un témoin : lui-même");
     }
 

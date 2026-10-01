@@ -18,7 +18,7 @@
 use std::collections::BTreeMap;
 
 use cairn_core::{TICKS_PER_DAY, WorldSeed, km_to_tiles};
-use cairn_sim::{DeathCause, Physiology, Position, Sim, fauna, food_stats, scenario};
+use cairn_sim::{DeathCause, Knowledge, Physiology, Position, Sim, fauna, food_stats, scenario};
 use cairn_worldgen::Biome;
 
 /// Maille de comptage : celle de la faune (`fauna::range_zone`), 2 km.
@@ -70,11 +70,11 @@ fn main() {
     );
     println!(
         "{:>5} {:>4} {:>4} {:>4} {:>13} {:>15} | {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} | \
-         {:>6} {:>5} {:>5} | {:>5} {:>4} {:>6} {:>7} | {:>7} {:>5}",
+         {:>6} {:>5} {:>5} | {:>5} {:>4} {:>6} {:>7} | {:>7} {:>5} {:>5}",
         "jour", "pop", "nés", "morts", "faim/soif/aut", "faim moy/p90/max",
         "ceuil", "chsM", "chsP", "perdu", "stock", "chept", "lait", "part",
         "bio/h/j", "court", "tue/j",
-        "zones", "max", "h/km²", "h/km²z", "gibier", "tps",
+        "zones", "max", "h/km²", "h/km²z", "gibier", "tps", "cons%",
     );
 
     let total_days = years * 360;
@@ -106,6 +106,13 @@ fn main() {
         }
         seen_deaths = sim.deaths.len();
 
+        let preservation = sim.tech_tree.id_of("preservation");
+        let preserving = sim
+            .agents
+            .query::<&Knowledge>()
+            .iter()
+            .filter(|(_, k)| preservation.is_some_and(|t| k.has(t)))
+            .count() as u32;
         let mut hunger: Vec<f32> = Vec::new();
         let mut zones: BTreeMap<(i64, i64), u32> = BTreeMap::new();
         for (_, (pos, phys)) in sim.agents.query::<(&Position, &Physiology)>().iter() {
@@ -131,7 +138,7 @@ fn main() {
         println!(
             "{:>5} {:>4} {:>4} {:>4} {:>4}/{:>3}/{:>4} {:>5.2}/{:>4.2}/{:>4.2} | \
              {:>5.1} {:>5.1} {:>5.1} {:>5.1} {:>5.1} {:>5.1} {:>5.1} {:>5.1} | \
-             {:>6.1} {:>4.0}% {:>5.2} | {:>5} {:>4} {:>6.2} {:>7.2} | {:>7.0} {:>5.1}",
+             {:>6.1} {:>4.0}% {:>5.2} | {:>5} {:>4} {:>6.2} {:>7.2} | {:>7.0} {:>5.1} {:>5.1}",
             day0 + day, pop, births, d_starv + d_thirst + d_other, d_starv, d_thirst, d_other,
             mean, p90, max,
             pct(fed[0]), pct(fed[1]), pct(fed[2]), pct(fed[3]), pct(fed[4]), pct(fed[5]),
@@ -140,7 +147,7 @@ fn main() {
             100.0 * ev[2] as f64 / (ev[1].max(1)) as f64,
             ev[3] as f64 / PERIOD_DAYS as f64,
             zones.len(), zmax, dens, dens_max,
-            sim.fauna_census().0, tps,
+            sim.fauna_census().0, tps, 100.0 * f64::from(preserving) / n as f64,
         );
     }
 }

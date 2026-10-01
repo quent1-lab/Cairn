@@ -167,6 +167,11 @@ pub const STOCK_SCALE_PER_MEMBER: f32 = 3.0;
 /// aucune technique : la viande crue se gâte en quelques jours. Le stock
 /// décroît en `e^(−t/τ)`, au lieu de buter sur un plafond.
 const FRESH_KEEP_DAYS: f64 = 3.0;
+/// Durée de vie de la réserve d'un clan dont **tous** les membres savent
+/// conserver (technique `preservation`) : viande séchée, gelée ou cachée au
+/// frais, des mois. Entre les deux, la durée suit la part des membres qui
+/// savent — un facteur, pas une porte.
+const PRESERVED_KEEP_DAYS: f64 = 180.0;
 /// Requêtes A* autorisées par tick (BRIEF §8.2 : « pathfinding budgété »).
 /// Seuls les agents que l'eau bloque en consomment ; les autres marchent en
 /// ligne droite pour rien.
@@ -1063,9 +1068,23 @@ impl Sim {
         // marcher inutilement d'autres membres vers un chantier déjà achevé
         // (le prochain `structures::plan` de minuit le referait de toute
         // façon, mais autant couper court tout de suite).
+        // Part des membres de chaque clan qui savent conserver.
+        let mut preserving: BTreeMap<ClanId, (u32, u32)> = BTreeMap::new();
+        let preservation = self.tech_tree.id_of("preservation");
+        for (_, (membership, knowledge)) in self.agents.query::<(&ClanMembership, &Knowledge)>().iter() {
+            if let Some(clan_id) = membership.0 {
+                let e = preserving.entry(clan_id).or_insert((0, 0));
+                e.1 += 1;
+                if preservation.is_some_and(|t| knowledge.has(t)) {
+                    e.0 += 1;
+                }
+            }
+        }
         for clan in &mut self.clans {
             if let Some(&stock) = clan_stock.get(&clan.id) {
-                let keep_days = FRESH_KEEP_DAYS
+                let (knowers, members) = preserving.get(&clan.id).copied().unwrap_or((0, 0));
+                let share = f64::from(knowers) / f64::from(members.max(1));
+                let keep_days = (FRESH_KEEP_DAYS + (PRESERVED_KEEP_DAYS - FRESH_KEEP_DAYS) * share)
                     * f64::from(structures::granary_keep_factor(clan.id, &self.structures));
                 let keep = (-1.0 / (keep_days * cairn_core::TICKS_PER_DAY as f64)).exp();
                 clan.stock = (f64::from(stock.max(0.0)) * keep) as f32;
@@ -3244,6 +3263,40 @@ mod tests {
             (20.0..26.0).contains(&stock),
             "30 points de stock deviennent {stock:.1} en 20 heures (attendu ~22,7 : un pourrissement, pas un plafond)"
         );
+    }
+
+    /// D10, la conservation se découvre : un clan dont les membres savent
+    /// conserver (neige, séchage, caches — la technique `preservation`) garde
+    /// sa réserve des mois au lieu de quelques jours. Même scène que le test
+    /// du pourrissement : 30 points, 20 heures, deux membres qui savent.
+    #[test]
+    fn un_clan_qui_sait_conserver_garde_sa_reserve() {
+        let (mut sim, home) = scenario_setup(3, 2, 0);
+        let preservation = sim.tech_tree.id_of("preservation").expect("la conservation doit exister");
+        let members: Vec<AgentId> = sim.agents.query::<&AgentId>().iter().map(|(_, id)| *id).collect();
+        for (_, (phys, membership, know)) in
+            sim.agents.query_mut::<(&mut Physiology, &mut ClanMembership, &mut Knowledge)>()
+        {
+            phys.hunger = 0.0;
+            membership.0 = Some(social::ClanId(1));
+            know.insert(preservation);
+        }
+        sim.clans.push(Clan {
+            id: social::ClanId(1),
+            founded_tick: 0,
+            members: members.iter().copied().collect(),
+            home: (home.0 as f64 + 0.5, home.1 as f64 + 0.5),
+            stock: 30.0,
+            chief: members[0],
+            desired: None,
+            rivalry: 0.0,
+        });
+        sim.time.tick = 1;
+        for _ in 0..20 {
+            sim.step();
+        }
+        let stock = sim.clans.iter().find(|c| c.id == social::ClanId(1)).unwrap().stock;
+        assert!(stock > 29.5, "un clan qui sait conserver perd {:.1} points sur 30 en 20 heures", 30.0 - stock);
     }
 
     /// Le pendant du dépôt : rapporter le surplus porté au foyer

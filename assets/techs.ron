@@ -54,6 +54,20 @@
         age: Paleolithic,
     ),
     (
+        // La conservation des aliments (D10) : garder la viande et les
+        // cueillettes au-delà de quelques jours — la neige, une cache fraîche,
+        // le séchage au vent. Aucun matériau requis : c'est un savoir-faire,
+        // qu'on invente quand la faim revient après l'abondance. Dans un clan,
+        // la part des membres qui le tiennent allonge la vie de la réserve
+        // (voir `sim::PRESERVED_KEEP_DAYS`).
+        id: "preservation",
+        label: "Conservation des aliments",
+        narrative: "la conservation des aliments",
+        pressure: [Famine],
+        skill: Foraging,
+        age: Paleolithic,
+    ),
+    (
         id: "pottery",
         label: "Poterie",
         narrative: "la poterie",
