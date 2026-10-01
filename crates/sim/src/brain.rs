@@ -273,10 +273,23 @@ fn build_candidates(
     //   ce candidat s'efface tout seul et la faim repart sur la cueillette
     //   ou l'errance. C'est de là que sort le suivi des troupeaux — rien ne
     //   dit « suis le gibier ».
+    //   D10 : l'envie de chasser suit le **besoin de viande**, pas la seule
+    //   faim — une bête vaut un mois de nourriture. Le sien : la faim, moins
+    //   ce qu'on porte déjà. Celui des siens : ce qui manque à la réserve du
+    //   clan. On chasse pour le plus pressant des deux.
+    let meat_need = {
+        let own = (phys.hunger - carrying).max(0.0);
+        let clan_gap = clan.and_then(|c| clan_views.get(&c)).map_or(0.0, |v| {
+            let scale = crate::sim::STOCK_SCALE_PER_MEMBER * v.members.max(1) as f32;
+            (1.0 - (v.stock + carrying) / scale).clamp(0.0, 1.0)
+        });
+        own.max(clan_gap)
+    };
+    let hunt_urgency = Curve::Logistic { steepness: 6.0, midpoint: 0.4 }.eval(meat_need);
     let nearest_herd = if adult { nearest_herd(pos, herds) } else { None };
     if let Some(herd) = nearest_herd {
         let target = (herd.pos.0.floor() as i64, herd.pos.1.floor() as i64);
-        let urgency = Curve::Logistic { steepness: 6.0, midpoint: 0.4 }.eval(phys.hunger);
+        let urgency = hunt_urgency;
         // Un gros troupeau est une proie plus sûre (plus de bêtes à approcher).
         let size = Curve::Power { k: 0.5 }.eval(herd.population / 60.0);
         let score = urgency * (0.55 + 0.45 * size) * travel_discount(pos.distance_tiles(target));
@@ -294,7 +307,7 @@ fn build_candidates(
     {
         let age_days = time.tick.saturating_sub(seen) as f64 / cairn_core::TICKS_PER_DAY as f64;
         let freshness = (-age_days / GAME_MEMORY_DAYS).exp() as f32;
-        let urgency = Curve::Logistic { steepness: 6.0, midpoint: 0.4 }.eval(phys.hunger);
+        let urgency = hunt_urgency;
         let day = 1.0 / (1.0 + pos.distance_tiles(spot) / (WALK_TILES_PER_TICK * 24.0));
         candidates.push((TaskKind::Track, spot, urgency * 0.55 * freshness * day as f32));
     }

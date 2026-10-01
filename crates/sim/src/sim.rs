@@ -3400,6 +3400,33 @@ mod tests {
         assert!(carrying.0 < porte, "ce qu'il a mangé sort de ce qu'il porte");
     }
 
+    /// D10, l'envie de chasser suit le besoin : deux adultes aussi affamés,
+    /// un troupeau à vue ; celui qui porte déjà de quoi manger des jours n'a
+    /// aucune raison de tuer une autre bête. Lu via `inspect_agent` (pur).
+    #[test]
+    fn qui_porte_deja_de_la_viande_ne_chasse_guere() {
+        let score = |porte: f32| -> f32 {
+            let (mut sim, home) = scenario_setup(5, 1, 0);
+            sim.spawn_herd(home.0 as f64 + 300.0, home.1 as f64, 30.0);
+            let id = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).next().unwrap();
+            for (_, (phys, carrying)) in sim.agents.query_mut::<(&mut Physiology, &mut Carrying)>() {
+                phys.hunger = 0.5;
+                carrying.0 = porte;
+            }
+            sim.inspect_agent(id)
+                .unwrap()
+                .iter()
+                .find(|m| m.kind == TaskKind::Hunt)
+                .map_or(0.0, |m| m.score)
+        };
+        let (demuni, pourvu) = (score(0.0), score(5.0));
+        assert!(demuni > 0.0, "un affamé sans viande, un troupeau à vue : il doit envisager la chasse");
+        assert!(
+            pourvu < 0.3 * demuni,
+            "qui porte cinq points de viande chasse presque autant ({pourvu:.3}) qu'un démuni ({demuni:.3})"
+        );
+    }
+
     /// Le pendant du dépôt : rapporter le surplus porté au foyer
     /// (`TaskKind::BringSurplusHome`) vide `Carrying` **dans** le stock, du
     /// même montant — ni nourriture créée, ni perdue en chemin.
