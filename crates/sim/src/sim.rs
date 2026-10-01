@@ -1807,6 +1807,7 @@ fn execute(
         | TaskKind::Follow
         | TaskKind::Socialize
         | TaskKind::Explore
+        | TaskKind::Track
         | TaskKind::ReturnToClan
         // Le pèlerinage n'a d'effet que d'avoir eu lieu : on est venu, on est là.
         // Ce que ça produit — des peuples qui convergent et se disputent le lieu —
@@ -3297,6 +3298,53 @@ mod tests {
         }
         let stock = sim.clans.iter().find(|c| c.id == social::ClanId(1)).unwrap().stock;
         assert!(stock > 29.5, "un clan qui sait conserver perd {:.1} points sur 30 en 20 heures", 30.0 - stock);
+    }
+
+    /// D10, pister : aucun troupeau à vue, mais un souvenir récent d'en avoir
+    /// vu un à 4 km. Un affamé envisage de s'y rendre ; sans souvenir, rien ne
+    /// lui dit où est le gibier. Lu via `inspect_agent` (pur).
+    #[test]
+    fn un_affame_qui_se_souvient_du_gibier_part_le_pister() {
+        let candidats = |souvenir: bool| -> bool {
+            let (mut sim, home) = scenario_setup(5, 1, 0);
+            let id = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).next().unwrap();
+            let tick = sim.time.tick;
+            for (_, (phys, mem)) in sim.agents.query_mut::<(&mut Physiology, &mut Memory)>() {
+                phys.hunger = 0.8;
+                if souvenir {
+                    mem.game = Some(((home.0 + 2_000, home.1), tick));
+                }
+            }
+            sim.inspect_agent(id).unwrap().iter().any(|m| m.kind == TaskKind::Track)
+        };
+        assert!(!candidats(false), "sans souvenir, rien ne dit où pister");
+        assert!(candidats(true), "un affamé qui se souvient d'un troupeau doit envisager de le pister");
+    }
+
+    /// D10, pister (suite) : le souvenir d'un troupeau survit à sa sortie du
+    /// champ de vue. Un humain voit un troupeau à 1,5 km ; le troupeau part au
+    /// loin ; à la délibération suivante, l'humain — resté sur place — doit
+    /// encore s'en souvenir.
+    #[test]
+    fn perdre_un_troupeau_de_vue_n_efface_pas_son_souvenir() {
+        let (mut sim, home) = scenario_setup(5, 1, 0);
+        let herd = sim.spawn_herd(home.0 as f64 + 750.0, home.1 as f64, 30.0);
+        for (_, phys) in sim.agents.query_mut::<&mut Physiology>() {
+            phys.hunger = 0.8;
+        }
+        sim.step(); // délibération : le troupeau est vu
+        let seen = sim.agents.query::<&Memory>().iter().next().map(|(_, m)| m.game).unwrap();
+        assert!(seen.is_some(), "un troupeau à 1,5 km doit être aperçu et retenu");
+        for (_, (id, pos)) in sim.fauna.query_mut::<(&FaunaId, &mut Position)>() {
+            if *id == herd {
+                pos.x += 5_000.0; // parti à 10 km
+            }
+        }
+        for _ in 0..8 {
+            sim.step();
+        }
+        let kept = sim.agents.query::<&Memory>().iter().next().map(|(_, m)| m.game).unwrap();
+        assert!(kept.is_some(), "le souvenir du troupeau a disparu dès qu'il est sorti du champ de vue");
     }
 
     /// Le pendant du dépôt : rapporter le surplus porté au foyer

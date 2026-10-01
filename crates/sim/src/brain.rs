@@ -167,6 +167,23 @@ pub fn decide(
     if let Some(seen) = spring {
         mem.remember_spring(seen, (agent.pos.x, agent.pos.y));
     }
+    // Le gibier aussi s'apprend en le voyant : on retient le dernier troupeau
+    // aperçu. Arrivé sur une piste sans rien y voir, on l'oublie.
+    match nearest_herd(agent.pos, herds) {
+        Some(herd) => {
+            mem.game = Some(((herd.pos.0.floor() as i64, herd.pos.1.floor() as i64), time.tick));
+        }
+        None => {
+            // Seulement une fois **sur** la piste : juste après avoir perdu un
+            // troupeau de vue, on en est encore à moins de 2 km — l'oublier là
+            // effaçait le souvenir avant qu'il serve (mesuré : 0 % de pistage).
+            if let Some((spot, _)) = mem.game
+                && agent.pos.distance_tiles(spot) <= GAME_ARRIVAL_TILES
+            {
+                mem.game = None;
+            }
+        }
+    }
     let candidates =
         build_candidates(world, time, &agent, mem, spring, current, herds, packs, humans, clan_views, relations, shrines);
 
@@ -264,6 +281,22 @@ fn build_candidates(
         let size = Curve::Power { k: 0.5 }.eval(herd.population / 60.0);
         let score = urgency * (0.55 + 0.45 * size) * travel_discount(pos.distance_tiles(target));
         candidates.push((TaskKind::Hunt, target, score));
+    }
+
+    // — Pister (adultes, D10) : aucun troupeau à vue, mais on se souvient
+    //   d'en avoir vu un. On part vers la piste, avec la même faim qui pousse
+    //   à chasser, d'autant moins que le souvenir est vieux — le gibier bouge.
+    //   Le trajet se juge à l'échelle d'une journée : on part pister, on ne
+    //   fait pas un détour.
+    if adult
+        && nearest_herd.is_none()
+        && let Some((spot, seen)) = mem.game
+    {
+        let age_days = time.tick.saturating_sub(seen) as f64 / cairn_core::TICKS_PER_DAY as f64;
+        let freshness = (-age_days / GAME_MEMORY_DAYS).exp() as f32;
+        let urgency = Curve::Logistic { steepness: 6.0, midpoint: 0.4 }.eval(phys.hunger);
+        let day = 1.0 / (1.0 + pos.distance_tiles(spot) / (WALK_TILES_PER_TICK * 24.0));
+        candidates.push((TaskKind::Track, spot, urgency * 0.55 * freshness * day as f32));
     }
 
     // — Défendre le territoire des prédateurs (« éleveur », Phase 5) : une meute
@@ -718,6 +751,12 @@ fn nearest_herd(pos: &Position, herds: &[HerdView]) -> Option<HerdView> {
     }
     best.map(|(_, h)| h)
 }
+
+/// Durée de vie d'un souvenir de gibier, en jours : un troupeau se déplace
+/// de quelques kilomètres par jour, ses traces s'effacent en quelques jours.
+const GAME_MEMORY_DAYS: f64 = 3.0;
+/// Arrivé à moins de 100 m de la piste sans rien voir, on l'oublie.
+const GAME_ARRIVAL_TILES: f64 = 50.0;
 
 /// En deçà de cette part (deux jours de nourriture par tête dans la maille),
 /// le pays « ne répond plus » : c'est le moment de puiser dans le stock.

@@ -125,6 +125,10 @@ pub enum TaskKind {
     /// Marcher vers une cellule jamais visitée : le drive « comprendre »,
     /// réservé aux curieux dont les besoins sont contenus (voir `brain`).
     Explore,
+    /// Pister le gibier : marcher vers le dernier troupeau aperçu quand aucun
+    /// n'est à vue (D10). Arrivé, on délibère de nouveau — chasser si le
+    /// troupeau est là, oublier la piste sinon.
+    Track,
     /// Se rendre au lieu que la divinité a désigné (BRIEF §6.2, « le Signe »).
     /// Réservé à ceux qui ont assez de ferveur pour se déranger — et c'est tout
     /// ce que le Signe fait : il n'a aucun effet propre, il attire. Ce qui suit

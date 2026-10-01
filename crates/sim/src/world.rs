@@ -275,6 +275,12 @@ impl World {
         self.gathering.available(&self.worldgen, &climate, pos, cairn_core::SimTime { tick })
     }
 
+    /// Comme [`Self::edible_kcal`], sans rien écrire (instruments de mesure).
+    pub fn edible_kcal_peek(&mut self, pos: (f64, f64), tick: u64) -> f64 {
+        let climate = crate::climate::Climate::new(self.worldgen.temperature.latitude());
+        self.gathering.peek(&self.worldgen, &climate, pos, cairn_core::SimTime { tick })
+    }
+
     /// Cueille jusqu'à `want` kcal dans la maille de `pos` ; renvoie ce qui a
     /// été trouvé.
     pub fn gather(&mut self, pos: (f64, f64), tick: u64, want: f64) -> f64 {

@@ -51,6 +51,10 @@ pub struct Memory {
     pub springs: Vec<(i64, i64)>,
     /// Cellules où l'agent a mis les pieds. Jamais transmises.
     pub known: BTreeSet<(i64, i64)>,
+    /// Le dernier troupeau aperçu : tuile et tick. Un seul souvenir, le plus
+    /// récent — le gibier bouge, un vieux souvenir ne vaut rien (voir
+    /// `brain::GAME_MEMORY_DAYS`).
+    pub game: Option<((i64, i64), u64)>,
     /// Dernière cellule notée — évite une insertion par tick quand on
     /// piétine dans la même cellule (le cas de très loin le plus fréquent).
     last_cell: Option<(i64, i64)>,

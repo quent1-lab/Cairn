@@ -1779,6 +1779,7 @@ fn task_name(kind: TaskKind) -> String {
         TaskKind::Follow => "suivre un parent".to_string(),
         TaskKind::Socialize => "rejoindre les siens".to_string(),
         TaskKind::Explore => "explorer l'inconnu".to_string(),
+        TaskKind::Track => "pister le gibier".to_string(),
         TaskKind::ReturnToClan => "rentrer au clan".to_string(),
         TaskKind::Pilgrimage => "se rendre au lieu sacré".to_string(),
         TaskKind::EatFromStock => "puiser dans le stock".to_string(),

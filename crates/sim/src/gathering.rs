@@ -146,6 +146,30 @@ impl Gathering {
         stock
     }
 
+    /// Comme [`Self::available`], mais **sans rien écrire** : l'état de la
+    /// maille est avancé sur une copie. Pour les instruments de mesure, qui
+    /// ne doivent pas créer d'état qu'une simulation sans eux n'aurait pas.
+    pub fn peek(
+        &mut self,
+        worldgen: &WorldGen,
+        climate: &Climate,
+        pos: (f64, f64),
+        time: SimTime,
+    ) -> f64 {
+        let zone = range_zone(pos);
+        let saved = self.stocks.get(&zone).copied();
+        let kcal = self.advance(worldgen, climate, zone, time.tick / TICKS_PER_DAY).kcal;
+        match saved {
+            Some(stock) => {
+                self.stocks.insert(zone, stock);
+            }
+            None => {
+                self.stocks.remove(&zone);
+            }
+        }
+        kcal
+    }
+
     /// Ce que la maille de `pos` offre aujourd'hui, en kcal.
     pub fn available(
         &mut self,
