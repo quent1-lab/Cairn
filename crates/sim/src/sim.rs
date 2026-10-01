@@ -99,8 +99,8 @@ pub(crate) struct Share {
 }
 
 /// Distribue les parts : les plus affamés d'abord, chacun mange au plus sa
-/// faim. Ce que personne n'a mangé revient au chasseur : porté au clan s'il
-/// en a un, laissé sur place sinon — on n'offre pas pour jeter.
+/// faim. Ce que personne n'a mangé revient au chasseur, qui le porte — on
+/// n'offre pas pour jeter.
 fn resolve_shares(sim: &mut Sim, shares: &[Share]) {
     for share in shares {
         let r2 = SHARE_RADIUS_TILES * SHARE_RADIUS_TILES;
@@ -131,10 +131,10 @@ fn resolve_shares(sim: &mut Sim, shares: &[Share]) {
         if left > 0.0 {
             let giver = sim
                 .agents
-                .query_mut::<(&AgentId, &ClanMembership, &mut Carrying)>()
+                .query_mut::<(&AgentId, &mut Carrying)>()
                 .into_iter()
-                .find(|(_, (id, _, _))| **id == share.giver)
-                .and_then(|(_, (_, membership, carrying))| membership.0.map(|_| carrying));
+                .find(|(_, (id, _))| **id == share.giver)
+                .map(|(_, (_, carrying))| carrying);
             match giver {
                 Some(carrying) => {
                     carrying.0 += left;
@@ -167,6 +167,9 @@ pub const STOCK_SCALE_PER_MEMBER: f32 = 3.0;
 /// aucune technique : la viande crue se gâte en quelques jours. Le stock
 /// décroît en `e^(−t/τ)`, au lieu de buter sur un plafond.
 const FRESH_KEEP_DAYS: f64 = 3.0;
+/// Faim au-delà de laquelle on mange ce qu'on porte : une demi-journée sans
+/// repas.
+const EAT_CARRIED_HUNGER: f32 = 0.25;
 /// Durée de vie de la réserve d'un clan dont **tous** les membres savent
 /// conserver (technique `preservation`) : viande séchée, gelée ou cachée au
 /// frais, des mois. Entre les deux, la durée suit la part des membres qui
@@ -1044,6 +1047,10 @@ impl Sim {
                 &mut shares,
                 time.tick,
             );
+            // La viande portée se gâte comme une réserve sans technique.
+            if carrying.0 > 0.0 {
+                carrying.0 *= (-1.0 / (FRESH_KEEP_DAYS * TICKS_PER_DAY as f64)).exp() as f32;
+            }
             // Où que la tâche l'ait mené, l'agent note où il a mis les pieds.
             mem.note_visit(pos.tile());
             if let Some(kill) = outcome {
@@ -1501,6 +1508,14 @@ fn execute(
     shares: &mut Vec<Share>,
     tick: u64,
 ) -> Option<Kill> {
+    // Manger ce qu'on porte quand la faim revient : la viande d'une prise est
+    // sur le dos, pas au foyer — ni trajet ni tâche pour y mordre.
+    if phys.hunger > EAT_CARRIED_HUNGER && carrying.0 > 0.0 {
+        let eaten = carrying.0.min(phys.hunger);
+        carrying.0 -= eaten;
+        phys.hunger -= eaten;
+        crate::food_stats::fed(crate::food_stats::Source::Carried, eaten);
+    }
     let task = match behavior.task {
         Some(task) => task,
         None => {
@@ -1555,11 +1570,11 @@ fn execute(
             shares.push(Share { giver: id, pos: (pos.x, pos.y), amount: offered });
             surplus -= offered;
         }
-        if surplus > 0.0 && clan.is_some() {
+        // Ce qu'il n'offre pas, il le garde — clan ou pas : rapporté au foyer
+        // s'il en a un, mangé plus tard sinon (voir le haut de `execute`).
+        if surplus > 0.0 {
             carrying.0 += surplus;
             crate::food_stats::fed(crate::food_stats::Source::HuntCarried, surplus);
-        } else {
-            crate::food_stats::fed(crate::food_stats::Source::HuntWasted, surplus);
         }
         behavior.task = None;
         return Some(Kill { herd: prey.entity, head: HUNT_YIELD_HEAD });
@@ -3347,6 +3362,44 @@ mod tests {
         assert!(kept.is_some(), "le souvenir du troupeau a disparu dès qu'il est sorti du champ de vue");
     }
 
+    /// D10, garder sa prise : un chasseur sans clan ne jette plus ce qu'il ne
+    /// mange pas. Il le porte, et le mange quand la faim revient — sans quoi
+    /// un chasseur repu qui tue un cerf en perd un mois de nourriture, et
+    /// recommence le lendemain.
+    #[test]
+    fn un_chasseur_sans_clan_garde_sa_prise_et_la_mange_plus_tard() {
+        let mut sim = Sim::new(WorldSeed(42), 512);
+        let home = find_land(&sim);
+        let mut pos = Position { x: home.0 as f64 + 0.5, y: home.1 as f64 + 0.5 };
+        let mut phys = Physiology { hunger: 0.3, ..Physiology::default() };
+        let mut carrying = Carrying::default();
+        let traits = Traits { sociability: 0.0, ..Traits::default() };
+        let herd = HerdView {
+            entity: hecs::Entity::DANGLING,
+            pos: (pos.x, pos.y),
+            population: 20.0,
+            species: fauna::Species::Deer,
+            tameness: 0.0,
+        };
+        let mut run = |task: Option<Task>, phys: &mut Physiology, carrying: &mut Carrying, pos: &mut Position| {
+            let mut behavior = Behavior { task, ..Behavior::default() };
+            execute(
+                &mut sim.world, &mut BTreeMap::new(), &mut PATH_REQUESTS_PER_TICK.clone(),
+                AgentId(0), pos, phys, &mut behavior, &[herd], &[], &[], 1.0, &traits,
+                &mut Skills::default(), None, &mut BTreeMap::new(), carrying,
+                &mut Prestige::default(), &mut Vec::new(), &mut Vec::new(), &mut Vec::new(),
+                &mut Vec::new(), 0,
+            );
+        };
+        run(Some(Task { kind: TaskKind::Hunt, target: home }), &mut phys, &mut carrying, &mut pos);
+        assert!(carrying.0 > 5.0, "sans clan, le chasseur doit garder sa prise ({:.2} porté)", carrying.0);
+        phys.hunger = 0.8;
+        let porte = carrying.0;
+        run(None, &mut phys, &mut carrying, &mut pos);
+        assert!(phys.hunger < 0.1, "affamé, il mange ce qu'il porte (faim restante {:.2})", phys.hunger);
+        assert!(carrying.0 < porte, "ce qu'il a mangé sort de ce qu'il porte");
+    }
+
     /// Le pendant du dépôt : rapporter le surplus porté au foyer
     /// (`TaskKind::BringSurplusHome`) vide `Carrying` **dans** le stock, du
     /// même montant — ni nourriture créée, ni perdue en chemin.
@@ -3355,7 +3408,7 @@ mod tests {
         let mut sim = Sim::new(WorldSeed(42), 512);
         let home = find_land(&sim);
         let mut pos = Position { x: home.0 as f64 + 0.5, y: home.1 as f64 + 0.5 };
-        let mut phys = Physiology::default();
+        let mut phys = Physiology { hunger: 0.0, ..Physiology::default() }; // repu : il ne mange pas en route
         let mut behavior = Behavior {
             task: Some(Task { kind: TaskKind::BringSurplusHome, target: home }),
             ..Behavior::default()

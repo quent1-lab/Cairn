@@ -25,6 +25,8 @@ pub enum Source {
     Milk = 6,
     /// Part de viande reçue d'un chasseur, hors clan ou non.
     Shared = 7,
+    /// Viande portée, mangée plus tard par celui qui la porte.
+    Carried = 8,
 }
 
 /// Compteurs d'événements (et non de faim).
@@ -44,7 +46,7 @@ pub enum Event {
 mod imp {
     use std::sync::atomic::{AtomicU64, Ordering};
     /// Faim en millionièmes de point.
-    pub static HUNGER: [AtomicU64; 8] = [const { AtomicU64::new(0) }; 8];
+    pub static HUNGER: [AtomicU64; 9] = [const { AtomicU64::new(0) }; 9];
     pub static EVENTS: [AtomicU64; 4] = [const { AtomicU64::new(0) }; 4];
 
     pub fn fed(source: super::Source, hunger: f32) {
@@ -54,8 +56,8 @@ mod imp {
     pub fn event(e: super::Event, n: u64) {
         EVENTS[e as usize].fetch_add(n, Ordering::Relaxed);
     }
-    pub fn take() -> ([f64; 8], [u64; 4]) {
-        let mut h = [0.0; 8];
+    pub fn take() -> ([f64; 9], [u64; 4]) {
+        let mut h = [0.0; 9];
         for (i, a) in HUNGER.iter().enumerate() {
             h[i] = a.swap(0, Ordering::Relaxed) as f64 / 1e6;
         }
@@ -83,6 +85,6 @@ pub fn event(_event: Event, _n: u64) {
 
 /// Lit et remet à zéro : (faim retirée par source, événements).
 #[cfg(feature = "food-stats")]
-pub fn take() -> ([f64; 8], [u64; 4]) {
+pub fn take() -> ([f64; 9], [u64; 4]) {
     imp::take()
 }

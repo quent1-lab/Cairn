@@ -177,9 +177,17 @@ fn main() {
             .take(5)
             .map(|(v, k)| format!("{k} {:.0}%", 100.0 * *v as f64 / tasks_total.max(1) as f64))
             .collect();
+        let pct_of = |k: &str| 100.0 * *hungry_tasks.get(k).unwrap_or(&0) as f64 / tasks_total.max(1) as f64;
+        let (track_pct, hunt_pct) = (pct_of("Track"), pct_of("Hunt"));
+        let remembering = sim
+            .agents
+            .query::<&cairn_sim::Memory>()
+            .iter()
+            .filter(|(_, m)| m.game.is_some())
+            .count();
         hungry_tasks.clear();
         let (fed, ev) = food_stats::take();
-        let total: f64 = fed[0] + fed[1] + fed[4] + fed[6] + fed[7];
+        let total: f64 = fed[0] + fed[1] + fed[4] + fed[6] + fed[7] + fed[8];
         let pct = |x: f64| 100.0 * x / total.max(1e-9);
         let hd = human_days.max(1.0);
         human_days = 0.0;
@@ -210,6 +218,14 @@ fn main() {
             .filter(|w| **w >= cairn_sim::social::BOND_THRESHOLD)
             .count();
         if pop > 0 {
+            println!(
+                "      mangé : {:.2} point de faim par personne et par jour (besoin 0,50) — cueillette {:.2}, chasse {:.2}, porté {:.2}, part {:.2}, stock {:.2}, lait {:.2}",
+                total / hd, fed[0] / hd, fed[1] / hd, fed[8] / hd, fed[7] / hd, fed[4] / hd, fed[6] / hd
+            );
+            println!(
+                "      gibier : {track_pct:.1} % des heures d'affamés à pister, {hunt_pct:.1} % à chasser ; {:.0} % se souviennent d'un troupeau",
+                100.0 * remembering as f64 / pop as f64
+            );
             println!(
                 "      groupe : {} clan(s), {:.0} % en clan, {:.1} liens solides par personne",
                 sim.clans.len(),
