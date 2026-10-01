@@ -946,6 +946,13 @@ impl Sim {
             if demo.is_infant(time.tick) {
                 continue;
             }
+            // Une marche qui a buté apprend : la cible est mise de côté (seules
+            // les sources sont concernées pour l'instant, voir `brain`).
+            if let Some(stuck) = behavior.stuck_on.take()
+                && mem.springs.contains(&stuck)
+            {
+                mem.block(stuck, time.tick + crate::memory::BLOCKED_SPRING_TICKS);
+            }
             let due = behavior.task.is_none()
                 || (time.tick.wrapping_add(id.0)) % DELIBERATION_PERIOD == 0;
             if due {
@@ -1712,6 +1719,7 @@ fn execute(
         behavior.activity = Activity::Walking;
         if advance(world, routes, path_budget, id, pos, task.target) == Move::Stuck {
             behavior.task = None; // vraiment cerné : on re-délibérera
+            behavior.stuck_on = Some(task.target);
         }
         return None;
     }
@@ -3592,6 +3600,33 @@ mod tests {
             .filter(|m| m.kind == TaskKind::Sleep)
             .find(|m| ((m.target.0 as f64 - camp.0).hypot(m.target.1 as f64 - camp.1)) < 50.0);
         assert!(rentrer.is_some(), "un membre fatigué, la nuit, loin du camp, doit envisager d'y rentrer dormir");
+    }
+
+    /// D11 : un humain mourait de soif à 300 m d'une source qu'il ne pouvait
+    /// pas atteindre (de l'autre côté de l'eau), parce que « boire » visait
+    /// toujours la source la plus proche à vol d'oiseau et qu'aucun échec ne
+    /// s'apprenait. Une marche qui a buté sur une source doit la faire écarter :
+    /// à la délibération suivante, l'assoiffé vise une autre source connue.
+    #[test]
+    fn une_source_hors_d_atteinte_est_mise_de_cote() {
+        let (mut sim, home) = scenario_au_foyer(42, 1, 0);
+        let proche = sim.world.nearest_spring(home, 5).expect("le foyer des bancs a une source à portée");
+        let loin_depart = (home.0 + 1_500, home.1 + 1_500);
+        let autre = sim.world.nearest_spring(loin_depart, 5).expect("une seconde source dans la région");
+        assert_ne!(proche, autre);
+        for (_, (phys, mem, behavior)) in sim.agents.query_mut::<(&mut Physiology, &mut Memory, &mut Behavior)>() {
+            phys.thirst = 0.9;
+            mem.springs = vec![proche, autre];
+            behavior.task = None;
+            behavior.stuck_on = Some(proche); // la marche vers elle vient d'échouer
+        }
+        sim.step();
+        let task = sim.agents.query::<&Behavior>().iter().next().map(|(_, b)| b.task).unwrap();
+        assert_eq!(
+            task.map(|t| (t.kind, t.target)),
+            Some((TaskKind::Drink, autre)),
+            "après un échec vers la source la plus proche, l'assoiffé doit viser l'autre"
+        );
     }
 
     /// Le pendant du dépôt : rapporter le surplus porté au foyer

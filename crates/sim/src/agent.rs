@@ -197,6 +197,10 @@ pub enum TaskKind {
 pub struct Behavior {
     pub task: Option<Task>,
     pub activity: Activity,
+    /// La cible vers laquelle la marche vient de buter (eau sans contournement
+    /// trouvé) : transmise à la mémoire à la délibération suivante, qui la met
+    /// de côté (D11).
+    pub stuck_on: Option<(i64, i64)>,
 }
 
 /// Surplus de chasse porté vers le foyer du clan, en attente de dépôt

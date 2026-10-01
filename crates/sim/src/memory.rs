@@ -37,6 +37,12 @@ pub const MAX_KNOWN_CELLS: usize = 4096;
 /// Portée d'une conversation (~120 m) : en deçà, deux agents « se croisent »
 /// et se partagent leurs sources (une fois par jour).
 pub const TALK_RADIUS_TILES: f64 = 60.0;
+/// Sources mises de côté retenues au plus.
+const MAX_BLOCKED_SPRINGS: usize = 4;
+/// Combien de temps une source où l'on a buté reste écartée : deux jours —
+/// le lac ne bouge pas, mais l'échec peut venir d'un budget de calcul épuisé
+/// ce tick-là, et il reste d'autres sources.
+pub const BLOCKED_SPRING_TICKS: u64 = 2 * cairn_core::TICKS_PER_DAY;
 
 /// La cellule de mémoire couvrant une tuile.
 pub fn cell_of(tile: (i64, i64)) -> (i64, i64) {
@@ -55,6 +61,10 @@ pub struct Memory {
     /// récent — le gibier bouge, un vieux souvenir ne vaut rien (voir
     /// `brain::GAME_MEMORY_DAYS`).
     pub game: Option<((i64, i64), u64)>,
+    /// Sources mises de côté jusqu'à un tick : la marche y a buté (de l'eau
+    /// sans contournement trouvé). Sans ce souvenir, un assoiffé revisait la
+    /// même source inaccessible jusqu'à en mourir à 300 m (D11).
+    pub blocked: Vec<((i64, i64), u64)>,
     /// Dernière cellule notée — évite une insertion par tick quand on
     /// piétine dans la même cellule (le cas de très loin le plus fréquent).
     last_cell: Option<(i64, i64)>,
@@ -100,6 +110,37 @@ impl Memory {
     pub fn nearest_known_spring(&self, from: (f64, f64)) -> Option<(i64, i64)> {
         let mut best: Option<(f64, (i64, i64))> = None;
         for &s in &self.springs {
+            let d2 =
+                (s.0 as f64 + 0.5 - from.0).powi(2) + (s.1 as f64 + 0.5 - from.1).powi(2);
+            if best.is_none_or(|(bd, _)| d2 < bd) {
+                best = Some((d2, s));
+            }
+        }
+        best.map(|(_, s)| s)
+    }
+
+    /// Met `spring` de côté jusqu'au tick `until`. Au plus quelques entrées :
+    /// la plus ancienne s'oublie.
+    pub fn block(&mut self, spring: (i64, i64), until: u64) {
+        self.blocked.retain(|(s, _)| *s != spring);
+        self.blocked.push((spring, until));
+        if self.blocked.len() > MAX_BLOCKED_SPRINGS {
+            self.blocked.remove(0);
+        }
+    }
+
+    /// `spring` est-elle mise de côté au tick `tick` ?
+    pub fn is_blocked(&self, spring: (i64, i64), tick: u64) -> bool {
+        self.blocked.iter().any(|(s, until)| *s == spring && tick < *until)
+    }
+
+    /// La source connue la plus proche qui n'est pas mise de côté.
+    pub fn nearest_open_spring(&self, from: (f64, f64), tick: u64) -> Option<(i64, i64)> {
+        let mut best: Option<(f64, (i64, i64))> = None;
+        for &s in &self.springs {
+            if self.is_blocked(s, tick) {
+                continue;
+            }
             let d2 =
                 (s.0 as f64 + 0.5 - from.0).powi(2) + (s.1 as f64 + 0.5 - from.1).powi(2);
             if best.is_none_or(|(bd, _)| d2 < bd) {

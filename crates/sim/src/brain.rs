@@ -227,7 +227,12 @@ fn build_candidates(
     //   perception locale d'abord (passée en `spring`, mémorisée par `decide`) ;
     //   sinon la **mémoire** prend le relais — c'est elle qui sauve l'agent
     //   parti trop loin de l'eau, et rend l'exploration moins suicidaire.
-    if let Some(target) = spring.or_else(|| mem.nearest_known_spring((pos.x, pos.y))) {
+    // Une source où la marche vient de buter est mise de côté (D11) : on vise la
+    // suivante plutôt que de retenter la même jusqu'à en mourir.
+    let open = |s: &(i64, i64)| !mem.is_blocked(*s, time.tick);
+    if let Some(target) =
+        spring.filter(open).or_else(|| mem.nearest_open_spring((pos.x, pos.y), time.tick))
+    {
         let urgency = Curve::Logistic { steepness: 9.0, midpoint: 0.45 }.eval(phys.thirst);
         let score = urgency * travel_discount(pos.distance_tiles(target));
         candidates.push((TaskKind::Drink, target, score));
