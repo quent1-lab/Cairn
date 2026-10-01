@@ -129,6 +129,11 @@ pub enum TaskKind {
     /// n'est à vue (D10). Arrivé, on délibère de nouveau — chasser si le
     /// troupeau est là, oublier la piste sinon.
     Track,
+    /// Partir en quête de gibier : sans troupeau en vue ni piste fraîche, un
+    /// chasseur d'un clan qui a besoin de viande balaie le territoire depuis le
+    /// foyer (D10). En route, le premier troupeau aperçu devient une chasse à
+    /// la délibération suivante.
+    SeekGame,
     /// Se rendre au lieu que la divinité a désigné (BRIEF §6.2, « le Signe »).
     /// Réservé à ceux qui ont assez de ferveur pour se déranger — et c'est tout
     /// ce que le Signe fait : il n'a aucun effet propre, il attire. Ce qui suit

@@ -312,6 +312,41 @@ fn build_candidates(
         candidates.push((TaskKind::Track, spot, urgency * 0.55 * freshness * day as f32));
     }
 
+    // — Partir en quête (adultes d'un clan, D10) : ni troupeau en vue, ni piste
+    //   fraîche, et besoin de viande. On part du foyer et on balaie le
+    //   territoire du clan (jusqu'au rayon de résidence), du regard sur 2 km de
+    //   part et d'autre : le fourrage « à place centrale » des chasseurs, qui
+    //   partent du campement et y reviennent (le rappel au clan les ramène).
+    //   Sans clan, pas de foyer d'où partir ni où revenir : on erre près des
+    //   autres, ce qui laisse aux liens le temps de se nouer — une quête
+    //   solitaire et sans retour dispersait les fondateurs avant qu'aucun clan
+    //   ne naisse (mesuré : trois tests de formation de clan cassés).
+    let fresh_track = mem.game.is_some_and(|(_, seen)| {
+        time.tick.saturating_sub(seen) < cairn_core::TICKS_PER_DAY * GAME_MEMORY_DAYS as u64
+    });
+    if adult
+        && nearest_herd.is_none()
+        && !fresh_track
+        && let Some(view) = clan.and_then(|c| clan_views.get(&c))
+    {
+        let mut rng = Pcg32::new(world.seed().derive(salt::WANDER) ^ splitmix64(time.tick ^ 0x5eed), id.0);
+        let angle = rng.next_f64() * std::f64::consts::TAU;
+        let (dx, dy) = (angle.cos(), angle.sin());
+        let mut target = None;
+        let mut d = 80.0;
+        while d <= 0.9 * RESIDENCE_RADIUS_TILES {
+            let p = ((view.home.0 + dx * d).floor() as i64, (view.home.1 + dy * d).floor() as i64);
+            if world.worldgen().elevation(p.0, p.1) <= 0.0 {
+                break; // eau : on s'arrête à la dernière terre
+            }
+            target = Some(p);
+            d += 80.0;
+        }
+        if let Some(target) = target {
+            candidates.push((TaskKind::SeekGame, target, hunt_urgency * 0.55));
+        }
+    }
+
     // — Défendre le territoire des prédateurs (« éleveur », Phase 5) : une meute
     //   qui rôde près du foyer menace le gibier dont on vit (et, demain, le
     //   cheptel). Un adulte assez **agressif** et **fort** va l'affronter — au
@@ -419,6 +454,20 @@ fn build_candidates(
     let night_factor = if time.is_night() { 1.15 } else { 0.55 };
     let sleep_score = Curve::Power { k: 2.5 }.eval(phys.fatigue) * night_factor;
     candidates.push((TaskKind::Sleep, here, sleep_score));
+    // — Ou rentrer dormir au campement (D10) : un membre de clan loin du foyer
+    //   peut aller dormir près des siens. Personne ne l'y oblige — c'est la
+    //   sociabilité qui y pousse, et la longueur du chemin qui en détourne
+    //   (jugée sur quelques heures de marche). C'est le soir, autour du foyer,
+    //   que les liens se nouent : les rencontres se font à moins de 120 m.
+    if let Some(view) = clan.and_then(|c| clan_views.get(&c)) {
+        let camp = (view.home.0.floor() as i64, view.home.1.floor() as i64);
+        let d = pos.distance_tiles(camp);
+        if d > CAMP_RADIUS_TILES {
+            let walk = 1.0 / (1.0 + d / (WALK_TILES_PER_TICK * 6.0));
+            let score = sleep_score * (0.5 + 0.5 * traits.sociability) * walk as f32;
+            candidates.push((TaskKind::Sleep, camp, score));
+        }
+    }
 
     // — S'abriter : réponse linéaire au stress thermique, de préférence sous
     //   couvert forestier.
@@ -768,6 +817,9 @@ fn nearest_herd(pos: &Position, herds: &[HerdView]) -> Option<HerdView> {
 /// Durée de vie d'un souvenir de gibier, en jours : un troupeau se déplace
 /// de quelques kilomètres par jour, ses traces s'effacent en quelques jours.
 const GAME_MEMORY_DAYS: f64 = 3.0;
+/// Au-delà de cette distance du foyer de son clan (~500 m), on peut choisir
+/// de rentrer dormir au campement plutôt que sur place.
+const CAMP_RADIUS_TILES: f64 = 250.0;
 /// Arrivé à moins de 100 m de la piste sans rien voir, on l'oublie.
 const GAME_ARRIVAL_TILES: f64 = 50.0;
 

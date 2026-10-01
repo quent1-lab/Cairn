@@ -96,10 +96,19 @@ fn main() {
             sim.step();
             for (_, (phys, behavior)) in sim.agents.query::<(&Physiology, &Behavior)>().iter() {
                 if phys.hunger > 0.5 {
-                    let kind = behavior.task.map_or("Rien".to_string(), |t| {
-                        let k = format!("{:?}", t.kind);
-                        k.split('(').next().unwrap_or("").to_string()
-                    });
+                    // Ce que l'heure a réellement été : l'activité du tick, et pour
+                    // une marche, ce vers quoi on marchait. (La tâche relevée après
+                    // le tick est vide dès qu'elle s'est achevée dans l'heure : un
+                    // premier relevé comptait ainsi « Rien » un tiers du temps.)
+                    let kind = match behavior.activity {
+                        cairn_sim::Activity::Walking => format!(
+                            "Marche→{}",
+                            behavior.task.map_or("?".to_string(), |t| {
+                                format!("{:?}", t.kind).split('(').next().unwrap_or("").to_string()
+                            })
+                        ),
+                        a => format!("{a:?}"),
+                    };
                     *hungry_tasks.entry(kind).or_insert(0) += 1;
                 }
             }
@@ -174,11 +183,11 @@ fn main() {
         tasks.sort_by(|a, b| b.0.cmp(&a.0));
         let tasks_txt: Vec<String> = tasks
             .iter()
-            .take(5)
+            .take(7)
             .map(|(v, k)| format!("{k} {:.0}%", 100.0 * *v as f64 / tasks_total.max(1) as f64))
             .collect();
         let pct_of = |k: &str| 100.0 * *hungry_tasks.get(k).unwrap_or(&0) as f64 / tasks_total.max(1) as f64;
-        let (track_pct, hunt_pct) = (pct_of("Track"), pct_of("Hunt"));
+        let (track_pct, hunt_pct) = (pct_of("Marche→Track"), pct_of("Hunting") + pct_of("Marche→Hunt"));
         let remembering = sim
             .agents
             .query::<&cairn_sim::Memory>()

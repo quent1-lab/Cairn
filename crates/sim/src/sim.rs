@@ -1847,6 +1847,7 @@ fn execute(
         | TaskKind::Socialize
         | TaskKind::Explore
         | TaskKind::Track
+        | TaskKind::SeekGame
         | TaskKind::ReturnToClan
         // Le pèlerinage n'a d'effet que d'avoir eu lieu : on est venu, on est là.
         // Ce que ça produit — des peuples qui convergent et se disputent le lieu —
@@ -3384,6 +3385,11 @@ mod tests {
         });
         sim.time.tick = 1;
         for _ in 0..20 {
+            // Repus d'un bout à l'autre : c'est le pourrissement qu'on mesure, pas
+            // un repas pris dans la réserve.
+            for (_, phys) in sim.agents.query_mut::<&mut Physiology>() {
+                phys.hunger = 0.0;
+            }
             sim.step();
         }
         let stock = sim.clans.iter().find(|c| c.id == social::ClanId(1)).unwrap().stock;
@@ -3501,6 +3507,91 @@ mod tests {
             pourvu < 0.3 * demuni,
             "qui porte cinq points de viande chasse presque autant ({pourvu:.3}) qu'un démuni ({demuni:.3})"
         );
+    }
+
+    /// D10, partir en quête : un membre de clan affamé, sans troupeau en vue
+    /// ni piste, envisage de balayer le territoire du clan loin du foyer ; un
+    /// repu, guère ; un humain sans clan, jamais (il n'a pas de foyer où
+    /// revenir). Lu via `inspect_agent`.
+    #[test]
+    fn un_affame_d_un_clan_part_en_quete_sur_le_territoire() {
+        let quete = |faim: f32, avec_clan: bool, reserve: f32| -> Option<(f32, f64)> {
+            let (mut sim, home) = scenario_au_foyer(5, 1, 0);
+            let id = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).next().unwrap();
+            for (_, (phys, membership)) in sim.agents.query_mut::<(&mut Physiology, &mut ClanMembership)>() {
+                phys.hunger = faim;
+                if avec_clan {
+                    membership.0 = Some(social::ClanId(1));
+                }
+            }
+            if avec_clan {
+                sim.clans.push(Clan {
+                    id: social::ClanId(1),
+                    founded_tick: 0,
+                    members: [id].into_iter().collect(),
+                    home: (home.0 as f64 + 0.5, home.1 as f64 + 0.5),
+                    stock: reserve,
+                    chief: id,
+                    desired: None,
+                    rivalry: 0.0,
+                });
+            }
+            // Plusieurs délibérations, donc plusieurs directions tirées : une
+            // seule peut buter sur un rivage proche.
+            let mut best: Option<(f32, f64)> = None;
+            for t in 0..8 {
+                sim.time.tick = t * 4;
+                if let Some(m) = sim.inspect_agent(id).unwrap().iter().find(|m| m.kind == TaskKind::SeekGame) {
+                    let d = ((m.target.0 - home.0) as f64).hypot((m.target.1 - home.1) as f64);
+                    let km = cairn_core::tiles_to_km(d);
+                    if best.is_none_or(|(_, b)| km > b) {
+                        best = Some((m.score, km));
+                    }
+                }
+            }
+            best
+        };
+        let (affame, loin) = quete(0.9, true, 0.0).expect("un affamé d'un clan, sans gibier en vue, doit envisager une quête");
+        assert!(loin > 2.0, "une quête part au-delà du regard (2 km), au plus loin {loin:.1} km sur huit directions");
+        // Repu, et un clan pourvu (une réserve pleine pour son seul membre) : rien
+        // ne pousse à chasser. Un clan sans réserve, lui, enverrait même un repu
+        // chasser pour les siens (H2) — voulu.
+        let repu = quete(0.0, true, STOCK_SCALE_PER_MEMBER).map_or(0.0, |(s, _)| s);
+        assert!(repu < 0.2 * affame, "un repu ne part guère en quête ({repu:.3} contre {affame:.3})");
+        assert!(quete(0.9, false, 0.0).is_none(), "sans clan, pas de foyer d'où partir en quête");
+    }
+
+    /// D10, le soir au campement : un membre de clan fatigué, la nuit, à 3 km
+    /// du foyer, envisage de rentrer dormir près des siens — pas seulement de
+    /// s'effondrer sur place. C'est là que les liens se nouent (les rencontres
+    /// se font à moins de 120 m) : sans retour au camp, les chasseurs partis
+    /// en quête ne se croisaient plus et le clan se défaisait.
+    #[test]
+    fn le_soir_on_rentre_dormir_au_campement() {
+        let (mut sim, home) = scenario_au_foyer(5, 1, 0);
+        let id = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).next().unwrap();
+        let camp = (home.0 as f64 + 1_500.5, home.1 as f64 + 0.5); // 3 km
+        for (_, (phys, membership)) in sim.agents.query_mut::<(&mut Physiology, &mut ClanMembership)>() {
+            phys.fatigue = 0.7;
+            membership.0 = Some(social::ClanId(1));
+        }
+        sim.clans.push(Clan {
+            id: social::ClanId(1),
+            founded_tick: 0,
+            members: [id].into_iter().collect(),
+            home: camp,
+            stock: 0.0,
+            chief: id,
+            desired: None,
+            rivalry: 0.0,
+        });
+        sim.time.tick = 23; // la nuit
+        let motifs = sim.inspect_agent(id).unwrap();
+        let rentrer = motifs
+            .iter()
+            .filter(|m| m.kind == TaskKind::Sleep)
+            .find(|m| ((m.target.0 as f64 - camp.0).hypot(m.target.1 as f64 - camp.1)) < 50.0);
+        assert!(rentrer.is_some(), "un membre fatigué, la nuit, loin du camp, doit envisager d'y rentrer dormir");
     }
 
     /// Le pendant du dépôt : rapporter le surplus porté au foyer
