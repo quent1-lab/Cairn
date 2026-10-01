@@ -157,13 +157,16 @@ const HUNT_YIELD_HEAD: f32 = 1.0;
 fn meat_hunger(species: fauna::Species) -> f32 {
     (f64::from(species.edible_kcal()) / KCAL_PER_HUNGER) as f32
 }
-/// Plafond du stock commun d'un clan, par membre : quelques portions de
-/// réserve, pas un grenier sans fond — 3 points, six jours de nourriture par
-/// membre, de quoi absorber un mauvais jour de chasse, pas accumuler
-/// indéfiniment. `pub` (même
-/// patron que `memory::MEMORY_CELL_TILES`) : le client en a besoin pour
-/// afficher un stock relatif à son plafond plutôt qu'un nombre nu.
-pub const STOCK_CAP_PER_MEMBER: f32 = 3.0;
+/// Échelle d'une réserve « pleine », par membre : 3 points, six jours de
+/// nourriture. Ce n'est plus un plafond (le stock pourrit, voir
+/// `FRESH_KEEP_DAYS`) mais l'unité dans laquelle on juge qu'un clan a de quoi
+/// désirer un grenier, et dans laquelle le client affiche la réserve. `pub`
+/// (même patron que `memory::MEMORY_CELL_TILES`) pour le client.
+pub const STOCK_SCALE_PER_MEMBER: f32 = 3.0;
+/// Durée de vie moyenne, en jours, de la nourriture mise en réserve sans
+/// aucune technique : la viande crue se gâte en quelques jours. Le stock
+/// décroît en `e^(−t/τ)`, au lieu de buter sur un plafond.
+const FRESH_KEEP_DAYS: f64 = 3.0;
 /// Requêtes A* autorisées par tick (BRIEF §8.2 : « pathfinding budgété »).
 /// Seuls les agents que l'eau bloque en consomment ; les autres marchent en
 /// ligne droite pour rien.
@@ -172,7 +175,7 @@ const PATH_REQUESTS_PER_TICK: u32 = 8;
 // — Agriculture (Phase 5, chaîne §5.3) : entretenir un champ élève la biomasse
 //   d'une prairie au-dessus de sa capacité sauvage. La récolte passe par la
 //   cueillette ordinaire (tuile plus riche → meilleur rendement) ; l'écologie
-//   ramène un champ abandonné vers la friche. `pub` (comme `STOCK_CAP...`) : la
+//   ramène un champ abandonné vers la friche. `pub` (comme `STOCK_SCALE...`) : la
 //   délibération (`brain`) en a besoin pour proposer le candidat `Cultivate`. —
 /// Plafond de biomasse d'un champ entretenu — la richesse d'un champ cultivé,
 /// bien au-dessus de ce que la prairie sauvage porte seule (`u8`, 0–255).
@@ -1053,17 +1056,19 @@ impl Sim {
         self.path_calls += u64::from(PATH_REQUESTS_PER_TICK - path_budget);
         structures.sort_by_key(|s| (s.clan.0, s.kind));
         self.structures = structures;
-        // Report des dépôts/retraits de la boucle, plafonné par membre
-        // (`STOCK_CAP_PER_MEMBER`) plus la capacité des greniers du clan. On
+        // Report des dépôts/retraits de la boucle, et une heure de
+        // pourrissement : la réserve se gâte (`FRESH_KEEP_DAYS`), moins vite
+        // à l'abri d'un grenier. On
         // efface aussi le désir déjà satisfait ce tick, pour ne pas faire
         // marcher inutilement d'autres membres vers un chantier déjà achevé
         // (le prochain `structures::plan` de minuit le referait de toute
         // façon, mais autant couper court tout de suite).
         for clan in &mut self.clans {
             if let Some(&stock) = clan_stock.get(&clan.id) {
-                let cap = STOCK_CAP_PER_MEMBER * clan.members.len() as f32
-                    + structures::granary_bonus(clan.id, &self.structures);
-                clan.stock = stock.min(cap);
+                let keep_days = FRESH_KEEP_DAYS
+                    * f64::from(structures::granary_keep_factor(clan.id, &self.structures));
+                let keep = (-1.0 / (keep_days * cairn_core::TICKS_PER_DAY as f64)).exp();
+                clan.stock = (f64::from(stock.max(0.0)) * keep) as f32;
             }
             if let Some(kind) = clan.desired
                 && self.structures.iter().any(|s| s.clan == clan.id && s.kind == kind)
@@ -3108,6 +3113,7 @@ mod tests {
                 tameness: 0.0,
             };
 
+        let mut shares = Vec::new();
         let kill = execute(
             &mut sim.world,
             &mut routes,
@@ -3129,7 +3135,7 @@ mod tests {
             &mut structures,
             &mut Vec::new(),
             &mut Vec::new(),
-            &mut Vec::new(),
+            &mut shares,
             0,
         );
 
@@ -3141,8 +3147,9 @@ mod tests {
         );
         // D10 : une bête tuée est une bête entière. Un cerf de ~120 kg donne
         // ~60 kg comestibles, ~72 000 kcal, un mois de nourriture ; même un
-        // novice qui en gâche un quart en tire plus de deux semaines (7 points).
-        let fed = 0.3 + carrying.0;
+        // novice qui en gâche un quart en tire plus de deux semaines (7 points),
+        // qu'il les mange, les porte au clan ou les offre autour de lui.
+        let fed = 0.3 + carrying.0 + shares.iter().map(|s| s.amount).sum::<f32>();
         assert!(
             fed >= 7.0,
             "un cerf tué ne rapporte que {fed:.2} point de faim, {:.1} jour de nourriture",
@@ -3203,6 +3210,40 @@ mod tests {
         let sociable = voisin_apres(1.0);
         assert!((solitaire - 0.8).abs() < 1e-6, "un solitaire ne partage pas (faim du voisin {solitaire:.2})");
         assert!(sociable < 0.05, "un chasseur sociable doit rassasier son voisin (faim restante {sociable:.2})");
+    }
+
+    /// D10, la conservation : le stock du clan n'a plus de plafond, il
+    /// pourrit. Sans technique, la viande crue a une durée de vie de quelques
+    /// jours ; un stock de 30 points pour deux membres (quinze jours de
+    /// nourriture chacun) ne doit être ni tronqué d'un coup, ni gardé intact :
+    /// en 20 heures, il perd un quart environ (e^(−20/72)).
+    #[test]
+    fn le_stock_du_clan_pourrit_au_lieu_d_etre_plafonne() {
+        let (mut sim, home) = scenario_setup(3, 2, 0);
+        let members: Vec<AgentId> = sim.agents.query::<&AgentId>().iter().map(|(_, id)| *id).collect();
+        for (_, (phys, membership)) in sim.agents.query_mut::<(&mut Physiology, &mut ClanMembership)>() {
+            phys.hunger = 0.0; // repus : personne ne puise
+            membership.0 = Some(social::ClanId(1));
+        }
+        sim.clans.push(Clan {
+            id: social::ClanId(1),
+            founded_tick: 0,
+            members: members.iter().copied().collect(),
+            home: (home.0 as f64 + 0.5, home.1 as f64 + 0.5),
+            stock: 30.0,
+            chief: members[0],
+            desired: None,
+            rivalry: 0.0,
+        });
+        sim.time.tick = 1; // entre deux minuits : la détection des clans ne passe pas
+        for _ in 0..20 {
+            sim.step();
+        }
+        let stock = sim.clans.iter().find(|c| c.id == social::ClanId(1)).unwrap().stock;
+        assert!(
+            (20.0..26.0).contains(&stock),
+            "30 points de stock deviennent {stock:.1} en 20 heures (attendu ~22,7 : un pourrissement, pas un plafond)"
+        );
     }
 
     /// Le pendant du dépôt : rapporter le surplus porté au foyer

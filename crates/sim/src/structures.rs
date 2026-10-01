@@ -10,9 +10,10 @@
 //!   **son** clan gagne quelques degrés ressentis, sans avoir à s'arrêter
 //!   pour s'abriter (`Activity::Sheltering`) — c'est ce qui rend un foyer
 //!   fixe survivable là où l'errance ne l'était pas.
-//! - **Grenier** (`Granary`) : relève le plafond du stock commun du clan
-//!   (`STOCK_CAP_PER_MEMBER × membres`, voir `sim`), donc la réserve qu'il
-//!   peut accumuler contre la disette.
+//! - **Grenier** (`Granary`) : double la durée de vie de la réserve commune
+//!   du clan (qui pourrit, voir `sim::FRESH_KEEP_DAYS`), donc ce qu'il peut
+//!   garder contre la disette. Désiré quand la réserve dépasse l'échelle
+//!   `STOCK_SCALE_PER_MEMBER × membres`.
 //! - **Palissade** (`Palisade`) : la tension inter-clans (incrément 6) monte
 //!   **moins vite** contre un clan protégé — un groupe qui tient sa position
 //!   escalade moins. Pas de combat pour autant (`force`/`agressivité`
@@ -54,7 +55,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::agent::{Physiology, Prestige};
-use crate::sim::{STOCK_CAP_PER_MEMBER, Sim};
+use crate::sim::{STOCK_SCALE_PER_MEMBER, Sim};
 use crate::skills::Skills;
 use crate::social::{ClanId, ClanMembership};
 use cairn_core::km_to_tiles;
@@ -103,8 +104,9 @@ pub const CHIEF_HUT_COST: f32 = 15.0;
 pub const HUT_WARMTH_C: f64 = 6.0;
 /// Rayon d'effet d'une hutte (~300 m) : on en profite en vivant à côté.
 pub const HUT_RADIUS_TILES: f64 = km_to_tiles(0.3);
-/// Capacité de stock supplémentaire qu'un grenier ajoute au plafond du clan.
-pub const GRANARY_STOCK_BONUS: f32 = 12.0;
+/// Un grenier double la durée de vie de la réserve : au sec, hors d'atteinte
+/// des bêtes. Plusieurs greniers ne font pas mieux qu'un.
+pub const GRANARY_KEEP_FACTOR: f32 = 2.0;
 /// Facteur appliqué à la montée de tension contre un clan qui a une
 /// palissade : elle monte à 40 % de son rythme normal.
 pub const PALISADE_TENSION_FACTOR: f32 = 0.4;
@@ -112,7 +114,8 @@ pub const PALISADE_TENSION_FACTOR: f32 = 0.4;
 // — Seuils de pression (quand un clan « désire » une structure) —
 /// Froid moyen des membres au-delà duquel une hutte devient désirable.
 const COLD_PRESSURE_THRESHOLD: f32 = 0.15;
-/// Remplissage du stock (stock / plafond de base) au-delà duquel un grenier
+/// Remplissage du stock (stock / échelle `STOCK_SCALE_PER_MEMBER × membres`)
+/// au-delà duquel un grenier
 /// devient désirable.
 const STORAGE_PRESSURE_THRESHOLD: f32 = 0.8;
 /// Tension maximale avec un voisin au-delà de laquelle une palissade devient
@@ -169,10 +172,14 @@ pub fn hut_warmth(pos: (f64, f64), clan: Option<ClanId>, huts: &[(f64, f64, Clan
     if sheltered { HUT_WARMTH_C } else { 0.0 }
 }
 
-/// La capacité de stock supplémentaire d'un clan, somme de ses greniers.
-pub fn granary_bonus(clan: ClanId, structures: &[Structure]) -> f32 {
-    structures.iter().filter(|s| s.clan == clan && s.kind == StructureKind::Granary).count() as f32
-        * GRANARY_STOCK_BONUS
+/// Facteur de durée de vie de la réserve d'un clan : `GRANARY_KEEP_FACTOR`
+/// s'il a un grenier, 1 sinon.
+pub fn granary_keep_factor(clan: ClanId, structures: &[Structure]) -> f32 {
+    if structures.iter().any(|s| s.clan == clan && s.kind == StructureKind::Granary) {
+        GRANARY_KEEP_FACTOR
+    } else {
+        1.0
+    }
 }
 
 /// Le clan a-t-il une palissade ? (lu par `social::update_relations`).
@@ -219,7 +226,7 @@ pub(crate) fn plan(sim: &mut Sim) {
         let present = existing.get(&clan.id.0);
         let mean_cold =
             cold.get(&clan.id.0).map(|&(sum, n)| sum / n.max(1) as f32).unwrap_or(0.0);
-        let base_cap = STOCK_CAP_PER_MEMBER * clan.members.len() as f32;
+        let base_cap = STOCK_SCALE_PER_MEMBER * clan.members.len() as f32;
         let storage = if base_cap > 0.0 { clan.stock / base_cap } else { 0.0 };
         let menace = threat.get(&clan.id.0).copied().unwrap_or(0.0);
         let chief_score = score.get(&clan.chief.0).copied().unwrap_or(0.0);
@@ -515,14 +522,14 @@ mod tests {
     }
 
     #[test]
-    fn le_bonus_de_grenier_compte_les_greniers_du_clan() {
+    fn le_grenier_allonge_la_vie_de_la_reserve() {
         let st = |kind, clan| Structure { kind, clan, pos: (0.0, 0.0), built_tick: 0, abandoned_since: None };
         let structures = [
             st(StructureKind::Granary, ClanId(1)),
             st(StructureKind::Hut, ClanId(1)),
             st(StructureKind::Granary, ClanId(2)),
         ];
-        assert_eq!(granary_bonus(ClanId(1), &structures), GRANARY_STOCK_BONUS);
-        assert_eq!(granary_bonus(ClanId(3), &structures), 0.0, "un clan sans grenier n'a aucun bonus");
+        assert_eq!(granary_keep_factor(ClanId(1), &structures), GRANARY_KEEP_FACTOR);
+        assert_eq!(granary_keep_factor(ClanId(3), &structures), 1.0, "un clan sans grenier ne garde pas mieux");
     }
 }

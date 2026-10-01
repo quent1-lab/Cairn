@@ -923,7 +923,7 @@ impl App {
         let mut html = String::new();
         for clan in &self.sim.clans {
             let n = clan.members.len();
-            let cap = cairn_sim::sim::STOCK_CAP_PER_MEMBER * n as f32;
+            let cap = cairn_sim::sim::STOCK_SCALE_PER_MEMBER * n as f32;
             let frac = if cap > 0.0 { clan.stock / cap } else { 0.0 };
             let age = self.sim.clan_age(clan.id);
             let age_class = if matches!(age, cairn_sim::Age::Paleolithic) {
