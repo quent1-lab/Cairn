@@ -9,6 +9,17 @@ use crate::fauna;
 use crate::sim::Sim;
 use crate::tech::Knowledge;
 
+/// Fait commencer la simulation au jour `day_of_year` (0 = cœur de l'hiver
+/// boréal ; printemps à partir du jour 45, été 135, automne 225, hiver 315 —
+/// voir `Climate::season`). À appeler sur un monde neuf, avant tout semis :
+/// les fondateurs datent leur âge du tick courant. C'est un choix de scène,
+/// pas une règle du monde : un banc teste ainsi l'arrivée d'une population à
+/// chaque saison, comme un joueur pourra la lâcher quand il veut.
+pub fn start_on_day(sim: &mut Sim, day_of_year: u64) {
+    assert_eq!(sim.time.tick, 0, "start_on_day se règle sur un monde neuf");
+    sim.time.tick = (day_of_year % cairn_core::DAYS_PER_YEAR) * cairn_core::TICKS_PER_DAY;
+}
+
 /// Cherche un foyer tempéré (prairie ou forêt tempérée, climat doux, une
 /// source à portée) en spirale depuis `around`.
 pub fn find_home(sim: &mut Sim, around: (i64, i64)) -> (i64, i64) {

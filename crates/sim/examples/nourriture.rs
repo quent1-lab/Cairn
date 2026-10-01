@@ -10,7 +10,7 @@
 //!
 //! Usage :
 //!   cargo run --release -p cairn-sim --features food-stats --example nourriture -- \
-//!       [seed] [années] [scène: tempere|froid] [capacité_chunks] [agents] [période_j]
+//!       [seed] [années] [scène: tempere|froid] [capacité_chunks] [agents] [période_j] [jour_de_départ]
 //!
 //! Scènes : `tempere` est celle de `chronicle` (foyer tempéré, 40 agents),
 //! `froid` celle d'`etincelle` (1-5 °C, hivers sous zéro, 60 agents).
@@ -35,8 +35,10 @@ fn main() {
         args.next().and_then(|s| s.parse().ok()).unwrap_or(if cold { 60 } else { 40 });
     #[allow(non_snake_case)]
     let PERIOD_DAYS: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(90);
+    let start_day: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(0);
 
     let mut sim = Sim::new(WorldSeed(seed), capacity);
+    scenario::start_on_day(&mut sim, start_day);
     let seed_point = (km_to_tiles(1500.0) as i64, km_to_tiles(2100.0) as i64);
     let home = if cold {
         scenario::find_home_where(
@@ -63,14 +65,14 @@ fn main() {
     let tile = sim.world.tile(home.0, home.1);
     println!(
         "# nourriture — seed {seed}, scène {scene}, foyer {:?} {:.1} °C, {placed} agents, \
-         {years} ans, capacité {capacity}, période {PERIOD_DAYS} j",
+         {years} ans, capacité {capacity}, période {PERIOD_DAYS} j, départ au jour {start_day}",
         tile.biome, tile.temperature,
     );
     println!(
-        "{:>5} {:>4} {:>4} {:>4} {:>13} {:>15} | {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} | \
+        "{:>5} {:>4} {:>4} {:>4} {:>13} {:>15} | {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} | \
          {:>6} {:>5} {:>5} | {:>5} {:>4} {:>6} {:>7} | {:>7} {:>5}",
         "jour", "pop", "nés", "morts", "faim/soif/aut", "faim moy/p90/max",
-        "ceuil", "chsM", "chsP", "perdu", "stock", "chept", "lait",
+        "ceuil", "chsM", "chsP", "perdu", "stock", "chept", "lait", "part",
         "bio/h/j", "court", "tue/j",
         "zones", "max", "h/km²", "h/km²z", "gibier", "tps",
     );
@@ -80,6 +82,7 @@ fn main() {
     let mut seen_births = 0usize;
     let mut window = std::time::Instant::now();
     let mut human_days = 0.0f64;
+    let day0 = sim.time.tick / TICKS_PER_DAY;
     for day in 1..=total_days {
         for _ in 0..TICKS_PER_DAY {
             sim.step();
@@ -121,18 +124,18 @@ fn main() {
         let dens_max = f64::from(zmax) / ZONE_KM2;
 
         let (fed, ev) = food_stats::take();
-        let total: f64 = fed[0] + fed[1] + fed[4] + fed[6];
+        let total: f64 = fed[0] + fed[1] + fed[4] + fed[6] + fed[7];
         let pct = |x: f64| 100.0 * x / total.max(1e-9);
         let hd = human_days.max(1.0);
         human_days = 0.0;
         println!(
             "{:>5} {:>4} {:>4} {:>4} {:>4}/{:>3}/{:>4} {:>5.2}/{:>4.2}/{:>4.2} | \
-             {:>5.1} {:>5.1} {:>5.1} {:>5.1} {:>5.1} {:>5.1} {:>5.1} | \
+             {:>5.1} {:>5.1} {:>5.1} {:>5.1} {:>5.1} {:>5.1} {:>5.1} {:>5.1} | \
              {:>6.1} {:>4.0}% {:>5.2} | {:>5} {:>4} {:>6.2} {:>7.2} | {:>7.0} {:>5.1}",
-            day, pop, births, d_starv + d_thirst + d_other, d_starv, d_thirst, d_other,
+            day0 + day, pop, births, d_starv + d_thirst + d_other, d_starv, d_thirst, d_other,
             mean, p90, max,
             pct(fed[0]), pct(fed[1]), pct(fed[2]), pct(fed[3]), pct(fed[4]), pct(fed[5]),
-            pct(fed[6]),
+            pct(fed[6]), pct(fed[7]),
             ev[0] as f64 / hd,
             100.0 * ev[2] as f64 / (ev[1].max(1)) as f64,
             ev[3] as f64 / PERIOD_DAYS as f64,

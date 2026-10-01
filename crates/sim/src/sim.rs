@@ -84,6 +84,68 @@ pub(crate) fn gathering_kcal_m2_yr(biome: cairn_worldgen::Biome) -> f64 {
         * crate::gathering::EDIBLE_KCAL_PER_G
 }
 
+/// Rayon dans lequel on accourt à une prise pour en avoir sa part : la
+/// portée de la voix et du regard autour d'un dépeçage, ~500 m.
+const SHARE_RADIUS_TILES: f64 = cairn_core::km_to_tiles(0.5);
+
+/// Une part de viande offerte par un chasseur autour de sa prise, à
+/// distribuer après la boucle d'exécution (on ne touche pas à la faim des
+/// autres pendant qu'on itère sur eux).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Share {
+    giver: AgentId,
+    pos: (f64, f64),
+    amount: f32,
+}
+
+/// Distribue les parts : les plus affamés d'abord, chacun mange au plus sa
+/// faim. Ce que personne n'a mangé revient au chasseur : porté au clan s'il
+/// en a un, laissé sur place sinon — on n'offre pas pour jeter.
+fn resolve_shares(sim: &mut Sim, shares: &[Share]) {
+    for share in shares {
+        let r2 = SHARE_RADIUS_TILES * SHARE_RADIUS_TILES;
+        let mut near: Vec<(f32, AgentId, hecs::Entity)> = sim
+            .agents
+            .query::<(&AgentId, &Position, &Physiology)>()
+            .iter()
+            .filter(|(_, (id, p, ph))| {
+                **id != share.giver
+                    && ph.hunger > 0.0
+                    && (p.x - share.pos.0).powi(2) + (p.y - share.pos.1).powi(2) <= r2
+            })
+            .map(|(e, (id, _, ph))| (ph.hunger, *id, e))
+            .collect();
+        near.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.0.cmp(&b.1.0)));
+        let mut left = share.amount;
+        for (_, _, entity) in near {
+            if left <= 0.0 {
+                break;
+            }
+            if let Ok(ph) = sim.agents.query_one_mut::<&mut Physiology>(entity) {
+                let eaten = left.min(ph.hunger);
+                ph.hunger -= eaten;
+                left -= eaten;
+                crate::food_stats::fed(crate::food_stats::Source::Shared, eaten);
+            }
+        }
+        if left > 0.0 {
+            let giver = sim
+                .agents
+                .query_mut::<(&AgentId, &ClanMembership, &mut Carrying)>()
+                .into_iter()
+                .find(|(_, (id, _, _))| **id == share.giver)
+                .and_then(|(_, (_, membership, carrying))| membership.0.map(|_| carrying));
+            match giver {
+                Some(carrying) => {
+                    carrying.0 += left;
+                    crate::food_stats::fed(crate::food_stats::Source::HuntCarried, left);
+                }
+                None => crate::food_stats::fed(crate::food_stats::Source::HuntWasted, left),
+            }
+        }
+    }
+}
+
 /// Portée d'une mise à mort : le chasseur doit être à ~200 m du troupeau.
 const HUNT_REACH_TILES: f64 = cairn_core::km_to_tiles(0.2);
 /// Têtes prélevées par chasse réussie.
@@ -924,6 +986,7 @@ impl Sim {
         let mut structures = self.structures.clone();
         let mut engagements: Vec<Engagement> = Vec::new();
         let mut clashes: Vec<Clash> = Vec::new();
+        let mut shares: Vec<Share> = Vec::new();
         for (
             _,
             (id, pos, phys, traits, demo, behavior, mem, agent_skills, membership, carrying, prestige, wound),
@@ -970,6 +1033,7 @@ impl Sim {
                 &mut structures,
                 &mut engagements,
                 &mut clashes,
+                &mut shares,
                 time.tick,
             );
             // Où que la tâche l'ait mené, l'agent note où il a mis les pieds.
@@ -983,6 +1047,8 @@ impl Sim {
         combat::resolve(self, &engagements);
         // Puis les raids inter-clans : coups mutuels, butin, morts par violence.
         combat::resolve_clashes(self, &clashes);
+        // Puis les parts de viande offertes autour des prises.
+        resolve_shares(self, &shares);
         self.hunted_head += kills.iter().map(|k| k.head).sum::<f32>();
         self.path_calls += u64::from(PATH_REQUESTS_PER_TICK - path_budget);
         structures.sort_by_key(|s| (s.clan.0, s.kind));
@@ -1408,6 +1474,7 @@ fn execute(
     structures: &mut Vec<Structure>,
     engagements: &mut Vec<Engagement>,
     clashes: &mut Vec<Clash>,
+    shares: &mut Vec<Share>,
     tick: u64,
 ) -> Option<Kill> {
     let task = match behavior.task {
@@ -1451,10 +1518,19 @@ fn execute(
         // le commentaire de module de `social`) — il faut d'abord le
         // rapporter au foyer (`Carrying`, `TaskKind::BringSurplusHome`),
         // sans quoi la viande se téléporterait depuis le lieu de la chasse.
-        let surplus = (nutrition - phys.hunger).max(0.0);
+        let mut surplus = (nutrition - phys.hunger).max(0.0);
         crate::food_stats::fed(crate::food_stats::Source::HuntEaten, nutrition.min(phys.hunger));
         crate::food_stats::event(crate::food_stats::Event::Kills, 1);
         phys.hunger = (phys.hunger - nutrition).max(0.0);
+        // Partager la prise avec ceux qui ont faim autour : ni une règle, ni un
+        // devoir de clan — une disposition. La part offerte suit la
+        // sociabilité héritée ; ce qui n'est pas offert est rapporté au clan
+        // ou laissé sur place, comme avant.
+        let offered = surplus * traits.sociability;
+        if offered > 0.0 {
+            shares.push(Share { giver: id, pos: (pos.x, pos.y), amount: offered });
+            surplus -= offered;
+        }
         if surplus > 0.0 && clan.is_some() {
             carrying.0 += surplus;
             crate::food_stats::fed(crate::food_stats::Source::HuntCarried, surplus);
@@ -3053,6 +3129,7 @@ mod tests {
             &mut structures,
             &mut Vec::new(),
             &mut Vec::new(),
+            &mut Vec::new(),
             0,
         );
 
@@ -3076,6 +3153,56 @@ mod tests {
             0.0,
             "le stock du clan ne doit RIEN recevoir tant que le surplus n'a pas été rapporté au foyer"
         );
+    }
+
+    /// D10, le partage : un chasseur ne mange qu'une ration de sa bête ; ce
+    /// qu'il offre autour de lui suit sa sociabilité héritée. Un voisin
+    /// affamé à 100 m est nourri par un chasseur sociable, pas par un
+    /// solitaire — et personne ne l'oblige : c'est une disposition, pas une
+    /// règle de clan (le chasseur n'a pas de clan ici).
+    #[test]
+    fn un_chasseur_sociable_nourrit_ses_voisins_affames() {
+        let voisin_apres = |sociability: f32| -> f32 {
+            let mut sim = Sim::new(WorldSeed(42), 512);
+            let home = find_land(&sim);
+            let voisin = sim.spawn_agent(home.0 as f64 + 50.5, home.1 as f64 + 0.5);
+            for (_, (id, ph)) in sim.agents.query_mut::<(&AgentId, &mut Physiology)>() {
+                if *id == voisin {
+                    ph.hunger = 0.8;
+                }
+            }
+            let mut pos = Position { x: home.0 as f64 + 0.5, y: home.1 as f64 + 0.5 };
+            let mut phys = Physiology { hunger: 0.3, ..Physiology::default() };
+            let mut behavior =
+                Behavior { task: Some(Task { kind: TaskKind::Hunt, target: home }), ..Behavior::default() };
+            let traits = Traits { sociability, ..Traits::default() };
+            let herd = HerdView {
+                entity: hecs::Entity::DANGLING,
+                pos: (pos.x, pos.y),
+                population: 20.0,
+                species: fauna::Species::Deer,
+                tameness: 0.0,
+            };
+            let mut shares = Vec::new();
+            execute(
+                &mut sim.world, &mut BTreeMap::new(), &mut PATH_REQUESTS_PER_TICK.clone(),
+                AgentId(9_999), &mut pos, &mut phys, &mut behavior, &[herd], &[], &[], 1.0,
+                &traits, &mut Skills::default(), None, &mut BTreeMap::new(),
+                &mut Carrying::default(), &mut Prestige::default(), &mut Vec::new(),
+                &mut Vec::new(), &mut Vec::new(), &mut shares, 0,
+            );
+            resolve_shares(&mut sim, &shares);
+            sim.agents
+                .query::<(&AgentId, &Physiology)>()
+                .iter()
+                .find(|(_, (id, _))| **id == voisin)
+                .map(|(_, (_, ph))| ph.hunger)
+                .unwrap()
+        };
+        let solitaire = voisin_apres(0.0);
+        let sociable = voisin_apres(1.0);
+        assert!((solitaire - 0.8).abs() < 1e-6, "un solitaire ne partage pas (faim du voisin {solitaire:.2})");
+        assert!(sociable < 0.05, "un chasseur sociable doit rassasier son voisin (faim restante {sociable:.2})");
     }
 
     /// Le pendant du dépôt : rapporter le surplus porté au foyer
@@ -3121,6 +3248,7 @@ mod tests {
             &mut carrying,
             &mut prestige,
             &mut structures,
+            &mut Vec::new(),
             &mut Vec::new(),
             &mut Vec::new(),
             0,
@@ -3179,6 +3307,7 @@ mod tests {
             &mut carrying,
             &mut prestige,
             &mut structures,
+            &mut Vec::new(),
             &mut Vec::new(),
             &mut Vec::new(),
             0,
@@ -3243,6 +3372,7 @@ mod tests {
             &mut structures,
             &mut Vec::new(),
             &mut Vec::new(),
+            &mut Vec::new(),
             0,
         );
 
@@ -3280,6 +3410,7 @@ mod tests {
             &mut carrying,
             &mut prestige,
             &mut structures,
+            &mut Vec::new(),
             &mut Vec::new(),
             &mut Vec::new(),
             0,
@@ -3320,7 +3451,8 @@ mod tests {
         execute(
             &mut sim.world, &mut routes, &mut budget, AgentId(0), &mut pos, &mut phys,
             &mut behavior, &[], &[], &[], 1.0, &traits, &mut skills, None, &mut clan_stock,
-            &mut carrying, &mut prestige, &mut structures, &mut Vec::new(), &mut Vec::new(), 0,
+            &mut carrying, &mut prestige, &mut structures, &mut Vec::new(), &mut Vec::new(),
+            &mut Vec::new(), 0,
         );
 
         let tile = sim.world.tile(field.0, field.1);
@@ -3465,7 +3597,7 @@ mod tests {
             &mut sim.world, &mut routes, &mut budget, AgentId(0), &mut pos, &mut phys,
             &mut behavior, &[cheptel], &[], &[], 1.0, &traits, &mut skills, Some(clan_id),
             &mut clan_stock, &mut carrying, &mut prestige, &mut structures, &mut Vec::new(),
-            &mut Vec::new(), 0,
+            &mut Vec::new(), &mut Vec::new(), 0,
         );
 
         assert!(
