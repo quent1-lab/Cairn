@@ -18,7 +18,8 @@
 use std::collections::BTreeMap;
 
 use cairn_core::{TICKS_PER_DAY, WorldSeed, km_to_tiles};
-use cairn_sim::{Behavior, DeathCause, Knowledge, Physiology, Position, Sim, fauna, food_stats, scenario};
+use cairn_sim::demography::{self, Demographics, Kinship, Sex};
+use cairn_sim::{AgentId, Behavior, DeathCause, Knowledge, Memory, Physiology, Position, Sim, fauna, food_stats, scenario};
 use cairn_worldgen::Biome;
 
 /// Maille de comptage : celle de la faune (`fauna::range_zone`), 2 km.
@@ -87,6 +88,20 @@ fn main() {
     // dispersion se juge à ce qu'ils choisissent quand le pays ne répond plus.
     let mut hungry_tasks: BTreeMap<String, u64> = BTreeMap::new();
     let mut first_clan_day: Option<u64> = None;
+    // D11 — la soif : le dernier état connu de chaque assoiffé (soif >= 0,95),
+    // pour décrire ceux qui en meurent (l'agent mort n'est plus interrogeable).
+    let mut parched: BTreeMap<u64, (String, Option<f64>, f64, (f64, f64), f32)> = BTreeMap::new();
+    let mut thirst_deaths: Vec<(String, Option<f64>, f64, (f64, f64), f32)> = Vec::new();
+    let mut seen_deaths_t = 0usize;
+    // Qui meurt, et à quel âge : l'âge de chaque vivant, relevé chaque heure,
+    // sert d'âge au décès (l'agent mort n'est plus interrogeable).
+    let mut ages: BTreeMap<u64, f64> = BTreeMap::new();
+    let mut deaths_by_age: BTreeMap<(&'static str, String), u32> = BTreeMap::new();
+    // Trace heure par heure des assoiffés (soif > 0,7), pour les premiers morts.
+    let mut traces: BTreeMap<u64, std::collections::VecDeque<String>> = BTreeMap::new();
+    let mut traces_printed = 0;
+    // D12 — la natalité : jours-femme féconde par première porte fermée.
+    let mut gates: BTreeMap<&'static str, u64> = BTreeMap::new();
     for day in 1..=total_days {
         if first_clan_day.is_none() && !sim.clans.is_empty() {
             first_clan_day = Some(day - 1);
@@ -94,6 +109,83 @@ fn main() {
         }
         for _ in 0..TICKS_PER_DAY {
             sim.step();
+            let tick_now = sim.time.tick;
+            for (_, (id, pos, phys, behavior, mem, demo)) in sim
+                .agents
+                .query::<(&AgentId, &Position, &Physiology, &Behavior, &Memory, &Demographics)>()
+                .iter()
+            {
+                ages.insert(id.0, demo.age_years(tick_now));
+                if phys.thirst > 0.7 {
+                    let tr = traces.entry(id.0).or_default();
+                    let (tk, dist) = behavior.task.map_or(("—".to_string(), -1.0), |t| {
+                        (
+                            format!("{:?}", t.kind).split('(').next().unwrap_or("").to_string(),
+                            (t.target.0 as f64 - pos.x).hypot(t.target.1 as f64 - pos.y) * 2.0,
+                        )
+                    });
+                    let spring = mem.nearest_known_spring((pos.x, pos.y));
+                    let water_between = spring.is_some_and(|sp| {
+                        let (dx, dy) = (sp.0 as f64 - pos.x, sp.1 as f64 - pos.y);
+                        let d = dx.hypot(dy).max(1.0);
+                        (0..(d / 8.0) as i64).any(|k| {
+                            let f = k as f64 * 8.0 / d;
+                            sim.world.worldgen().elevation((pos.x + dx * f) as i64, (pos.y + dy * f) as i64) <= 0.0
+                        })
+                    });
+                    tr.push_back(format!(
+                        "h{} {tk} {:?} cible {dist:.0} m soif {:.2} faim {:.2} santé {:.2} fatigue {:.2} | source connue à {} m, eau entre deux : {water_between}, sources connues {}",
+                        tick_now % 24, behavior.activity, phys.thirst, phys.hunger, phys.health, phys.fatigue,
+                        spring.map_or(-1.0, |sp| (sp.0 as f64 - pos.x).hypot(sp.1 as f64 - pos.y) * 2.0) as i64,
+                        mem.springs.len()
+                    ));
+                    if tr.len() > 48 {
+                        tr.pop_front();
+                    }
+                } else {
+                    traces.remove(&id.0);
+                }
+                if phys.thirst >= 0.95 {
+                    let task = behavior.task.map_or("—".to_string(), |t| {
+                        format!("{:?}", t.kind).split('(').next().unwrap_or("").to_string()
+                    });
+                    let known = mem.nearest_known_spring((pos.x, pos.y)).map(|s| {
+                        cairn_core::tiles_to_km((s.0 as f64 - pos.x).hypot(s.1 as f64 - pos.y))
+                    });
+                    parched.insert(id.0, (task, known, demo.age_years(tick_now), (pos.x, pos.y), phys.hunger));
+                }
+            }
+            for d in &sim.deaths[seen_deaths_t..] {
+                let age = ages.get(&d.agent.0).copied().unwrap_or(-1.0);
+                let class = match age {
+                    a if a < 0.0 => "?",
+                    a if a < 3.0 => "nourrisson",
+                    a if a < 14.0 => "enfant",
+                    a if a < 50.0 => "adulte",
+                    _ => "âgé",
+                };
+                *deaths_by_age.entry((class, format!("{:?}", d.cause))).or_insert(0) += 1;
+            }
+            for d in &sim.deaths[seen_deaths_t..] {
+                if d.cause == DeathCause::Dehydration && traces_printed < 3 {
+                    traces_printed += 1;
+                    println!("      TRACE de l'agent {} (mort de soif) :", d.agent.0);
+                    for l in traces.get(&d.agent.0).into_iter().flatten() {
+                        println!("        {l}");
+                    }
+                }
+                if d.cause == DeathCause::Dehydration {
+                    let snap = parched.remove(&d.agent.0).unwrap_or((
+                        "?".to_string(),
+                        None,
+                        -1.0,
+                        (d.pos.0 as f64, d.pos.1 as f64),
+                        -1.0,
+                    ));
+                    thirst_deaths.push(snap);
+                }
+            }
+            seen_deaths_t = sim.deaths.len();
             for (_, (phys, behavior)) in sim.agents.query::<(&Physiology, &Behavior)>().iter() {
                 if phys.hunger > 0.5 {
                     // Ce que l'heure a réellement été : l'activité du tick, et pour
@@ -114,6 +206,53 @@ fn main() {
             }
         }
         human_days += sim.population() as f64;
+        // Les portes de la conception, relevées une fois par jour.
+        {
+            let tick_now = sim.time.tick;
+            let mut nursing: std::collections::BTreeSet<u64> = Default::default();
+            let mut males: Vec<(f64, f64)> = Vec::new();
+            for (_, (pos, phys, demo, kin)) in
+                sim.agents.query::<(&Position, &Physiology, &Demographics, &Kinship)>().iter()
+            {
+                if demo.is_infant(tick_now)
+                    && let Some(m) = kin.mother
+                {
+                    nursing.insert(m.0);
+                }
+                if demo.sex == Sex::Male
+                    && demography::MALE_FERTILE_YEARS.contains(&demo.age_years(tick_now))
+                    && phys.health > 0.3
+                {
+                    males.push((pos.x, pos.y));
+                }
+            }
+            let r2 = demography::MATE_RADIUS_TILES * demography::MATE_RADIUS_TILES;
+            for (_, (id, pos, phys, demo)) in
+                sim.agents.query::<(&AgentId, &Position, &Physiology, &Demographics)>().iter()
+            {
+                if demo.sex != Sex::Female
+                    || !demography::FEMALE_FERTILE_YEARS.contains(&demo.age_years(tick_now))
+                {
+                    continue;
+                }
+                let gate = if demo.pregnancy.is_some() {
+                    "enceinte"
+                } else if nursing.contains(&id.0) {
+                    "allaite"
+                } else if phys.health <= 0.6 {
+                    "santé"
+                } else if phys.hunger >= 0.85 {
+                    "faim"
+                } else if phys.thirst >= 0.9 {
+                    "soif"
+                } else if !males.iter().any(|m| (m.0 - pos.x).powi(2) + (m.1 - pos.y).powi(2) <= r2) {
+                    "sans homme à 400 m"
+                } else {
+                    "féconde"
+                };
+                *gates.entry(gate).or_insert(0) += 1;
+            }
+        }
         if !day.is_multiple_of(PERIOD_DAYS) {
             continue;
         }
@@ -226,6 +365,55 @@ fn main() {
             .values()
             .filter(|w| **w >= cairn_sim::social::BOND_THRESHOLD)
             .count();
+        {
+            let total: u64 = gates.values().sum();
+            if total > 0 {
+                let mut v: Vec<(u64, &str)> = gates.iter().map(|(k, n)| (*n, *k)).collect();
+                v.sort_by(|a, b| b.0.cmp(&a.0));
+                let txt: Vec<String> =
+                    v.iter().map(|(n, k)| format!("{k} {:.0}%", 100.0 * *n as f64 / total as f64)).collect();
+                let open = *gates.get("féconde").unwrap_or(&0) as f64;
+                println!(
+                    "      natalité : {total} jours-femme féconde — {} ; conceptions attendues {:.1}, naissances {births}",
+                    txt.join(", "),
+                    open * demography::CONCEPTION_DAILY_P
+                );
+            }
+            gates.clear();
+            if !deaths_by_age.is_empty() {
+                let txt: Vec<String> =
+                    deaths_by_age.iter().map(|((c, cause), n)| format!("{c} {cause} {n}")).collect();
+                println!("      morts par âge : {}", txt.join(", "));
+                deaths_by_age.clear();
+            }
+            if !thirst_deaths.is_empty() {
+                let mut known: Vec<f64> = thirst_deaths.iter().filter_map(|t| t.1).collect();
+                known.sort_by(f64::total_cmp);
+                let never = thirst_deaths.iter().filter(|t| t.1.is_none()).count();
+                let kids = thirst_deaths.iter().filter(|t| t.2 >= 0.0 && t.2 < 14.0).count();
+                let mut tasks: BTreeMap<&str, u32> = BTreeMap::new();
+                for t in &thirst_deaths {
+                    *tasks.entry(t.0.as_str()).or_insert(0) += 1;
+                }
+                let hum: f64 = thirst_deaths
+                    .iter()
+                    .map(|t| sim.world.worldgen().humidity(t.3.0 as i64, t.3.1 as i64))
+                    .sum::<f64>()
+                    / thirst_deaths.len() as f64;
+                let starving = thirst_deaths.iter().filter(|t| t.4 >= 0.99).count();
+                println!("      soif : dont {starving} mourants qui avaient aussi faim à 1,0 (affamés comptés « soif »)");
+                println!(
+                    "      soif : {} morts — source connue la plus proche : médiane {}, aucune connue {} ; enfants {} ; humidité moyenne {:.2} ; tâches {:?}",
+                    thirst_deaths.len(),
+                    known.get(known.len() / 2).map_or("—".to_string(), |k| format!("{k:.1} km")),
+                    never,
+                    kids,
+                    hum,
+                    tasks
+                );
+                thirst_deaths.clear();
+            }
+        }
         if pop > 0 {
             println!(
                 "      mangé : {:.2} point de faim par personne et par jour (besoin 0,50) — cueillette {:.2}, chasse {:.2}, porté {:.2}, part {:.2}, stock {:.2}, lait {:.2}",
