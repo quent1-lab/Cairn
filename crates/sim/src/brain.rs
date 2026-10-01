@@ -216,14 +216,38 @@ fn build_candidates(
         candidates.push((TaskKind::Drink, target, score));
     }
 
-    // — Manger : pression progressive, pondérée par l'abondance trouvée.
+    // — Manger : pression progressive, pondérée par l'abondance trouvée. D10 :
+    //   l'abondance est celle de la **maille** (ce que le pays offre de
+    //   comestible, partagé entre ceux qui y vivent), plus la seule tuile.
     let (forage_target, forage_biomass) = best_forage(world, here);
+    let urgency = Curve::Logistic { steepness: 6.0, midpoint: 0.4 }.eval(phys.hunger);
+    let share_here = edible_share(world, (pos.x, pos.y), time.tick, humans);
     if forage_biomass >= FORAGE_MIN_BIOMASS {
-        let urgency = Curve::Logistic { steepness: 6.0, midpoint: 0.4 }.eval(phys.hunger);
-        let abundance = (f32::from(forage_biomass) / 255.0).sqrt();
+        let abundance = (f32::from(forage_biomass) / 255.0).sqrt() * share_here;
         let score =
             urgency * abundance * travel_discount(pos.distance_tiles(forage_target));
         candidates.push((TaskKind::Forage, forage_target, score));
+    }
+    // — Changer de pays quand le sien s'épuise : un cueilleur connaît les
+    //   mailles voisines et va vers la mieux pourvue. Le trajet se juge à
+    //   l'échelle d'une journée de marche, pas d'une heure : déplacer son
+    //   camp est une décision de la journée.
+    if share_here < 1.0 {
+        let zone = crate::fauna::range_zone((pos.x, pos.y));
+        let side = crate::fauna::RANGE_ZONE_TILES;
+        let mut best: Option<(f32, (i64, i64))> = None;
+        for dz in [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
+            let c = ((zone.0 + dz.0) as f64 + 0.5) * side;
+            let r = ((zone.1 + dz.1) as f64 + 0.5) * side;
+            let share = edible_share(world, (c, r), time.tick, humans);
+            if share > share_here && best.is_none_or(|(b, _)| share > b) {
+                best = Some((share, (c as i64, r as i64)));
+            }
+        }
+        if let Some((share, target)) = best {
+            let day = 1.0 / (1.0 + pos.distance_tiles(target) / (WALK_TILES_PER_TICK * 24.0));
+            candidates.push((TaskKind::Wander, target, urgency * (share - share_here) * day as f32));
+        }
     }
 
     // — Chasser (adultes seulement) : même pression de faim que la
@@ -318,7 +342,7 @@ fn build_candidates(
     if let Some(clan_id) = clan
         && let Some(view) = clan_views.get(&clan_id)
         && view.stock > MIN_STOCK_WORTH_TRIP
-        && forage_biomass < FORAGE_MIN_BIOMASS
+        && (forage_biomass < FORAGE_MIN_BIOMASS || share_here < LEAN_SHARE)
         && nearest_herd.is_none()
     {
         let urgency = Curve::Logistic { steepness: 6.0, midpoint: 0.4 }.eval(phys.hunger);
@@ -584,7 +608,7 @@ fn build_candidates(
     }
     // La faim ne pousse à partir que si **ni** la cueillette **ni** le gibier
     // ne répondent ici : c'est ce qui vide une zone surchassée et surpâturée.
-    if forage_biomass < 30 && nearest_herd.is_none() {
+    if (forage_biomass < 30 || share_here < LEAN_SHARE) && nearest_herd.is_none() {
         desperation += 0.5 * phys.hunger;
     }
     let wander_score = (0.06 + desperation).min(1.0);
@@ -693,6 +717,20 @@ fn nearest_herd(pos: &Position, herds: &[HerdView]) -> Option<HerdView> {
         }
     }
     best.map(|(_, h)| h)
+}
+
+/// En deçà de cette part (deux jours de nourriture par tête dans la maille),
+/// le pays « ne répond plus » : c'est le moment de puiser dans le stock.
+const LEAN_SHARE: f32 = 0.3;
+
+/// Ce que la maille de `pos` offre de comestible à chacun de ceux qui y
+/// vivent, rapporté à une semaine de nourriture : 1 = de quoi tenir, 0 = rien.
+fn edible_share(world: &mut World, pos: (f64, f64), tick: u64, humans: &[HumanView]) -> f32 {
+    const WEEK_KCAL: f64 = 7.0 * 2_500.0;
+    let zone = crate::fauna::range_zone(pos);
+    let here = humans.iter().filter(|h| crate::fauna::range_zone(h.pos) == zone).count().max(1);
+    let kcal = world.edible_kcal(pos, tick);
+    (kcal / (here as f64 * WEEK_KCAL)).min(1.0) as f32
 }
 
 /// La tuile la plus fournie en biomasse autour de `from` (échantillonnage en

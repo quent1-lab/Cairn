@@ -114,6 +114,9 @@ pub struct World {
     /// depuis la création du monde.
     pub springs_computed: u64,
     humidity_cache: BTreeMap<(i64, i64), f64>,
+    /// Nourriture végétale des humains, maille par maille (défaut D10) : un
+    /// état de la terre, à une échelle plus grossière que la tuile.
+    gathering: crate::gathering::Gathering,
     /// Horloge logique : incrémentée à chaque accès.
     clock: u64,
     /// Nombre maximal de chunks résidents.
@@ -179,6 +182,7 @@ impl World {
             last_regrowth: BTreeMap::new(),
             humidity_computed: 0,
             springs_computed: 0,
+            gathering: Default::default(),
             humidity_cache: BTreeMap::new(),
             clock: 0,
             capacity: capacity.max(1),
@@ -263,6 +267,24 @@ impl World {
     /// Le baseline procédural sous-jacent (lecture seule — il est pur).
     pub fn worldgen(&self) -> &WorldGen {
         &self.worldgen
+    }
+
+    /// Nourriture végétale offerte aujourd'hui par la maille de `pos`, en kcal.
+    pub fn edible_kcal(&mut self, pos: (f64, f64), tick: u64) -> f64 {
+        let climate = crate::climate::Climate::new(self.worldgen.temperature.latitude());
+        self.gathering.available(&self.worldgen, &climate, pos, cairn_core::SimTime { tick })
+    }
+
+    /// Cueille jusqu'à `want` kcal dans la maille de `pos` ; renvoie ce qui a
+    /// été trouvé.
+    pub fn gather(&mut self, pos: (f64, f64), tick: u64, want: f64) -> f64 {
+        let climate = crate::climate::Climate::new(self.worldgen.temperature.latitude());
+        self.gathering.take(&self.worldgen, &climate, pos, cairn_core::SimTime { tick }, want)
+    }
+
+    /// Mailles dont on suit la nourriture végétale.
+    pub fn gathering_zones(&self) -> usize {
+        self.gathering.len()
     }
 
     /// Renvoie le chunk demandé, le générant s'il est absent. Marque l'accès

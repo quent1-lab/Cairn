@@ -71,6 +71,19 @@ const NUTRITION_PER_BIOMASS: f32 = 0.02;
 /// un point, c'est deux rations quotidiennes d'un adulte actif, ~2 500 kcal
 /// chacune (FAO/OMS, dépense d'un chasseur-cueilleur).
 pub(crate) const KCAL_PER_HUNGER: f64 = 5_000.0;
+/// Ration quotidienne correspondante, en kcal.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) const KCAL_PER_DAY: f64 = KCAL_PER_HUNGER * crate::agent::HUNGER_PER_TICK as f64 * 24.0;
+
+/// Ce que la cueillette peut rendre durablement, en kcal par m² et par an,
+/// tel que le modèle le définit : la production comestible de la maille
+/// (`crate::gathering`), part comestible de la NPP convertie en kcal.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn gathering_kcal_m2_yr(biome: cairn_worldgen::Biome) -> f64 {
+    f64::from(ecology::npp_g_m2_yr(biome) * crate::gathering::edible_fraction(biome))
+        * crate::gathering::EDIBLE_KCAL_PER_G
+}
+
 /// Portée d'une mise à mort : le chasseur doit être à ~200 m du troupeau.
 const HUNT_REACH_TILES: f64 = cairn_core::km_to_tiles(0.2);
 /// Têtes prélevées par chasse réussie.
@@ -1581,19 +1594,34 @@ fn execute(
             // le savoir-faire, qui se forge à chaque heure pratiquée.
             let bite = EAT_HUNGER_PER_TICK * work * (0.6 + 0.8 * agent_skills.foraging);
             skills::practice(&mut agent_skills.foraging, skills::forage_cap(traits), 1.0);
+            // D10 : on ne mange que ce que la maille offre de comestible. La
+            // tuile, elle, est toujours foulée et entamée comme avant — c'est
+            // l'impact de la cueillette sur la flore, un autre chantier.
+            // PROTOTYPE : un champ cultivé devrait nourrir depuis sa tuile ; non
+            // traité ici (aucune agriculture en un an de fondateurs, et une
+            // averse met aussi la biomasse au-dessus de la capacité).
             let tile = world.tile_mut(task.target.0, task.target.1);
+            let cultivated = false;
             let wanted = (phys.hunger.min(bite) / NUTRITION_PER_BIOMASS).ceil() as u8;
             let taken = wanted.min(tile.biomass);
             tile.biomass -= taken;
-            crate::food_stats::fed(
-                crate::food_stats::Source::Forage,
-                (f32::from(taken) * NUTRITION_PER_BIOMASS).min(phys.hunger),
-            );
+            let want_kcal = f64::from(f32::from(taken) * NUTRITION_PER_BIOMASS) * KCAL_PER_HUNGER;
+            let got_kcal = if cultivated {
+                want_kcal
+            } else {
+                world.gather((pos.x, pos.y), tick, want_kcal)
+            };
+            let eaten = (got_kcal / KCAL_PER_HUNGER) as f32;
+            crate::food_stats::fed(crate::food_stats::Source::Forage, eaten.min(phys.hunger));
             crate::food_stats::event(crate::food_stats::Event::BiomassTaken, u64::from(taken));
             crate::food_stats::event(crate::food_stats::Event::ForageHours, 1);
-            crate::food_stats::event(crate::food_stats::Event::ForageShort, u64::from(taken < wanted));
-            phys.hunger = (phys.hunger - f32::from(taken) * NUTRITION_PER_BIOMASS).max(0.0);
-            if phys.hunger <= 0.05 || tile.biomass == 0 {
+            crate::food_stats::event(
+                crate::food_stats::Event::ForageShort,
+                u64::from(taken < wanted || got_kcal < want_kcal),
+            );
+            phys.hunger = (phys.hunger - eaten).max(0.0);
+            let bare = world.tile(task.target.0, task.target.1).biomass == 0;
+            if phys.hunger <= 0.05 || bare || got_kcal < want_kcal {
                 behavior.task = None; // rassasié, ou tuile épuisée
             }
         }
@@ -2007,6 +2035,28 @@ mod tests {
              en 20 jours : rien ne freine la natalité quand le pays est surpeuplé",
             production / species.daily_ration_kg()
         );
+    }
+
+    /// D10 : la cueillette ne peut pas rendre plus d'énergie que la plante n'en
+    /// fixe. La référence est physique, pas une constante du modèle : la
+    /// productivité primaire nette du biome (Whittaker & Likens) convertie en
+    /// kcal, soit toute la matière végétale produite dans l'année, bois compris.
+    /// La part réellement comestible en est une petite fraction ; ce test ne
+    /// demande que la borne la plus lâche.
+    #[test]
+    fn la_cueillette_ne_rend_pas_plus_que_la_plante_ne_produit() {
+        use cairn_worldgen::Biome::*;
+        for biome in [HotDesert, ColdDesert, Tundra, Steppe, Savanna, Grassland, Taiga, TemperateForest, TropicalForest] {
+            let npp = f64::from(ecology::npp_g_m2_yr(biome)) * ecology::PLANT_KCAL_PER_G;
+            let gathered = gathering_kcal_m2_yr(biome);
+            assert!(
+                gathered <= npp,
+                "{biome:?} : la cueillette rend {gathered:.0} kcal/m²/an, la plante en fixe {npp:.0} \
+                 (×{:.1}) — un humain se nourrit sur {:.0} m²",
+                gathered / npp,
+                KCAL_PER_DAY / (gathered / 360.0)
+            );
+        }
     }
 
     /// Une tuile de terre ferme proche de `home + (dx, 0)`, pour poser un

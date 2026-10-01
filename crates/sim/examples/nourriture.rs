@@ -10,7 +10,7 @@
 //!
 //! Usage :
 //!   cargo run --release -p cairn-sim --features food-stats --example nourriture -- \
-//!       [seed] [années] [scène: tempere|froid] [capacité_chunks] [agents]
+//!       [seed] [années] [scène: tempere|froid] [capacité_chunks] [agents] [période_j]
 //!
 //! Scènes : `tempere` est celle de `chronicle` (foyer tempéré, 40 agents),
 //! `froid` celle d'`etincelle` (1-5 °C, hivers sous zéro, 60 agents).
@@ -21,7 +21,6 @@ use cairn_core::{TICKS_PER_DAY, WorldSeed, km_to_tiles};
 use cairn_sim::{DeathCause, Physiology, Position, Sim, fauna, food_stats, scenario};
 use cairn_worldgen::Biome;
 
-const PERIOD_DAYS: u64 = 90;
 /// Maille de comptage : celle de la faune (`fauna::range_zone`), 2 km.
 const ZONE_KM2: f64 = 4.0;
 
@@ -34,6 +33,8 @@ fn main() {
     let cold = scene == "froid";
     let n_agents: usize =
         args.next().and_then(|s| s.parse().ok()).unwrap_or(if cold { 60 } else { 40 });
+    #[allow(non_snake_case)]
+    let PERIOD_DAYS: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(90);
 
     let mut sim = Sim::new(WorldSeed(seed), capacity);
     let seed_point = (km_to_tiles(1500.0) as i64, km_to_tiles(2100.0) as i64);

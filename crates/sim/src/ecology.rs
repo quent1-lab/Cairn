@@ -31,6 +31,28 @@ use crate::world::World;
 /// saison de repousse, ordre de grandeur d'une strate herbacée.
 pub const GROWTH_RATE_PER_DAY: f64 = 0.08;
 
+/// Productivité primaire nette d'un biome, en grammes de matière sèche par m²
+/// et par an : toute la matière végétale produite, bois compris. Ordres de
+/// grandeur de Whittaker & Likens (1975), les mêmes que ceux dont part le
+/// fourrage de la faune (`fauna::accessible_forage_g_m2_yr`).
+pub fn npp_g_m2_yr(biome: cairn_worldgen::Biome) -> f32 {
+    use cairn_worldgen::Biome::*;
+    match biome {
+        Ocean | Coast | Glacier => 0.0,
+        HotDesert | ColdDesert => 90.0,
+        Tundra => 140.0,
+        Steppe => 350.0,
+        Grassland => 600.0,
+        Taiga => 800.0,
+        Savanna => 900.0,
+        TemperateForest => 1_200.0,
+        TropicalForest => 2_200.0,
+    }
+}
+
+/// Énergie d'un gramme de matière végétale sèche (~18-19 kJ/g).
+pub const PLANT_KCAL_PER_G: f64 = 4.5;
+
 /// Solution exacte de la logistique après `days` jours, en unités u8.
 /// L'arrondi de la partie fractionnaire est tiré dans `rng` (stochastique).
 ///
