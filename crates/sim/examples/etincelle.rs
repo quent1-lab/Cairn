@@ -45,11 +45,17 @@ fn main() {
     // une terre de cuivre. La suite de la chaîne (métallurgie, bronze) reste
     // strictement émergente — rien n'est offert au-delà de ces trois savoirs.
     let seeded = args.next().is_some_and(|s| s == "1" || s == "true");
+    // Jour de départ (9ᵉ argument, défaut 135 : l'été). Depuis que la nourriture
+    // contraint (D10), une arrivée en plein hiver sans réserve est mortelle — à
+    // juste titre : l'ancien départ au jour 0 ne mesurait plus qu'une extinction.
+    // L'hiver reste un cas extrême qu'on choisit explicitement.
+    let start_day: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(135);
 
     // — Scène fraîche : forêt/taïga/prairie à 2–8 °C de moyenne (hivers sous 0),
     //   assez rude pour presser (froid → feu) mais pas la taïga glaciale qui
     //   éteint tout (voir le calibrage Phase 2). Repli tempéré si introuvable. —
     let mut sim = Sim::new(WorldSeed(seed), capacity);
+    scenario::start_on_day(&mut sim, start_day);
     let seed_point = (km_to_tiles(1500.0) as i64, km_to_tiles(2100.0) as i64);
     let home = foyer.unwrap_or_else(|| {
         scenario::find_home_where(

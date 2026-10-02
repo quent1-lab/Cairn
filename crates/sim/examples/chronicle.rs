@@ -7,7 +7,7 @@
 //!
 //! Usage :
 //!   cargo run --release -p cairn-sim --example chronicle -- \
-//!       [seed] [années] [sample_days] [out.csv] [capacité_chunks] [agents]
+//!       [seed] [années] [sample_days] [out.csv] [capacité_chunks] [agents] [jour_de_départ]
 //!
 //! Défauts : seed 42, 50 ans, 1 jour d'échantillon, out/chronicle_<seed>.csv,
 //! capacité 16384 chunks, 40 agents. Le CSV est vidé à chaque échantillon :
@@ -30,10 +30,14 @@ fn main() {
         args.next().unwrap_or_else(|| format!("out/chronicle_{seed}.csv"));
     let capacity: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(16384);
     let n_agents: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(40);
+    // Jour de départ (7ᵉ argument, défaut 135 : l'été) — voir `etincelle` : une
+    // arrivée en plein hiver sans réserve est mortelle depuis D10.
+    let start_day: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(135);
 
     // — Scène tempérée (prairie/forêt tempérée, 6–18 °C), même amorçage que le
     //   client (`scenario`), plus quelques meutes de prédateurs. —
     let mut sim = Sim::new(WorldSeed(seed), capacity);
+    scenario::start_on_day(&mut sim, start_day);
     let seed_point =
         (cairn_core::km_to_tiles(1500.0) as i64, cairn_core::km_to_tiles(2100.0) as i64);
     let home = scenario::find_home(&mut sim, seed_point);
