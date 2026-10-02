@@ -112,6 +112,8 @@ const RAID_RADIUS_TILES: f64 = km_to_tiles(1.0);
 /// Poussée du drive de raid : forte, mais modulée par l'agressivité et la
 /// tension — qui décident qui razzie qui, et quand.
 const RAID_DRIVE: f32 = 0.9;
+/// Plaie à partir de laquelle on ne razzie plus du tout.
+const RAID_WOUND_LIMIT: f32 = 0.5;
 /// Poussée du drive de pèlerinage : modeste, et de toute façon multipliée par
 /// la ferveur — un tiède ne bouge pas, un fervent traverse la contrée.
 const PILGRIMAGE_DRIVE: f32 = 0.5;
@@ -137,6 +139,9 @@ pub struct AgentCtx<'a> {
     /// traitement que `clan` et `carrying`, pour que `brain` reste découplé du
     /// système de croyance.
     pub fervor: f32,
+    /// La plaie de cet agent (`crate::agent::Wound`), dans [0, 1] : un blessé
+    /// ne cherche pas la bagarre.
+    pub wound: f32,
 }
 
 /// Choisit la prochaine tâche de l'agent. Déterministe : le tirage dérive de
@@ -413,7 +418,12 @@ fn build_candidates(
             }
         }
         if let Some((_, hpos, tension)) = best {
-            let score = RAID_DRIVE * traits.aggression * tension;
+            // On ne va pas au-devant des coups blessé : l'envie de razzier
+            // décroît avec la plaie et s'éteint à mi-plaie (D13). Sans ce frein,
+            // une mêlée durait jusqu'à la mort — chacun retournait se battre à
+            // chaque délibération, quelle que soit sa blessure.
+            let healthy = (1.0 - agent.wound / RAID_WOUND_LIMIT).clamp(0.0, 1.0);
+            let score = RAID_DRIVE * traits.aggression * tension * healthy;
             let target = (hpos.0.floor() as i64, hpos.1.floor() as i64);
             candidates.push((TaskKind::Raid, target, score));
         }
