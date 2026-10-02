@@ -989,9 +989,58 @@ fn resolve_cluster(
         }
         Err(reject) => {
             diag.note(&reject);
-            Vec::new()
+            // 3. Un réseau de liens qui ne co-réside pas n'est pas un peuple —
+            //    mais il peut en **contenir** un. Les liens durent un mois : la
+            //    composante agrège la bande et ses connaissances parties
+            //    ailleurs (mesuré, D2 : 2 à 4,6 fois la taille du clan, dont le
+            //    noyau co-réside). Le niveau du dessus — un réseau de bandes,
+            //    environ quatre fois plus grand (Hamilton et al. 2007) — existe,
+            //    mais ce n'est pas une bande. On en extrait donc le groupe qui
+            //    vit ensemble, et chaque morceau repasse les mêmes portes.
+            if !matches!(reject, ClanReject::Scattered { .. }) {
+                return Vec::new();
+            }
+            let Some((core, rest)) = resident_core(&members, humans) else {
+                return Vec::new();
+            };
+            connected_components(&core, edges)
+                .into_iter()
+                .chain(connected_components(&rest, edges))
+                .flat_map(|g| resolve_cluster(g, bonds, edges, humans, established, diag))
+                .collect()
         }
     }
+}
+
+/// Le plus grand groupe co-résident d'un ensemble dispersé : les membres à
+/// moins de `RESIDENCE_RADIUS_TILES` de celui qui en a le plus autour de lui
+/// (égalité départagée par le plus petit identifiant), et le reste. `None` si
+/// ce groupe est trop petit pour être un peuple — ailleurs, il n'y en a pas de
+/// plus grand — ou s'il ne retire personne (rien à extraire).
+fn resident_core(
+    members: &BTreeSet<u64>,
+    humans: &[crate::demography::HumanView],
+) -> Option<(BTreeSet<u64>, BTreeSet<u64>)> {
+    let pos: Vec<(u64, (f64, f64))> = members
+        .iter()
+        .filter_map(|&id| find_human(humans, AgentId(id)).map(|h| (id, h.pos)))
+        .collect();
+    let near = |c: (f64, f64)| {
+        pos.iter()
+            .filter(move |(_, p)| (p.0 - c.0).hypot(p.1 - c.1) <= RESIDENCE_RADIUS_TILES)
+            .map(|(id, _)| *id)
+    };
+    let (_, center) = pos
+        .iter()
+        .map(|&(id, p)| (near(p).count(), std::cmp::Reverse(id), p))
+        .max_by_key(|&(n, id, _)| (n, id))
+        .map(|(n, _, p)| (n, p))?;
+    let core: BTreeSet<u64> = near(center).collect();
+    if core.len() < MIN_CLAN_SIZE || core.len() == members.len() {
+        return None;
+    }
+    let rest = members.difference(&core).copied().collect();
+    Some((core, rest))
 }
 
 /// Cherche la **meilleure ligne de faille** d'un groupe, s'il en a une.
@@ -1637,6 +1686,44 @@ mod tests {
         let (a, _) = &result[0];
         let (b, _) = &result[1];
         assert!(a.is_disjoint(b), "les deux clans filles ne doivent partager aucun membre");
+    }
+
+    /// D2 (mesuré au banc `clans`) : la composante jugée est le réseau des liens
+    /// du dernier mois, 2 à 4,6 fois le clan, et elle échoue à la co-résidence
+    /// alors que la bande, elle, vit ensemble. Ici : dix personnes qui vivent
+    /// ensemble, et cinq connaissances liées à elles mais installées à 20 km,
+    /// trop intégrées pour qu'une ligne de faille les détache (groupe < 16).
+    /// La bande doit être reconnue ; les lointains n'en font pas partie.
+    #[test]
+    fn une_bande_qui_vit_ensemble_n_est_pas_dissoute_par_ses_connaissances_lointaines() {
+        let mut bonds: BTreeMap<(u64, u64), f32> = BTreeMap::new();
+        let mut humans: Vec<HumanView> = Vec::new();
+        for i in 0..10u64 {
+            humans.push(human_at(i, i as f64 * 20.0, 0.0));
+            for j in (i + 1)..10 {
+                bonds.insert(SocialGraph::key(AgentId(i), AgentId(j)), 0.9);
+            }
+        }
+        for k in 0..5u64 {
+            let id = 10 + k;
+            humans.push(human_at(id, 10_000.0 + k as f64 * 20.0, 0.0));
+            // Chacun garde trois liens forts avec la bande (connus il y a peu).
+            for b in 0..3u64 {
+                bonds.insert(SocialGraph::key(AgentId(id), AgentId((k * 2 + b) % 10)), 0.9);
+            }
+        }
+        humans.sort_by_key(|h| h.id.0);
+        let members: BTreeSet<u64> = (0..15).collect();
+        let edges: Vec<(u64, u64)> = bonds.keys().copied().collect();
+        assert!(
+            matches!(validate_cluster(&members, &humans), Err(ClanReject::Scattered { .. })),
+            "point de départ : les 15 pris en bloc ne co-résident pas"
+        );
+        let result =
+            resolve_cluster(members, &bonds, &edges, &humans, &[], &mut ClanDiagnostics::default());
+        assert_eq!(result.len(), 1, "la bande doit être reconnue");
+        let band: BTreeSet<AgentId> = (0..10).map(AgentId).collect();
+        assert_eq!(result[0].0, band, "la bande, et elle seule");
     }
 
     /// Contre-épreuve : un groupe trop lâche mais **sans** structure interne
