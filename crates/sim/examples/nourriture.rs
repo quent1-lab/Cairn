@@ -114,6 +114,10 @@ fn main() {
     let mut seen_clan_events = 0usize;
     let mut churn = (0u32, 0u32, 0u32, 0u32);
     let mut absent_tasks: BTreeMap<String, u32> = BTreeMap::new();
+    // Saut d'identité : membres des clans dissous dans les dernières 24 h,
+    // et, pour chaque clan formé, la part de ses membres qui en viennent.
+    let mut recently_dissolved: Vec<(u64, Vec<u64>)> = Vec::new();
+    let mut reborn = (0u32, 0f64);
     for day in 1..=total_days {
         if first_clan_day.is_none() && !sim.clans.is_empty() {
             first_clan_day = Some(day - 1);
@@ -205,9 +209,28 @@ fn main() {
                 let residence = cairn_sim::social::RESIDENCE_RADIUS_TILES;
                 for e in &sim.clan_events[seen_clan_events..] {
                     match e.kind {
-                        cairn_sim::ClanEventKind::Formed => churn.0 += 1,
+                        cairn_sim::ClanEventKind::Formed => {
+                            churn.0 += 1;
+                            if let Some(c) = sim.clans.iter().find(|c| c.id == e.clan) {
+                                let n = c.members.len().max(1) as f64;
+                                let from_dead = c
+                                    .members
+                                    .iter()
+                                    .filter(|m| {
+                                        recently_dissolved.iter().any(|(t, ms)| {
+                                            e.tick.saturating_sub(*t) <= TICKS_PER_DAY && ms.contains(&m.0)
+                                        })
+                                    })
+                                    .count() as f64;
+                                reborn.0 += 1;
+                                reborn.1 += from_dead / n;
+                            }
+                        }
                         cairn_sim::ClanEventKind::Dissolved => {
                             churn.1 += 1;
+                            if let Some((_, _, members)) = prev_clans.iter().find(|c| c.0 == e.clan.0) {
+                                recently_dissolved.push((e.tick, members.clone()));
+                            }
                             if let Some((_, home, members)) = prev_clans.iter().find(|c| c.0 == e.clan.0) {
                                 for (_, (id, pos, behavior)) in
                                     sim.agents.query::<(&AgentId, &Position, &Behavior)>().iter()
@@ -473,6 +496,14 @@ fn main() {
                     churn.0, churn.1, churn.2, churn.3, absent_tasks
                 );
             }
+            if reborn.0 > 0 {
+                println!(
+                    "      identité : {} clans formés, en moyenne {:.0} % de leurs membres viennent d'un clan dissous dans les 24 h",
+                    reborn.0,
+                    100.0 * reborn.1 / f64::from(reborn.0)
+                );
+            }
+            reborn = (0, 0.0);
             churn = (0, 0, 0, 0);
             absent_tasks.clear();
             {
