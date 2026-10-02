@@ -436,6 +436,15 @@ pub const RESIDENCE_RADIUS_TILES: f64 = km_to_tiles(4.5);
 /// chasseur ou un éclaireur temporairement loin reste du clan. En dessous de
 /// cette proportion, le groupe n'est plus « co-résident », il est dispersé.
 const RESIDENCE_FRACTION: f32 = 0.7;
+/// Constante de temps, en nuits, de la position durable (`SocialGraph::residence`).
+/// On appartient à la bande où l'on dort, pas à l'endroit où l'on se trouve à
+/// minuit : un groupe de chasse ou de collecte s'absente du camp des jours,
+/// parfois des semaines, et en reste membre (mobilité *logistique*, Binford
+/// 1980 ; les camps changent pourtant de composition, Hadza). Deux semaines :
+/// une expédition de trois nuits ne déplace la position durable que d'un
+/// cinquième du trajet, un vrai départ se lit en deux à quatre semaines.
+/// Ordre de grandeur, choix validé avec l'utilisateur (2026-10-02).
+const RESIDENCE_NIGHTS: f64 = 14.0;
 /// Un nouveau groupe hérite de l'identité d'un ancien clan si son **noyau**
 /// survit : au moins cette fraction des anciens membres s'y retrouve. Un peuple
 /// qui perd la moitié des siens à la famine reste ce peuple.
@@ -618,6 +627,11 @@ pub struct ClanEvent {
 #[derive(Debug, Clone, Default)]
 pub struct SocialGraph {
     pub bonds: BTreeMap<(u64, u64), f32>,
+    /// Où chacun **dort**, en moyenne glissante sur les dernières nuits
+    /// (`RESIDENCE_NIGHTS`) : c'est sur cette position durable, et non sur
+    /// celle de minuit, que se juge la co-résidence (BRIEF §5.1 : « proximité
+    /// spatiale durable »).
+    pub residence: BTreeMap<u64, (f64, f64)>,
 }
 
 impl SocialGraph {
@@ -642,6 +656,7 @@ impl SocialGraph {
     /// pas porter le poids d'agents qui n'existent plus.
     fn prune_dead(&mut self, alive: &BTreeSet<u64>) {
         self.bonds.retain(|&(a, b), _| alive.contains(&a) && alive.contains(&b));
+        self.residence.retain(|id, _| alive.contains(id));
     }
 
     /// Relâchement quotidien : chaque lien s'affaiblit un peu ; ceux tombés
@@ -1147,11 +1162,23 @@ fn modularity(parts: &[BTreeSet<u64>], edges: &[(u64, u64)], members: &BTreeSet<
 pub(crate) fn daily(sim: &mut Sim) {
     let alive: BTreeSet<u64> = sim.agents.query::<&AgentId>().iter().map(|(_, id)| id.0).collect();
     sim.social.prune_dead(&alive);
+    update_residence(sim);
     sim.social.decay(DAILY_DECAY, FORGET_THRESHOLD);
     sim.social.cap_bonds(MAX_BONDS_PER_AGENT);
     detect_clans(sim);
     update_relations(sim);
     elect_chiefs(sim);
+}
+
+/// La position durable de chacun, relevée à la passe de minuit — l'heure où
+/// l'on dort : un pas de `1/RESIDENCE_NIGHTS` vers la position de la nuit. Un
+/// nouveau venu (naissance, arrivée) commence là où il dort ce soir.
+fn update_residence(sim: &mut Sim) {
+    for (_, (id, pos)) in sim.agents.query::<(&AgentId, &Position)>().iter() {
+        let r = sim.social.residence.entry(id.0).or_insert((pos.x, pos.y));
+        r.0 += (pos.x - r.0) / RESIDENCE_NIGHTS;
+        r.1 += (pos.y - r.1) / RESIDENCE_NIGHTS;
+    }
 }
 
 /// Désigne le chef de chaque clan (voir le commentaire de module « Le
@@ -1314,7 +1341,14 @@ pub fn claim_from_views(
 /// seuil de cohésion et de co-résidence, puis réconcilie avec les clans
 /// existants (voir le commentaire de module sur la persistance d'identité).
 fn detect_clans(sim: &mut Sim) {
-    let humans = sim.human_views(); // trié par id, position courante de chacun
+    // Trié par id ; la co-résidence se juge sur la position **durable** de
+    // chacun (où il dort), pas sur celle de minuit — voir `RESIDENCE_NIGHTS`.
+    let mut humans = sim.human_views();
+    for h in &mut humans {
+        if let Some(&r) = sim.social.residence.get(&h.id.0) {
+            h.pos = r;
+        }
+    }
 
     // Arêtes « vraies relations » : au-dessus du seuil de lien. `cap_bonds`
     // borne déjà le degré, mais un agent presque sans contact garde ses
@@ -1724,6 +1758,40 @@ mod tests {
         assert_eq!(result.len(), 1, "la bande doit être reconnue");
         let band: BTreeSet<AgentId> = (0..10).map(AgentId).collect();
         assert_eq!(result[0].0, band, "la bande, et elle seule");
+    }
+
+    /// D2, second volet : on appartient à la bande où l'on dort, pas à l'endroit
+    /// où l'on se trouve à minuit. Une expédition de chasse de quelques jours
+    /// (mobilité logistique, Binford 1980) ne fait pas sortir de la bande.
+    #[test]
+    fn une_expedition_de_chasse_ne_fait_pas_sortir_de_la_bande() {
+        let mut sim = Sim::new(WorldSeed(1), 64);
+        let ids: Vec<AgentId> = (0..10).map(|i| sim.spawn_agent(i as f64 * 20.0, 0.0)).collect();
+        for (i, a) in ids.iter().enumerate() {
+            for b in &ids[i + 1..] {
+                sim.social.bonds.insert(SocialGraph::key(*a, *b), 0.95);
+            }
+        }
+        // Deux semaines au camp : la bande se forme.
+        for _ in 0..14 {
+            daily(&mut sim);
+        }
+        assert_eq!(sim.clans.len(), 1, "point de départ : la bande est reconnue");
+        let clan = sim.clans[0].id;
+        // Quatre chasseurs partent trois nuits à 10 km.
+        let hunters: BTreeSet<u64> = ids[..4].iter().map(|a| a.0).collect();
+        for (_, (id, pos)) in sim.agents.query_mut::<(&AgentId, &mut Position)>() {
+            if hunters.contains(&id.0) {
+                pos.x += 5_000.0;
+            }
+        }
+        for night in 0..3 {
+            daily(&mut sim);
+            assert!(
+                sim.clans.len() == 1 && sim.clans[0].id == clan && sim.clans[0].members.len() == 10,
+                "nuit {night} de l'expédition : la bande doit rester la même, chasseurs compris"
+            );
+        }
     }
 
     /// Contre-épreuve : un groupe trop lâche mais **sans** structure interne
