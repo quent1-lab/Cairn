@@ -108,6 +108,12 @@ fn main() {
     // (paires-jours, en contact, rares, tension ≥ 0,4, somme des tensions)
     let mut pairs = (0u64, 0u64, 0u64, 0u64, 0.0f64);
     let mut seen_events = 0usize;
+    // Clans instables : la veille de chaque dissolution, qui était où et
+    // faisait quoi. (formés, dissous, membres hors rayon, tâches des absents)
+    let mut prev_clans: Vec<(u64, (f64, f64), Vec<u64>)> = Vec::new();
+    let mut seen_clan_events = 0usize;
+    let mut churn = (0u32, 0u32, 0u32, 0u32);
+    let mut absent_tasks: BTreeMap<String, u32> = BTreeMap::new();
     for day in 1..=total_days {
         if first_clan_day.is_none() && !sim.clans.is_empty() {
             first_clan_day = Some(day - 1);
@@ -192,6 +198,45 @@ fn main() {
                 }
             }
             seen_deaths_t = sim.deaths.len();
+                // Les dissolutions de l'heure, lues contre les clans de l'heure d'avant
+                // (la détection tombe à minuit : on regarde où étaient les membres à
+                // ce moment-là, pas 24 h plus tard).
+            {
+                let residence = cairn_sim::social::RESIDENCE_RADIUS_TILES;
+                for e in &sim.clan_events[seen_clan_events..] {
+                    match e.kind {
+                        cairn_sim::ClanEventKind::Formed => churn.0 += 1,
+                        cairn_sim::ClanEventKind::Dissolved => {
+                            churn.1 += 1;
+                            if let Some((_, home, members)) = prev_clans.iter().find(|c| c.0 == e.clan.0) {
+                                for (_, (id, pos, behavior)) in
+                                    sim.agents.query::<(&AgentId, &Position, &Behavior)>().iter()
+                                {
+                                    if members.contains(&id.0) {
+                                        let out = (pos.x - home.0).hypot(pos.y - home.1) > residence;
+                                        if out {
+                                            churn.2 += 1;
+                                            let k = behavior.task.map_or("—".to_string(), |t| {
+                                                format!("{:?}", t.kind).split('(').next().unwrap_or("").to_string()
+                                            });
+                                            *absent_tasks.entry(k).or_insert(0) += 1;
+                                        }
+                                        churn.3 += 1;
+                                    }
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                seen_clan_events = sim.clan_events.len();
+                prev_clans = sim
+                    .clans
+                    .iter()
+                    .map(|c| (c.id.0, c.home, c.members.iter().map(|m| m.0).collect()))
+                    .collect();
+            }
+
             for (_, (phys, behavior)) in sim.agents.query::<(&Physiology, &Behavior)>().iter() {
                 if phys.hunger > 0.5 {
                     // Ce que l'heure a réellement été : l'activité du tick, et pour
@@ -422,6 +467,14 @@ fn main() {
                 );
             }
             gates.clear();
+            if churn.0 + churn.1 > 0 {
+                println!(
+                    "      clans : {} formés, {} dissous ; à la dissolution, {} anciens membres sur {} hors du rayon de résidence ; tâches des absents {:?}",
+                    churn.0, churn.1, churn.2, churn.3, absent_tasks
+                );
+            }
+            churn = (0, 0, 0, 0);
+            absent_tasks.clear();
             {
                 let (mut raids, mut killed, mut mutual) = (0u32, 0usize, 0u32);
                 for e in &sim.chronicle[seen_events..] {
