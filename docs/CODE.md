@@ -204,6 +204,7 @@ Une constante **sourcée** vient d'une mesure réelle ; **ordre de grandeur**, d
 | perception de la maille ; `LEAN_SHARE` | une semaine de nourriture par tête ; 0,3 | choix | — | — |
 | `BLOCKED_SPRING_TICKS` ; mémoire | 2 j ; 4 sources | choix | l'échec peut venir d'un budget de calcul épuisé | — |
 | `RAID_WOUND_LIMIT` | mi-plaie | choix | instinct de conservation | — |
+| `FORAY_RADIUS_TILES` ; portée de la quête | 10 km ; logistique(faim propre, pente 10, milieu 0,6) | ordre de grandeur | sortie à la journée (Kelly 1995) | D2 : n'a pas sauvé froid 1337 (la nourriture manquante était de la cueillette) |
 | `RESIDENCE_NIGHTS` | 14 nuits (moyenne glissante de l'endroit où l'on dort) | ordre de grandeur | expéditions logistiques de jours à semaines (Binford 1980) ; validé par l'utilisateur | D2 : dissolutions −65 à −100 % |
 | bande = groupe co-résident extrait du réseau | rayon de résidence autour du membre le plus entouré | sourcé | bande ~20-28 adultes (Hamilton 2007, Hill 2011) ; le réseau ×4 au-dessus est un autre niveau | D2 : dissolutions −14 à −100 % |
 | `SCARCITY_PER_CAPITA` (ancienne) | 3 têtes de gibier par bouche | **cassée** | calée sur l'ancien gibier ; rare ~100 % du temps en contact (D13) | à remplacer (vision : rareté ressentie, territoire, rancunes) |

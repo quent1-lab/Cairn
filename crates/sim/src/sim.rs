@@ -3575,6 +3575,73 @@ mod tests {
         assert!(quete(0.9, false, 0.0).is_none(), "sans clan, pas de foyer d'où partir en quête");
     }
 
+    /// D2, la faim disperse : un affamé peut pousser sa quête au-delà du
+    /// territoire du clan, jusqu'à la portée d'une sortie à la journée (Kelly
+    /// 1995, ~10 km) ; qui chasse seulement pour les siens, repu, reste sur le
+    /// territoire. Rien n'oblige à partir (un candidat parmi d'autres), et le
+    /// rappel au clan existe toujours une fois loin.
+    #[test]
+    fn la_faim_pousse_la_quete_au_dela_du_territoire_sans_couper_le_rappel() {
+        let portee = |faim: f32, reserve: f32| -> f64 {
+            let (mut sim, home) = scenario_au_foyer(5, 1, 0);
+            let id = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).next().unwrap();
+            for (_, (phys, membership)) in sim.agents.query_mut::<(&mut Physiology, &mut ClanMembership)>() {
+                phys.hunger = faim;
+                membership.0 = Some(social::ClanId(1));
+            }
+            sim.clans.push(Clan {
+                id: social::ClanId(1),
+                founded_tick: 0,
+                members: [id].into_iter().collect(),
+                home: (home.0 as f64 + 0.5, home.1 as f64 + 0.5),
+                stock: reserve,
+                chief: id,
+                desired: None,
+                rivalry: 0.0,
+            });
+            let mut far: f64 = 0.0;
+            for t in 0..16 {
+                sim.time.tick = t * 4;
+                if let Some(m) = sim.inspect_agent(id).unwrap().iter().find(|m| m.kind == TaskKind::SeekGame) {
+                    let d = ((m.target.0 - home.0) as f64).hypot((m.target.1 - home.1) as f64);
+                    far = far.max(cairn_core::tiles_to_km(d));
+                }
+            }
+            far
+        };
+        let territoire = cairn_core::tiles_to_km(social::RESIDENCE_RADIUS_TILES);
+        let affame = portee(0.95, STOCK_SCALE_PER_MEMBER);
+        assert!(affame > territoire, "un affamé doit pouvoir chercher au-delà du territoire ({affame:.1} km)");
+        let pour_les_siens = portee(0.0, 0.0);
+        assert!(
+            pour_les_siens <= territoire,
+            "repu, on chasse pour les siens sur le territoire ({pour_les_siens:.1} km)"
+        );
+
+        // Loin du foyer, le rappel est toujours là.
+        let (mut sim, home) = scenario_au_foyer(5, 1, 0);
+        let id = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).next().unwrap();
+        for (_, (phys, membership)) in sim.agents.query_mut::<(&mut Physiology, &mut ClanMembership)>() {
+            phys.hunger = 0.95;
+            membership.0 = Some(social::ClanId(1));
+        }
+        let away = (home.0 as f64 - cairn_core::km_to_tiles(8.0), home.1 as f64);
+        sim.clans.push(Clan {
+            id: social::ClanId(1),
+            founded_tick: 0,
+            members: [id].into_iter().collect(),
+            home: away,
+            stock: 0.0,
+            chief: id,
+            desired: None,
+            rivalry: 0.0,
+        });
+        assert!(
+            sim.inspect_agent(id).unwrap().iter().any(|m| m.kind == TaskKind::ReturnToClan && m.score > 0.0),
+            "à 8 km du foyer, rentrer reste un choix offert"
+        );
+    }
+
     /// D10, le soir au campement : un membre de clan fatigué, la nuit, à 3 km
     /// du foyer, envisage de rentrer dormir près des siens — pas seulement de
     /// s'effondrer sur place. C'est là que les liens se nouent (les rencontres

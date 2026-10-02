@@ -342,9 +342,22 @@ fn build_candidates(
         let mut rng = Pcg32::new(world.seed().derive(salt::WANDER) ^ splitmix64(time.tick ^ 0x5eed), id.0);
         let angle = rng.next_f64() * std::f64::consts::TAU;
         let (dx, dy) = (angle.cos(), angle.sin());
+        // D2 : la faim **personnelle** allonge la quête au-delà du territoire,
+        // jusqu'à la portée d'une sortie à la journée (`FORAY_RADIUS_TILES`).
+        // Pas le manque de la réserve du clan, qui pousse tout le monde en
+        // permanence : c'est l'affamé qui va voir plus loin. Rien ne l'y
+        // oblige (un candidat parmi d'autres), le rappel au clan reste offert
+        // une fois loin (`ReturnToClan`), et qui ne rentre pas finit par
+        // dormir ailleurs — il sort alors de la bande d'elle-même
+        // (`social::RESIDENCE_NIGHTS`). La bande affamée se disperse ainsi
+        // sans aucune règle de scission.
+        let own_hunger = (phys.hunger - carrying).max(0.0);
+        let reach_beyond = Curve::Logistic { steepness: 10.0, midpoint: 0.6 }.eval(own_hunger) as f64;
+        let max_d = 0.9 * RESIDENCE_RADIUS_TILES
+            + reach_beyond * (FORAY_RADIUS_TILES - 0.9 * RESIDENCE_RADIUS_TILES).max(0.0);
         let mut target = None;
         let mut d = 80.0;
-        while d <= 0.9 * RESIDENCE_RADIUS_TILES {
+        while d <= max_d {
             let p = ((view.home.0 + dx * d).floor() as i64, (view.home.1 + dy * d).floor() as i64);
             if world.worldgen().elevation(p.0, p.1) <= 0.0 {
                 break; // eau : on s'arrête à la dernière terre
@@ -835,6 +848,10 @@ const GAME_MEMORY_DAYS: f64 = 3.0;
 /// Au-delà de cette distance du foyer de son clan (~500 m), on peut choisir
 /// de rentrer dormir au campement plutôt que sur place.
 const CAMP_RADIUS_TILES: f64 = 250.0;
+/// Portée d'une sortie à la journée depuis le camp (~10 km : Kelly 1995,
+/// *The Foraging Spectrum* — au-delà, on ne fait plus l'aller-retour, on
+/// déménage). C'est jusqu'où un affamé pousse sa quête de gibier (D2).
+const FORAY_RADIUS_TILES: f64 = km_to_tiles(10.0);
 /// Arrivé à moins de 100 m de la piste sans rien voir, on l'oublie.
 const GAME_ARRIVAL_TILES: f64 = 50.0;
 
