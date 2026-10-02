@@ -177,3 +177,32 @@ Ces points ne se tranchent pas en lisant ; ils demandent de confronter le code a
 - Combien de tuiles de cuivre un peuple a-t-il une chance de fouler ? La taille réelle des gisements n'est pas lue ici.
 - Le froid ressenti atteint-il 0 °C dans les foyers où l'on a observé le feu, et jamais dans les autres ?
 - La composante famine peut-elle jamais mordre (seuil 0,5 de faim moyenne) ?
+
+## 7. Registre des hypothèses (constantes choisies, 2026-10-02)
+
+Une constante **sourcée** vient d'une mesure réelle ; **ordre de grandeur**, d'une estimation défendable mais non mesurée ; **choix**, d'une décision de modélisation sans source — à surveiller en premier quand un résultat surprend. Les critères du BRIEF ne servent jamais à en caler une (règle 10).
+
+| Constante | Valeur | Statut | Source ou raison | Ce qui la réfuterait |
+|---|---|---|---|---|
+| `KCAL_PER_HUNGER` | 5 000 kcal (2 500/j) | sourcée | FAO/OMS, dépense d'un adulte actif | — |
+| `Species::edible_kcal` | masse × 50 % × 1 200 kcal/kg | sourcée | White 1953 (part comestible), USDA (gibier cru) | — |
+| `gathering::edible_fraction` | 0,3 à 1 % de la NPP | ordre de grandeur | fruits, noix, racines accessibles, moins la part des bêtes | des densités humaines hors de 0,04-3 hab./km² à long terme |
+| `gathering::EDIBLE_KCAL_PER_G` | 4 kcal/g | ordre de grandeur | noix ~6, graines et racines ~3,5, baies ~3 | — |
+| `gathering::PERSISTENCE_DAYS` | 60 j | choix | baies en semaines, noix en mois | une soudure d'hiver absente ou totale partout |
+| `HUNT_SUCCESS_PER_HOUR` | 2 %/h à portée × (0,5 + compétence) | sourcée, **pour l'arc** | Hadza (~1 gros animal / 29 jours), Ju/'hoansi (< 27 % des jours) ; mesuré ~10 %/jour dans le modèle | à recaler sur l'épieu quand les outils existeront (D14) |
+| rendement d'une prise | 0,75 + 0,25 × compétence | choix | un novice gâche un quart | — |
+| `SHARE_RADIUS_TILES` | 500 m | choix | portée de la voix autour d'un dépeçage | — |
+| part offerte | surplus × sociabilité | choix | une disposition, pas une règle (vision de l'utilisateur) | — |
+| `EAT_CARRIED_HUNGER` | 0,25 | choix | une demi-journée sans repas | — |
+| `FRESH_KEEP_DAYS` | 3 j | ordre de grandeur | viande crue à l'air | — |
+| `PRESERVED_KEEP_DAYS` | 180 j | ordre de grandeur | viande séchée, gelée, cachée | — |
+| `GRANARY_KEEP_FACTOR` | × 2 | choix | au sec, hors d'atteinte | — |
+| technique `preservation` | pression Famine, sans matériau | choix, **trop facile** | découverte en un mois dans 5 runs froids sur 8 | à remplacer par cache au froid / séchage (vision de l'utilisateur) |
+| `GAME_MEMORY_DAYS` ; arrivée sur la piste | 3 j ; 100 m | choix | un troupeau bouge de quelques km par jour | — (la piste n'a pas d'effet mesuré) |
+| quête de gibier | jusqu'à 0,9 × rayon de résidence, score 0,55 × urgence | choix | le territoire du clan | elle a triplé les dissolutions de clans (à lire avec D2) |
+| `CAMP_RADIUS_TILES` ; retour au camp | 500 m ; × (0,5 + 0,5 sociabilité), chemin jugé sur 6 h | choix | — | — (pas d'effet mesuré) |
+| perception de la maille ; `LEAN_SHARE` | une semaine de nourriture par tête ; 0,3 | choix | — | — |
+| `BLOCKED_SPRING_TICKS` ; mémoire | 2 j ; 4 sources | choix | l'échec peut venir d'un budget de calcul épuisé | — |
+| `RAID_WOUND_LIMIT` | mi-plaie | choix | instinct de conservation | — |
+| `SCARCITY_PER_CAPITA` (ancienne) | 3 têtes de gibier par bouche | **cassée** | calée sur l'ancien gibier ; rare ~100 % du temps en contact (D13) | à remplacer (vision : rareté ressentie, territoire, rancunes) |
+| `MATE_RADIUS_TILES` (ancienne) | 400 m, tout ou rien | porte | — | ferme 16 % des jours-femme (mesuré) ; à transformer en couple si D2 le demande |
