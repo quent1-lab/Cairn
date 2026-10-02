@@ -75,6 +75,8 @@ struct Report {
     clans_end: usize,
     bronze: usize,
     techs: BTreeSet<String>,
+    // Débit : ticks par seconde murale, année par année (instruments compris).
+    tps_years: Vec<f64>,
 }
 
 fn main() {
@@ -161,6 +163,7 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
     let mut to_follow: Vec<(u64, Vec<u64>)> = Vec::new();
 
     let total_days = years * 360;
+    let mut year_started = std::time::Instant::now();
     for day in 1..=total_days {
         for _ in 0..TICKS_PER_DAY {
             sim.step();
@@ -265,6 +268,8 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
         }
         if day % 360 == 0 {
             r.pop_years.push(sim.population());
+            r.tps_years.push((360 * TICKS_PER_DAY) as f64 / year_started.elapsed().as_secs_f64());
+            year_started = std::time::Instant::now();
         }
         // Survivants des effondrements, 30 jours après : en clan ou non ?
         let now = sim.time.tick;
@@ -413,6 +418,17 @@ fn print_table(rs: &[Report], years: u64) {
     line("découvertes / oublis", &|r| format!("{} / {}", r.discoveries, r.forgotten));
     line("clans qui ont le feu (fin)", &|r| format!("{}/{}", r.fire_clans, r.clans_end));
     line("bronze (doit supposer une route)", &|r| r.bronze.to_string());
+    println!("— Débit (objectif : ≥ 20 tps chaque année ; instruments compris, un run par cœur)");
+    line("débit plancher annuel (tps)", &|r| {
+        r.tps_years.iter().copied().reduce(f64::min).map_or("—".into(), |t| format!("{t:.1}"))
+    });
+    line("…atteint l'année", &|r| {
+        r.tps_years
+            .iter()
+            .enumerate()
+            .min_by(|a, b| a.1.total_cmp(b.1))
+            .map_or("—".into(), |(i, _)| (i + 1).to_string())
+    });
     line("techniques connues", &|r| r.techs.iter().map(|t| t.chars().take(4).collect::<String>()).collect::<Vec<_>>().join(","));
     let distinct: BTreeSet<(usize, usize, Vec<String>)> =
         rs.iter().map(|r| (r.pop_end, r.clans_formed, r.techs.iter().cloned().collect())).collect();
@@ -423,4 +439,10 @@ fn print_table(rs: &[Report], years: u64) {
         distinct.len(),
         rs.len()
     );
+    // Pic mémoire du processus entier (tous les fils ensemble).
+    if let Ok(status) = std::fs::read_to_string("/proc/self/status")
+        && let Some(l) = status.lines().find(|l| l.starts_with("VmHWM"))
+    {
+        println!("Mémoire, pic du processus (tous fils) : {}", l.trim_start_matches("VmHWM:").trim());
+    }
 }
