@@ -52,6 +52,10 @@ struct Report {
     /// Jours-personnes en clan, et part dans un clan de plus de 30 jours.
     member_days: u64,
     member_days_old: u64,
+    /// Liens ≥ seuil par membre de clan, et densité interne (paires liées /
+    /// paires possibles), relevés chaque jour.
+    degree: Vec<f64>,
+    density: Vec<f64>,
 }
 
 fn main() {
@@ -170,6 +174,24 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
             r.member_days += c.members.len() as u64;
             if now.saturating_sub(c.founded_tick) > 30 * TICKS_PER_DAY {
                 r.member_days_old += c.members.len() as u64;
+            }
+        }
+        let strong: BTreeSet<(u64, u64)> =
+            sim.social.bonds.iter().filter(|&(_, &w)| w >= BOND_THRESHOLD).map(|(&k, _)| k).collect();
+        for c in &sim.clans {
+            let ids: Vec<u64> = c.members.iter().map(|m| m.0).collect();
+            let n = ids.len();
+            let mut inside = 0usize;
+            for (i, a) in ids.iter().enumerate() {
+                for b in &ids[i + 1..] {
+                    inside += usize::from(strong.contains(&((*a).min(*b), (*a).max(*b))));
+                }
+            }
+            for a in &ids {
+                r.degree.push(strong.iter().filter(|(x, y)| x == a || y == a).count() as f64);
+            }
+            if n > 1 {
+                r.density.push(inside as f64 / (n * (n - 1) / 2) as f64);
             }
         }
         following.retain(|(t, living)| {
@@ -311,6 +333,11 @@ fn print_report(r: &Report) {
             r.returns.len()
         );
     }
+    println!(
+        "  membres de clan : liens forts par personne médiane {:.0} ; densité interne médiane {:.2}",
+        median(&r.degree),
+        median(&r.density)
+    );
     println!(
         "  jours-personnes en clan : {} ; dont dans un clan de plus de 30 j : {:.0} %",
         r.member_days,

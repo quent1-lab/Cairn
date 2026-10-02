@@ -62,6 +62,9 @@ struct Report {
     clans_formed: usize,
     first_clan_day: Option<u64>,
     fissions: usize,
+    merges: usize,
+    /// Tailles des clans, relevées une fois par jour.
+    clan_sizes: Vec<usize>,
     hunger_collapses: usize,
     collapse_survivors: usize,
     collapse_survivors_regrouped: usize,
@@ -237,6 +240,7 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                             }
                         }
                     }
+                    ClanEventKind::Merged { .. } => r.merges += 1,
                     ClanEventKind::Dissolved => {
                         if let Some((_, members, hunger)) = prev.iter().find(|(pid, ..)| *pid == e.clan.0)
                             && *hunger > 0.6
@@ -245,7 +249,6 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                             to_follow.push((sim.time.tick + 30 * TICKS_PER_DAY, members.clone()));
                         }
                     }
-                    _ => {}
                 }
             }
             seen_events = sim.clan_events.len();
@@ -293,6 +296,7 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
             }
             false
         });
+        r.clan_sizes.extend(sim.clans.iter().map(|c| c.members.len()));
         // Tensions entre clans, une fois par jour.
         for i in 0..sim.clans.len() {
             for j in (i + 1)..sim.clans.len() {
@@ -409,6 +413,12 @@ fn print_table(rs: &[Report], years: u64) {
         format!("{} ({})", r.clans_formed, r.first_clan_day.map_or("—".into(), |d| d.to_string()))
     });
     line("scissions (un clan parent survit)", &|r| r.fissions.to_string());
+    line("absorptions (un clan en rejoint un autre)", &|r| r.merges.to_string());
+    line("taille des clans (médiane ; max)", &|r| {
+        let mut v = r.clan_sizes.clone();
+        v.sort_unstable();
+        if v.is_empty() { "—".into() } else { format!("{} ; {}", v[v.len() / 2], v[v.len() - 1]) }
+    });
     line("effondrements par la faim", &|r| r.hunger_collapses.to_string());
     line("…survivants regroupés à 30 j", &|r| {
         if r.collapse_survivors == 0 { "—".into() } else { format!("{}/{}", r.collapse_survivors_regrouped, r.collapse_survivors) }
