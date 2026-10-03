@@ -241,14 +241,18 @@ pub(crate) struct Route {
 }
 
 /// Issue d'un pas de déplacement.
-#[derive(PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 enum Move {
     /// Arrivé à moins d'`ARRIVAL_TILES` de la cible.
     Arrived,
     /// A progressé ce tick.
     Moved,
-    /// Bloqué : cerné par l'eau, ou budget d'A* épuisé pour ce tick.
+    /// Bloqué : cerné par l'eau, aucun contournement trouvé.
     Stuck,
+    /// L'eau barre la ligne droite et le budget d'A* du tick est épuisé : on
+    /// attend le tick suivant, la tâche gardée. **Pas** un blocage — une limite
+    /// de calcul ne doit jamais devenir la croyance « inaccessible » (D11).
+    Deferred,
 }
 
 /// Trace d'un décès, pour les statistiques — et, un jour, la Chronique.
@@ -285,6 +289,9 @@ pub struct Sim {
     pub hunted_head: f32,
     /// Nombre cumulé d'appels A* (observabilité du coût de pathfinding).
     pub path_calls: u64,
+    /// Demandes de trajet refusées faute de budget (observabilité : un refus
+    /// ne devrait jamais se lire comme « vraiment cerné »).
+    pub path_denied: u64,
     /// Agent-ticks passés à s'abriter (observabilité du comportement de froid).
     pub shelter_ticks: u64,
     /// Trajets d'évitement d'eau en cours, par identifiant d'agent.
@@ -503,6 +510,7 @@ impl Sim {
             births: Vec::new(),
             hunted_head: 0.0,
             path_calls: 0,
+            path_denied: 0,
             shelter_ticks: 0,
             routes: BTreeMap::new(),
             social: SocialGraph::default(),
@@ -1015,7 +1023,7 @@ impl Sim {
         // dépôts (chasse) et retraits (`EatFromStock`) s'y accumulent au fil
         // des agents, reportée sur `self.clans` une fois la boucle finie.
         let mut kills: Vec<Kill> = Vec::new();
-        let mut path_budget = PATH_REQUESTS_PER_TICK;
+        let mut path_budget = PathBudget { left: PATH_REQUESTS_PER_TICK, denied: 0 };
         let mut clan_stock: BTreeMap<ClanId, f32> =
             self.clans.iter().map(|c| (c.id, c.stock)).collect();
         // Copie de travail des structures : `Build` y pousse la structure
@@ -1092,7 +1100,8 @@ impl Sim {
         // Puis les parts de viande offertes autour des prises.
         resolve_shares(self, &shares);
         self.hunted_head += kills.iter().map(|k| k.head).sum::<f32>();
-        self.path_calls += u64::from(PATH_REQUESTS_PER_TICK - path_budget);
+        self.path_calls += u64::from(PATH_REQUESTS_PER_TICK - path_budget.left);
+        self.path_denied += u64::from(path_budget.denied);
         structures.sort_by_key(|s| (s.clan.0, s.kind));
         self.structures = structures;
         // Report des dépôts/retraits de la boucle, et une heure de
@@ -1514,7 +1523,7 @@ impl Sim {
 fn execute(
     world: &mut World,
     routes: &mut BTreeMap<u64, Route>,
-    path_budget: &mut u32,
+    path_budget: &mut PathBudget,
     id: AgentId,
     pos: &mut Position,
     phys: &mut Physiology,
@@ -1929,6 +1938,12 @@ fn closest_tame_herd(pos: &Position, herds: &[HerdView]) -> Option<HerdView> {
     best.map(|(_, h)| h)
 }
 
+/// Le budget d'A* d'un tick : ce qui reste, et les demandes refusées.
+pub(crate) struct PathBudget {
+    left: u32,
+    denied: u32,
+}
+
 /// Fait avancer l'agent vers `target` pour ce tick, en gérant l'évitement de
 /// l'eau : ligne droite tant qu'elle passe, A* budgété (via une [`Route`]
 /// persistante) dès qu'elle bute.
@@ -1938,7 +1953,7 @@ fn closest_tame_herd(pos: &Position, herds: &[HerdView]) -> Option<HerdView> {
 fn advance(
     world: &mut World,
     routes: &mut BTreeMap<u64, Route>,
-    path_budget: &mut u32,
+    path_budget: &mut PathBudget,
     id: AgentId,
     pos: &mut Position,
     target: (i64, i64),
@@ -1963,10 +1978,11 @@ fn advance(
     }
 
     // 3. Bloqué par l'eau : calculer un contournement, si le budget le permet.
-    if *path_budget == 0 {
-        return Move::Stuck; // pas ce tick — on retentera, la tâche est gardée
+    if path_budget.left == 0 {
+        path_budget.denied += 1;
+        return Move::Deferred; // pas ce tick — on retentera, la tâche est gardée
     }
-    *path_budget -= 1;
+    path_budget.left -= 1;
     let is_land = |x: i64, y: i64| world.worldgen().elevation(x, y) > 0.0;
     match pathfind::astar(pos.tile(), target, is_land, pathfind::NODE_BUDGET) {
         Some(waypoints) if !waypoints.is_empty() => {
@@ -1980,26 +1996,33 @@ fn advance(
 }
 
 /// Suit un trajet A* : consomme les étapes déjà atteintes, marche vers la
-/// prochaine (ou vers le but exact une fois le trajet épuisé).
+/// prochaine (ou vers le but exact une fois le trajet épuisé) — et **enchaîne
+/// les étapes dans la même heure** tant qu'il reste de la marche. Un trajet
+/// s'arrêtait à chaque étape (32 à 45 m) en jetant le reste de l'heure :
+/// contourner l'eau se faisait à ~45 m/h au lieu de 4 km/h.
 fn follow_route(world: &mut World, route: &mut Route, pos: &mut Position, target: (i64, i64)) -> Move {
-    while route.cursor < route.waypoints.len()
-        && pos.distance_tiles(route.waypoints[route.cursor]) <= ARRIVAL_TILES
-    {
-        route.cursor += 1;
-    }
-    let heading_to_goal = route.cursor >= route.waypoints.len();
-    let step_target = if heading_to_goal {
-        target
-    } else {
-        route.waypoints[route.cursor]
-    };
-    match walk_line(world, pos, step_target) {
-        Move::Arrived if heading_to_goal => Move::Arrived,
-        Move::Arrived => {
-            route.cursor += 1; // étape atteinte, on enchaîne au prochain tick
-            Move::Moved
+    let mut budget = WALK_TILES_PER_TICK;
+    let mut moved = false;
+    loop {
+        while route.cursor < route.waypoints.len()
+            && pos.distance_tiles(route.waypoints[route.cursor]) <= ARRIVAL_TILES
+        {
+            route.cursor += 1;
         }
-        other => other,
+        let heading_to_goal = route.cursor >= route.waypoints.len();
+        let step_target = if heading_to_goal { target } else { route.waypoints[route.cursor] };
+        match walk_budgeted(world, pos, step_target, &mut budget) {
+            Move::Arrived if heading_to_goal => return Move::Arrived,
+            Move::Arrived => {
+                route.cursor += 1; // étape atteinte : on enchaîne sur la suivante
+                moved = true;
+                if budget <= 0.0 {
+                    return Move::Moved;
+                }
+            }
+            Move::Stuck if moved => return Move::Moved,
+            other => return other,
+        }
     }
 }
 
@@ -2013,22 +2036,28 @@ fn follow_route(world: &mut World, route: &mut Route, pos: &mut Position, target
 /// en errance traverse des dizaines de chunks par heure.
 fn walk_line(world: &mut World, pos: &mut Position, target: (i64, i64)) -> Move {
     let mut budget = WALK_TILES_PER_TICK;
+    walk_budgeted(world, pos, target, &mut budget)
+}
+
+/// [`walk_line`] sur ce qui reste de marche dans l'heure (`budget`, en
+/// tuiles, décompté) : c'est ce qui laisse un trajet enchaîner ses étapes.
+fn walk_budgeted(world: &mut World, pos: &mut Position, target: (i64, i64), budget: &mut f64) -> Move {
     let mut moved = false;
-    while budget > 0.0 {
+    while *budget > 0.0 {
         let dx = target.0 as f64 + 0.5 - pos.x;
         let dy = target.1 as f64 + 0.5 - pos.y;
         let dist = (dx * dx + dy * dy).sqrt();
         if dist <= ARRIVAL_TILES {
             return Move::Arrived;
         }
-        let step = WALK_SAMPLE_TILES.min(dist).min(budget);
+        let step = WALK_SAMPLE_TILES.min(dist).min(*budget);
         let next = (pos.x + dx / dist * step, pos.y + dy / dist * step);
         if world.worldgen().elevation(next.0.floor() as i64, next.1.floor() as i64) <= 0.0 {
             return if moved { Move::Moved } else { Move::Stuck };
         }
         pos.x = next.0;
         pos.y = next.1;
-        budget -= step;
+        *budget -= step;
         moved = true;
     }
     Move::Moved
@@ -2501,11 +2530,15 @@ mod tests {
         let mut pos = Position { x: start.0 as f64 + 0.5, y: start.1 as f64 + 0.5 };
         let origin = (pos.x, pos.y);
         let mut routes: BTreeMap<u64, Route> = BTreeMap::new();
+        // Le trajet peut être épuisé avant la fin (on marche désormais à pleine
+        // vitesse le long d'un trajet) : on vérifie qu'il a existé.
+        let mut routed = false;
         for _ in 0..8 {
-            let mut budget = PATH_REQUESTS_PER_TICK;
+            let mut budget = PathBudget { left: PATH_REQUESTS_PER_TICK, denied: 0 };
             advance(&mut sim.world, &mut routes, &mut budget, id, &mut pos, target);
+            routed |= routes.contains_key(&id.0);
         }
-        assert!(routes.contains_key(&id.0), "un trajet A* d'évitement doit être créé");
+        assert!(routed, "un trajet A* d'évitement doit être créé");
         let moved = (pos.x - origin.0).hypot(pos.y - origin.1);
         assert!(moved > 1.0, "l'agent doit s'être déplacé le long de la route ({moved:.1} tuiles)");
         // Et il reste sur la terre (jamais dans l'eau).
@@ -3219,7 +3252,7 @@ mod tests {
         let traits = Traits::default();
         let mut skills = Skills::default();
         let mut routes: BTreeMap<u64, Route> = BTreeMap::new();
-        let mut budget = PATH_REQUESTS_PER_TICK;
+        let mut budget = PathBudget { left: PATH_REQUESTS_PER_TICK, denied: 0 };
         let clan_id = social::ClanId(3);
         let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::new();
         let mut carrying = Carrying::default();
@@ -3317,7 +3350,7 @@ mod tests {
             let tick = tick_de_prise(&sim, AgentId(9_999), Skills::default().hunting);
             let mut shares = Vec::new();
             execute(
-                &mut sim.world, &mut BTreeMap::new(), &mut PATH_REQUESTS_PER_TICK.clone(),
+                &mut sim.world, &mut BTreeMap::new(), &mut PathBudget { left: PATH_REQUESTS_PER_TICK, denied: 0 },
                 AgentId(9_999), &mut pos, &mut phys, &mut behavior, &[herd], &[], &[], 1.0,
                 &traits, &mut Skills::default(), None, &mut BTreeMap::new(),
                 &mut Carrying::default(), &mut Prestige::default(), &mut Vec::new(),
@@ -3480,7 +3513,7 @@ mod tests {
         let mut run = |task: Option<Task>, phys: &mut Physiology, carrying: &mut Carrying, pos: &mut Position| {
             let mut behavior = Behavior { task, ..Behavior::default() };
             execute(
-                &mut sim.world, &mut BTreeMap::new(), &mut PATH_REQUESTS_PER_TICK.clone(),
+                &mut sim.world, &mut BTreeMap::new(), &mut PathBudget { left: PATH_REQUESTS_PER_TICK, denied: 0 },
                 AgentId(0), pos, phys, &mut behavior, &[herd], &[], &[], 1.0, &traits,
                 &mut Skills::default(), None, &mut BTreeMap::new(), carrying,
                 &mut Prestige::default(), &mut Vec::new(), &mut Vec::new(), &mut Vec::new(),
@@ -3642,6 +3675,76 @@ mod tests {
         );
     }
 
+    /// Deux points de terre que l'eau sépare en ligne droite, et qu'un A*
+    /// contourne : un rivage réel du monde, trouvé en sondant le worldgen.
+    fn across_water(sim: &Sim) -> ((i64, i64), (i64, i64)) {
+        let land = |x: i64, y: i64| sim.world.worldgen().elevation(x, y) > 0.0;
+        let start = find_land(sim);
+        for r in 0..400i64 {
+            for k in 0..(8 * r.max(1)) {
+                let a = (
+                    start.0 + ((k as f64 / (8 * r.max(1)) as f64 * std::f64::consts::TAU).cos() * r as f64 * 60.0) as i64,
+                    start.1 + ((k as f64 / (8 * r.max(1)) as f64 * std::f64::consts::TAU).sin() * r as f64 * 60.0) as i64,
+                );
+                let b = (a.0 + 400, a.1);
+                if !land(a.0, a.1) || !land(b.0, b.1) {
+                    continue;
+                }
+                let wet = (1..400).any(|i| !land(a.0 + i, a.1));
+                if wet && crate::pathfind::astar(a, b, land, crate::pathfind::NODE_BUDGET).is_some() {
+                    return (a, b);
+                }
+            }
+        }
+        panic!("aucun rivage contournable trouvé");
+    }
+
+    /// Bug de l'eau (2026-10-03) : quand le budget d'A* du tick est épuisé,
+    /// `advance` répondait « bloqué » comme pour un agent vraiment cerné — et
+    /// l'appelant marquait la source inaccessible pendant deux jours (D11).
+    /// Une limite de calcul devenait une croyance : 115 morts de soif en
+    /// 30 jours dans un clan de 200 au bord de l'eau (run longue, an 92).
+    #[test]
+    fn un_budget_epuise_n_est_pas_un_chemin_bloque() {
+        let (mut sim, _) = scenario_setup(7, 0, 0);
+        let (a, b) = across_water(&sim);
+        let mut pos = Position { x: a.0 as f64 + 0.5, y: a.1 as f64 + 0.5 };
+        let mut routes = BTreeMap::new();
+        let mut empty = PathBudget { left: 0, denied: 0 };
+        // On marche d'abord jusqu'à la rive ; c'est là que l'A* serait demandé.
+        for _ in 0..10 {
+            let m = advance(&mut sim.world, &mut routes, &mut empty, AgentId(1), &mut pos, b);
+            assert_ne!(m, Move::Stuck, "faute de budget, on attend : ce n'est pas un chemin bloqué");
+        }
+        assert!(empty.denied >= 1, "arrivé à la rive, la demande de trajet est refusée et comptée");
+    }
+
+    /// Bug de l'eau (2026-10-03) : un trajet A* s'arrêtait à chaque étape
+    /// atteinte (32 à 45 m) et jetait le reste de l'heure de marche —
+    /// contourner l'eau se faisait à ~45 m/h au lieu de 4 km/h (trace : un
+    /// assoiffé mort en marchant vers une source à 1,6 km, 44 m par heure).
+    #[test]
+    fn un_trajet_qui_contourne_l_eau_avance_d_une_heure_de_marche() {
+        let (mut sim, _) = scenario_setup(7, 0, 0);
+        let (a, b) = across_water(&sim);
+        let mut pos = Position { x: a.0 as f64 + 0.5, y: a.1 as f64 + 0.5 };
+        let mut routes = BTreeMap::new();
+        let mut budget = PathBudget { left: 8, denied: 0 };
+        let mut walked = 0.0;
+        for _ in 0..3 {
+            let before = (pos.x, pos.y);
+            let m = advance(&mut sim.world, &mut routes, &mut budget, AgentId(1), &mut pos, b);
+            walked += (pos.x - before.0).hypot(pos.y - before.1);
+            if m == Move::Arrived {
+                return;
+            }
+        }
+        assert!(
+            walked > 3.0 * 0.5 * WALK_TILES_PER_TICK,
+            "trois heures de marche le long d'un trajet : au moins la moitié de la marche nominale ({walked:.0} tuiles)"
+        );
+    }
+
     /// D10, le soir au campement : un membre de clan fatigué, la nuit, à 3 km
     /// du foyer, envisage de rentrer dormir près des siens — pas seulement de
     /// s'effondrer sur place. C'est là que les liens se nouent (les rencontres
@@ -3718,7 +3821,7 @@ mod tests {
         let traits = Traits::default();
         let mut skills = Skills::default();
         let mut routes: BTreeMap<u64, Route> = BTreeMap::new();
-        let mut budget = PATH_REQUESTS_PER_TICK;
+        let mut budget = PathBudget { left: PATH_REQUESTS_PER_TICK, denied: 0 };
         let clan_id = social::ClanId(9);
         let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::new();
         let porte_avant = 0.4;
@@ -3777,7 +3880,7 @@ mod tests {
         let traits = Traits::default();
         let mut skills = Skills::default();
         let mut routes: BTreeMap<u64, Route> = BTreeMap::new();
-        let mut budget = PATH_REQUESTS_PER_TICK;
+        let mut budget = PathBudget { left: PATH_REQUESTS_PER_TICK, denied: 0 };
         let clan_id = social::ClanId(7);
         let stock_avant = 0.5; // moins que la faim : le retrait doit être partiel
         let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::from([(clan_id, stock_avant)]);
@@ -3840,7 +3943,7 @@ mod tests {
         let traits = Traits::default();
         let mut skills = Skills::default();
         let mut routes: BTreeMap<u64, Route> = BTreeMap::new();
-        let mut budget = PATH_REQUESTS_PER_TICK;
+        let mut budget = PathBudget { left: PATH_REQUESTS_PER_TICK, denied: 0 };
         let clan_id = social::ClanId(4);
         let stock_avant = StructureKind::Hut.cost() + 5.0; // de quoi payer, et un reste
         let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::from([(clan_id, stock_avant)]);
@@ -3939,7 +4042,7 @@ mod tests {
         let traits = Traits::default();
         let mut skills = Skills::default();
         let mut routes: BTreeMap<u64, Route> = BTreeMap::new();
-        let mut budget = PATH_REQUESTS_PER_TICK;
+        let mut budget = PathBudget { left: PATH_REQUESTS_PER_TICK, denied: 0 };
         let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::new();
         let mut carrying = Carrying::default();
         let mut prestige = Prestige::default();
@@ -4083,7 +4186,7 @@ mod tests {
         let traits = Traits::default();
         let mut skills = Skills::default();
         let mut routes: BTreeMap<u64, Route> = BTreeMap::new();
-        let mut budget = PATH_REQUESTS_PER_TICK;
+        let mut budget = PathBudget { left: PATH_REQUESTS_PER_TICK, denied: 0 };
         let clan_id = social::ClanId(2);
         let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::new();
         let mut carrying = Carrying::default();

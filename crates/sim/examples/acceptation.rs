@@ -78,6 +78,12 @@ struct Report {
     clans_end: usize,
     bronze: usize,
     techs: BTreeSet<String>,
+    // Soif : morts de déshydratation, dont enfants, dont affamés (faim au
+    // maximum la veille de la mort) ; refus de trajet faute de budget.
+    thirst_deaths: usize,
+    thirst_children: usize,
+    thirst_starving: usize,
+    path_denied: u64,
     // Débit : ticks par seconde murale, année par année (instruments compris).
     tps_years: Vec<f64>,
 }
@@ -165,6 +171,9 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
     // Survivants d'un effondrement par la faim, à revoir 30 jours plus tard.
     let mut to_follow: Vec<(u64, Vec<u64>)> = Vec::new();
 
+    // Assoiffés au bord de la mort, à l'heure d'avant : (faim, adulte).
+    let mut parched: BTreeMap<u64, (f32, bool)> = BTreeMap::new();
+    let mut seen_deaths = 0usize;
     let total_days = years * 360;
     let mut year_started = std::time::Instant::now();
     for day in 1..=total_days {
@@ -219,6 +228,23 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                     }
                 }
             }
+            for d in &sim.deaths[seen_deaths..] {
+                if d.cause == cairn_sim::DeathCause::Dehydration {
+                    r.thirst_deaths += 1;
+                    if let Some(&(hunger, adult)) = parched.get(&d.agent.0) {
+                        r.thirst_children += usize::from(!adult);
+                        r.thirst_starving += usize::from(hunger >= 0.99);
+                    }
+                }
+            }
+            seen_deaths = sim.deaths.len();
+            parched = sim
+                .agents
+                .query::<(&AgentId, &Physiology, &cairn_sim::Demographics)>()
+                .iter()
+                .filter(|(_, (_, p, _))| p.thirst >= 0.99)
+                .map(|(_, (id, p, demo))| (id.0, (p.hunger, demo.is_adult(sim.time.tick))))
+                .collect();
             // — Phase 4 : naissances et morts de clans, lues contre l'heure d'avant.
             let alive_clans: BTreeSet<u64> = sim.clans.iter().map(|c| c.id.0).collect();
             for e in &sim.clan_events[seen_events..] {
@@ -311,6 +337,7 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
     }
 
     r.pop_end = sim.population();
+    r.path_denied = sim.path_denied;
     r.deaths = sim.deaths.len();
     r.births = sim.births.len();
     // Phase 3 : curiosité contre territoire connu.
@@ -385,6 +412,10 @@ fn print_table(rs: &[Report], years: u64) {
     line("boire : assoiffé vs repu", &|r| ratio(r.thirst_ok, r.thirst_h, r.calm_drink, r.calm_h));
     line("manger/chasser : affamé vs repu", &|r| ratio(r.hunger_ok, r.hunger_h, r.calm_eat, r.calm_h));
     line("s'abriter : transi vs au chaud", &|r| ratio(r.cold_ok, r.cold_h, r.calm_shelter, r.calm_h));
+    line("morts de soif (dont enfants ; dont affamés)", &|r| {
+        format!("{} ({} ; {})", r.thirst_deaths, r.thirst_children, r.thirst_starving)
+    });
+    line("trajets refusés faute de budget", &|r| r.path_denied.to_string());
     println!("— Phase 3 : le nombre (projection, pas verdict)");
     // Après la cohorte des fondateurs (baby-boom puis allaitement) : de la fin
     // de l'an 2 à la fin du run, si le run dure au moins 5 ans.
