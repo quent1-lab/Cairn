@@ -3745,6 +3745,44 @@ mod tests {
         );
     }
 
+    /// Chantier de l'eau, défaut A : la soif doit primer quand elle tue vite.
+    /// Trace réelle : un chasseur affamé ET assoiffé chasse 22 h d'affilée, une
+    /// source à 164 m, et meurt de soif — à saturation, boire et chasser
+    /// valaient tous deux ~1, la chasse en cours gagnant l'inertie. La soif
+    /// tue en ~3 jours, la faim en ~3 semaines (« règle des trois ») : celle
+    /// qui tue le plus tôt doit l'emporter nettement, sans rien forcer.
+    #[test]
+    fn la_soif_qui_tue_prime_sur_la_chasse() {
+        let (mut sim, home) = scenario_au_foyer(5, 1, 0);
+        let spring = sim.world.nearest_spring(home, 5).expect("une source près du foyer");
+        let id = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).next().unwrap();
+        let at = (spring.0 as f64 + 80.5, spring.1 as f64 + 0.5); // ~160 m de la source
+        for (_, (pos, phys)) in sim.agents.query_mut::<(&mut Position, &mut Physiology)>() {
+            pos.x = at.0;
+            pos.y = at.1;
+            phys.thirst = 1.0;
+            phys.hunger = 1.0;
+            phys.health = 0.9;
+        }
+        sim.spawn_herd(at.0 + 5.0, at.1, 60.0);
+        let scores = sim.inspect_agent(id).unwrap();
+        let drink = scores.iter().filter(|m| m.kind == TaskKind::Drink).map(|m| m.score).fold(0.0, f32::max);
+        let other = scores.iter().filter(|m| m.kind != TaskKind::Drink).map(|m| m.score).fold(0.0, f32::max);
+        assert!(
+            drink > other + 0.2,
+            "assoiffé à mort, boire ({drink:.2}) doit nettement primer sur tout le reste ({other:.2})"
+        );
+        // L'autre bout : soif modérée, faim saturée — pas d'urgence vitale de
+        // l'eau, la nourriture reste en concurrence normale.
+        for (_, phys) in sim.agents.query_mut::<&mut Physiology>() {
+            phys.thirst = 0.5;
+            phys.health = 1.0;
+        }
+        let scores = sim.inspect_agent(id).unwrap();
+        let drink = scores.iter().filter(|m| m.kind == TaskKind::Drink).map(|m| m.score).fold(0.0, f32::max);
+        assert!(drink <= 1.0, "sans urgence, le score de boire reste dans sa plage ordinaire ({drink:.2})");
+    }
+
     /// D10, le soir au campement : un membre de clan fatigué, la nuit, à 3 km
     /// du foyer, envisage de rentrer dormir près des siens — pas seulement de
     /// s'effondrer sur place. C'est là que les liens se nouent (les rencontres

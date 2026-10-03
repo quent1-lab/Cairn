@@ -34,6 +34,10 @@ use crate::world::World;
 pub const DELIBERATION_PERIOD: u64 = 4;
 /// Température du softmax : bas = discipliné, haut = fantasque.
 pub const SOFTMAX_TAU: f32 = 0.12;
+/// En deçà de ce temps avant la mort (en ticks, donc en heures), un besoin
+/// vital devient une urgence : 3 jours, l'ordre de grandeur de la survie sans
+/// eau (la « règle des trois » : 3 jours sans eau, 3 semaines sans nourriture).
+const VITAL_HORIZON_TICKS: f64 = 72.0;
 /// Bonus accordé à la tâche en cours : l'inertie qui fait finir les choses.
 const COMMITMENT_BONUS: f32 = 0.08;
 
@@ -764,6 +768,38 @@ fn build_candidates(
         d += 40.0;
     }
     candidates.push((TaskKind::Wander, wander_target, wander_score));
+
+    // — L'urgence vitale (chantier de l'eau) : un besoin qui tuera bientôt
+    //   l'emporte. Le temps avant la mort se lit dans les rythmes mêmes du
+    //   corps (`agent`) — la santé qui s'use — et non dans un réglage :
+    //   à saturation, la soif tue en ~2 jours, la faim en ~2 semaines. Sous
+    //   `VITAL_HORIZON_TICKS`, la réponse à ce besoin gagne un bonus qui monte
+    //   vers 1 à mesure que la mort approche. Rien n'est forcé (le tirage
+    //   reste un tirage) ; c'est la « règle des trois » de la survie : l'eau
+    //   avant la nourriture.
+    //   Seulement pour un besoin **saturé**, qui ronge déjà la santé : avant,
+    //   les courbes ordinaires suffisent, et la soif (qui tue toujours en moins
+    //   de trois jours) ferait sinon boire tout le monde plus tôt.
+    let emergency = |need: f32, damage: f32| {
+        if need < 1.0 {
+            return 0.0;
+        }
+        let ticks_left = f64::from(phys.health.max(0.0) / damage);
+        (1.0 - ticks_left / VITAL_HORIZON_TICKS).max(0.0) as f32
+    };
+    let thirst_bonus = emergency(phys.thirst, crate::agent::DAMAGE_DEHYDRATION);
+    let hunger_bonus = emergency(phys.hunger, crate::agent::DAMAGE_STARVATION);
+    for c in &mut candidates {
+        match c.0 {
+            TaskKind::Drink => c.2 += thirst_bonus,
+            TaskKind::Forage
+            | TaskKind::Hunt
+            | TaskKind::Track
+            | TaskKind::SeekGame
+            | TaskKind::EatFromStock => c.2 += hunger_bonus,
+            _ => {}
+        }
+    }
 
     // — Engagement : la tâche en cours part avec une longueur d'avance.
     if let Some(kind) = current {
