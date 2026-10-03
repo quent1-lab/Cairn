@@ -130,4 +130,6 @@ pub(crate) mod salt {
     pub const NAMES: u64 = 1016;
     /// Issue d'une approche de chasse : la bête est-elle tuée cette heure-ci ?
     pub const HUNT: u64 = 1019;
+    /// Allomaternage : une femme qui allaite prend-elle un orphelin aujourd'hui ?
+    pub const ADOPTION: u64 = 1020;
 }

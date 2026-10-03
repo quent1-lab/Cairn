@@ -284,6 +284,9 @@ pub struct Sim {
     pub deaths: Vec<DeathRecord>,
     /// Naissances depuis le début du monde (Phase 3).
     pub births: Vec<BirthRecord>,
+    /// Allomaternage : le nourrisson orphelin → la femme qui l'allaite à la
+    /// place de sa mère (voir `demography::adopt_orphans`).
+    pub fosters: BTreeMap<u64, AgentId>,
     /// Têtes de gibier prélevées par les humains depuis le début : le compteur
     /// de la pression de chasse.
     pub hunted_head: f32,
@@ -508,6 +511,7 @@ impl Sim {
             time: SimTime::default(),
             deaths: Vec::new(),
             births: Vec::new(),
+            fosters: BTreeMap::new(),
             hunted_head: 0.0,
             path_calls: 0,
             path_denied: 0,
@@ -2884,6 +2888,91 @@ mod tests {
         assert!(
             sim.deaths.iter().any(|d| d.agent == orphan),
             "l'orphelin devrait être mort en 8 jours"
+        );
+    }
+
+    /// La proximité de parenté : sœur 0,5, grand-mère et tante 0,25, cousine
+    /// 0,125, étrangère 0 — calculée depuis les naissances, qui survivent aux
+    /// morts.
+    #[test]
+    fn la_proximite_de_parente_se_lit_dans_les_naissances() {
+        // 1 et 2 ont deux enfants, 10 et 11 ; 10 et 20 ont 30 ; 11 et 21 ont 31.
+        let parents: BTreeMap<u64, (u64, u64)> =
+            [(10, (1, 2)), (11, (1, 2)), (30, (10, 20)), (31, (11, 21))].into_iter().collect();
+        let k = |a, b| demography::kin_closeness(&parents, a, b);
+        assert_eq!(k(10, 11), 0.5, "sœurs");
+        assert_eq!(k(1, 30), 0.25, "grand-mère");
+        assert_eq!(k(11, 30), 0.25, "tante");
+        assert_eq!(k(30, 31), 0.125, "cousines");
+        assert_eq!(k(30, 99), 0.0, "étrangère");
+    }
+
+    /// Une scène d'orphelins : chacun a perdu sa mère et a près de lui une
+    /// femme qui allaite son propre nourrisson — sa grande sœur si `sisters`,
+    /// une étrangère sinon. Renvoie (sim, orphelins).
+    fn orphans_with_nursing_women(sisters: bool, n: u64) -> (Sim, Vec<AgentId>) {
+        let (mut sim, home) = scenario_setup(42, 0, 0);
+        let at = (home.0 as f64 + 0.5, home.1 as f64 + 0.5);
+        let mut orphans = Vec::new();
+        for i in 0..n {
+            // La mère morte et le père : de simples identifiants, absents du monde.
+            let (dead_mother, father) = (AgentId(1_000_000 + 2 * i), AgentId(1_000_001 + 2 * i));
+            let woman = sim.spawn_agent(at.0, at.1);
+            for (_, (id, demo)) in sim.agents.query_mut::<(&AgentId, &mut Demographics)>() {
+                if *id == woman {
+                    demo.sex = Sex::Female;
+                }
+            }
+            if sisters {
+                sim.births.push(BirthRecord { tick: 0, mother: dead_mother, father, child: woman });
+            }
+            let own = Kinship { mother: Some(woman), father: None };
+            sim.spawn_child(at.0, at.1, Sex::Male, Traits::default(), own);
+            let orphan = sim.spawn_child(
+                at.0,
+                at.1,
+                Sex::Female,
+                Traits::default(),
+                Kinship { mother: Some(dead_mother), father: Some(father) },
+            );
+            sim.births.push(BirthRecord { tick: 0, mother: dead_mother, father, child: orphan });
+            orphans.push(orphan);
+        }
+        (sim, orphans)
+    }
+
+    /// L'allomaternage (vision de l'utilisateur, sourcée) : plus la femme qui
+    /// allaite est proche de l'orphelin, plus il a de chances d'être nourri.
+    /// Sur trois jours — le temps qu'un nourrisson tient sans lait —, une
+    /// grande sœur (0,5 par jour) prend presque toujours l'orphelin, une
+    /// étrangère (0,01) presque jamais. La mort reste possible des deux côtés.
+    #[test]
+    fn plus_la_femme_est_proche_plus_l_orphelin_est_nourri() {
+        let adopted = |sisters: bool| {
+            let (mut sim, orphans) = orphans_with_nursing_women(sisters, 20);
+            for day in 1..=3 {
+                sim.time.tick = day * cairn_core::TICKS_PER_DAY;
+                demography::adopt_orphans(&mut sim);
+            }
+            orphans.iter().filter(|o| sim.fosters.contains_key(&o.0)).count()
+        };
+        let (soeurs, etrangeres) = (adopted(true), adopted(false));
+        assert!(soeurs >= 14, "des grandes sœurs qui allaitent prennent presque tous les orphelins ({soeurs}/20)");
+        assert!(etrangeres <= 4, "des étrangères n'en prennent presque aucun ({etrangeres}/20)");
+    }
+
+    /// Pris par une femme qui allaite, l'orphelin est porté et nourri, et vit.
+    #[test]
+    fn un_orphelin_pris_par_une_femme_qui_allaite_survit() {
+        let (mut sim, orphans) = orphans_with_nursing_women(true, 1);
+        let woman = sim.births.iter().find(|b| b.child != orphans[0]).map(|b| b.child).unwrap();
+        sim.fosters.insert(orphans[0].0, woman);
+        for _ in 0..24 * 8 {
+            sim.step();
+        }
+        assert!(
+            !sim.deaths.iter().any(|d| d.agent == orphans[0]),
+            "nourri par une autre, l'orphelin doit être vivant après 8 jours"
         );
     }
 
