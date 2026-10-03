@@ -23,7 +23,7 @@ use cairn_sim::exposure::{Exposure, Exposures};
 use cairn_sim::fauna::Herd;
 use cairn_sim::social::BOND_THRESHOLD;
 use cairn_sim::tech::TechEventKind;
-use cairn_sim::{ClanEventKind, ClanMembership, DeathCause, Physiology, Position, Sim, fauna, scenario};
+use cairn_sim::{AgentId, ClanEventKind, ClanMembership, DeathCause, Demographics, Physiology, Position, Sim, fauna, scenario};
 use cairn_worldgen::Biome;
 
 const STOP_TPS: f64 = 1.0;
@@ -83,7 +83,7 @@ fn main() {
     let causes_head: Vec<String> = CAUSES.iter().map(|c| format!("morts_{c:?}")).collect();
     writeln!(
         csv,
-        "jour,an,pop,naissances,morts,{},clans,en_clan,taille_med,taille_max,clans_formes,clans_dissous,clans_absorbes,liens_med,tension_max,paires_tendues,faim_moy,faim_p90,expo_feu,expo_cuivre,techs_vivantes,decouvertes,oublis,troupeaux,tetes,meutes,predateurs,mailles_faune,chunks,tps_jour,tps_30j,rss_mo",
+        "jour,an,pop,naissances,morts,{},clans,en_clan,taille_med,taille_max,clans_formes,clans_dissous,clans_absorbes,liens_med,tension_max,paires_tendues,faim_moy,faim_p90,expo_feu,expo_cuivre,techs_vivantes,decouvertes,oublis,troupeaux,tetes,meutes,predateurs,mailles_faune,chunks,tps_jour,tps_30j,rss_mo,morts_nourrissons,morts_enfants,age_med_deces_10a,age_med_vivants,disp_med_km,disp_max_km,tailles_clans",
         causes_head.join(",")
     )
     .unwrap();
@@ -94,6 +94,11 @@ fn main() {
     let mut window: VecDeque<f64> = VecDeque::new(); // secondes par jour de jeu
     let (mut formed, mut dissolved, mut merged) = (0usize, 0usize, 0usize);
     let mut seen_events = 0usize;
+    // Âge au décès : date de naissance des vivants de la veille.
+    let mut born: BTreeMap<u64, i64> = BTreeMap::new();
+    let mut seen_deaths = 0usize;
+    let (mut dead_infants, mut dead_children) = (0usize, 0usize);
+    let mut death_ages: VecDeque<(u64, f64)> = VecDeque::new(); // (jour, âge) sur 10 ans
     let mut day = 0u64;
     let reason = loop {
         let t0 = std::time::Instant::now();
@@ -119,6 +124,31 @@ fn main() {
         }
         seen_events = sim.clan_events.len();
 
+        for d in &sim.deaths[seen_deaths..] {
+            if let Some(&b) = born.get(&d.agent.0) {
+                let age = (d.tick as i64 - b) as f64 / (360.0 * TICKS_PER_DAY as f64);
+                dead_infants += usize::from(age < 3.0);
+                dead_children += usize::from(age < 15.0);
+                death_ages.push_back((day, age));
+            }
+        }
+        seen_deaths = sim.deaths.len();
+        while death_ages.front().is_some_and(|(d, _)| *d + 3600 < day) {
+            death_ages.pop_front();
+        }
+        let mut ages_dead: Vec<f64> = death_ages.iter().map(|(_, a)| *a).collect();
+        ages_dead.sort_by(f64::total_cmp);
+        born = sim.agents.query::<(&AgentId, &Demographics)>().iter().map(|(_, (id, d))| (id.0, d.born_tick)).collect();
+        let mut ages_alive: Vec<f64> =
+            sim.agents.query::<&Demographics>().iter().map(|(_, d)| d.age_years(sim.time.tick)).collect();
+        ages_alive.sort_by(f64::total_cmp);
+        let pts: Vec<(f64, f64)> = sim.agents.query::<&Position>().iter().map(|(_, p)| (p.x, p.y)).collect();
+        let n = pts.len().max(1) as f64;
+        let c = (pts.iter().map(|p| p.0).sum::<f64>() / n, pts.iter().map(|p| p.1).sum::<f64>() / n);
+        let mut dist: Vec<f64> = pts.iter().map(|p| cairn_core::tiles_to_km((p.0 - c.0).hypot(p.1 - c.1))).collect();
+        dist.sort_by(f64::total_cmp);
+        let med = |v: &[f64]| v.get(v.len() / 2).copied().unwrap_or(0.0);
+
         let pop = sim.population();
         let mut by_cause: BTreeMap<String, usize> = BTreeMap::new();
         for d in &sim.deaths {
@@ -129,6 +159,13 @@ fn main() {
 
         let mut sizes: Vec<usize> = sim.clans.iter().map(|c| c.members.len()).collect();
         sizes.sort_unstable();
+        // Vraie médiane (moyenne des deux du milieu quand le nombre est pair).
+        let size_med = match sizes.len() {
+            0 => 0.0,
+            n if n % 2 == 1 => sizes[n / 2] as f64,
+            n => (sizes[n / 2 - 1] + sizes[n / 2]) as f64 / 2.0,
+        };
+        let sizes_str: Vec<String> = sizes.iter().map(|x| x.to_string()).collect();
         let in_clan = sim.agents.query::<&ClanMembership>().iter().filter(|(_, m)| m.0.is_some()).count();
         let mut degree: BTreeMap<u64, usize> = BTreeMap::new();
         for (&(a, b), &w) in &sim.social.bonds {
@@ -178,19 +215,24 @@ fn main() {
 
         writeln!(
             csv,
-            "{day},{:.3},{pop},{},{},{},{},{in_clan},{},{},{formed},{dissolved},{merged},{},{tension_max:.3},{tense},{hunger_mean:.3},{hunger_p90:.3},{fire},{copper},{},{disc},{forgot},{herds},{heads:.0},{packs},{predators:.0},{},{},{tps_day:.1},{tps_win:.1},{}",
+            "{day},{:.3},{pop},{},{},{},{},{in_clan},{},{},{formed},{dissolved},{merged},{},{tension_max:.3},{tense},{hunger_mean:.3},{hunger_p90:.3},{fire},{copper},{},{disc},{forgot},{herds},{heads:.0},{packs},{predators:.0},{},{},{tps_day:.1},{tps_win:.1},{},{dead_infants},{dead_children},{:.1},{:.1},{:.2},{:.2},{}",
             day as f64 / 360.0,
             sim.births.len(),
             sim.deaths.len(),
             causes.join(","),
             sim.clans.len(),
-            sizes.get(sizes.len() / 2).copied().unwrap_or(0),
+            size_med,
             sizes.last().copied().unwrap_or(0),
             links.get(links.len() / 2).copied().unwrap_or(0),
             sim.known_techs.len(),
             zones.len(),
             sim.world.loaded(),
             rss_kb / 1000,
+            med(&ages_dead),
+            med(&ages_alive),
+            med(&dist),
+            dist.last().copied().unwrap_or(0.0),
+            sizes_str.join(";"),
         )
         .unwrap();
         csv.flush().unwrap();
