@@ -83,6 +83,11 @@ struct Report {
     thirst_deaths: usize,
     thirst_children: usize,
     thirst_starving: usize,
+    /// Nourrissons (âge d'allaitement) morts de soif : orphelins, mère sans
+    /// lait (affamée), autre.
+    infant_orphan: usize,
+    infant_dry_mother: usize,
+    infant_other: usize,
     path_denied: u64,
     // Débit : ticks par seconde murale, année par année (instruments compris).
     tps_years: Vec<f64>,
@@ -172,7 +177,9 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
     let mut to_follow: Vec<(u64, Vec<u64>)> = Vec::new();
 
     // Assoiffés au bord de la mort, à l'heure d'avant : (faim, adulte).
-    let mut parched: BTreeMap<u64, (f32, bool)> = BTreeMap::new();
+    // (faim, adulte, état du nourrisson : 0 = pas nourrisson, 1 = orphelin,
+    // 2 = mère sans lait, 3 = autre).
+    let mut parched: BTreeMap<u64, (f32, bool, u8)> = BTreeMap::new();
     let mut seen_deaths = 0usize;
     let total_days = years * 360;
     let mut year_started = std::time::Instant::now();
@@ -231,19 +238,42 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
             for d in &sim.deaths[seen_deaths..] {
                 if d.cause == cairn_sim::DeathCause::Dehydration {
                     r.thirst_deaths += 1;
-                    if let Some(&(hunger, adult)) = parched.get(&d.agent.0) {
+                    if let Some(&(hunger, adult, infant)) = parched.get(&d.agent.0) {
                         r.thirst_children += usize::from(!adult);
                         r.thirst_starving += usize::from(hunger >= 0.99);
+                        match infant {
+                            1 => r.infant_orphan += 1,
+                            2 => r.infant_dry_mother += 1,
+                            3 => r.infant_other += 1,
+                            _ => {}
+                        }
                     }
                 }
             }
             seen_deaths = sim.deaths.len();
+            let hunger_by_id: BTreeMap<u64, f32> = sim
+                .agents
+                .query::<(&AgentId, &Physiology)>()
+                .iter()
+                .map(|(_, (id, p))| (id.0, p.hunger))
+                .collect();
             parched = sim
                 .agents
-                .query::<(&AgentId, &Physiology, &cairn_sim::Demographics)>()
+                .query::<(&AgentId, &Physiology, &cairn_sim::Demographics, &cairn_sim::Kinship)>()
                 .iter()
-                .filter(|(_, (_, p, _))| p.thirst >= 0.99)
-                .map(|(_, (id, p, demo))| (id.0, (p.hunger, demo.is_adult(sim.time.tick))))
+                .filter(|(_, (_, p, _, _))| p.thirst >= 0.99)
+                .map(|(_, (id, p, demo, kin))| {
+                    let infant = if !demo.is_infant(sim.time.tick) {
+                        0
+                    } else {
+                        match kin.mother.and_then(|m| hunger_by_id.get(&m.0)) {
+                            None => 1,
+                            Some(&h) if h >= cairn_sim::demography::STARVING_MOTHER_HUNGER => 2,
+                            Some(_) => 3,
+                        }
+                    };
+                    (id.0, (p.hunger, demo.is_adult(sim.time.tick), infant))
+                })
                 .collect();
             // — Phase 4 : naissances et morts de clans, lues contre l'heure d'avant.
             let alive_clans: BTreeSet<u64> = sim.clans.iter().map(|c| c.id.0).collect();
@@ -414,6 +444,9 @@ fn print_table(rs: &[Report], years: u64) {
     line("s'abriter : transi vs au chaud", &|r| ratio(r.cold_ok, r.cold_h, r.calm_shelter, r.calm_h));
     line("morts de soif (dont enfants ; dont affamés)", &|r| {
         format!("{} ({} ; {})", r.thirst_deaths, r.thirst_children, r.thirst_starving)
+    });
+    line("…nourrissons : orphelins ; mère sans lait ; autre", &|r| {
+        format!("{} ; {} ; {}", r.infant_orphan, r.infant_dry_mother, r.infant_other)
     });
     line("trajets refusés faute de budget", &|r| r.path_denied.to_string());
     println!("— Phase 3 : le nombre (projection, pas verdict)");
