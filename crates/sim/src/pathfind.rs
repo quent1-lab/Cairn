@@ -40,6 +40,17 @@ const NEIGHBORS: [(i64, i64); 8] = [
     (1, 1), (1, -1), (-1, 1), (-1, -1),
 ];
 
+/// La ligne droite de `a` à `b` reste-t-elle sur la terre ? (échantillon
+/// toutes les 2 tuiles.)
+fn segment_on_land(a: (i64, i64), b: (i64, i64), is_land: &impl Fn(i64, i64) -> bool) -> bool {
+    let (dx, dy) = ((b.0 - a.0) as f64, (b.1 - a.1) as f64);
+    let n = (dx.hypot(dy) / 2.0).ceil() as i64;
+    (0..=n).all(|k| {
+        let t = k as f64 / n.max(1) as f64;
+        is_land((a.0 as f64 + 0.5 + dx * t).floor() as i64, (a.1 as f64 + 0.5 + dy * t).floor() as i64)
+    })
+}
+
 /// Distance octile (heuristique admissible et **consistante** pour une grille
 /// 8-connexe) entre deux cellules, en coût ×1000.
 fn heuristic(a: (i64, i64), b: (i64, i64)) -> i64 {
@@ -130,6 +141,14 @@ pub fn astar(
         for (dx, dy) in NEIGHBORS {
             let nb = (cell.0 + dx, cell.1 + dy);
             if closed.contains(&nb) || !land_cell(nb) {
+                continue;
+            }
+            // Depuis la cellule de départ, la première étape doit se rejoindre
+            // à pied depuis la tuile **exacte** de l'agent (piste E3 : sur une
+            // langue de terre, le segment vers le centre d'une cellule voisine
+            // traversait l'eau ; la marche butait au premier pas, et l'assoiffé
+            // restait 40 heures à 330 m d'une source).
+            if cell == start && !segment_on_land(start_tile, cell_center(nb), &is_land) {
                 continue;
             }
             let step = if dx != 0 && dy != 0 { DIAG } else { ORTHO };
@@ -279,5 +298,27 @@ mod tests {
             at = last;
         }
         panic!("40 recalculs sans contourner le lac (arrêté en {at:?})");
+    }
+
+    /// Piste E3 du chantier de l'eau (trace réelle : l'A* trouvait un chemin
+    /// complet de 52 étapes, et l'assoiffé ne bougeait pas pendant 40 heures).
+    /// L'A* raisonne de centre de cellule en centre de cellule ; le premier
+    /// tronçon, de la tuile exacte de l'agent à la première étape, n'était
+    /// jamais vérifié — s'il traverse l'eau, la marche bute au premier pas.
+    #[test]
+    fn le_premier_troncon_se_marche_depuis_la_tuile_exacte() {
+        // Un mur d'eau (x de 10 à 13, y de 0 à 19) entre l'agent et la cellule
+        // voisine de l'est ; on le contourne par le nord.
+        let is_land = |x: i64, y: i64| !((10..14).contains(&x) && (0..20).contains(&y));
+        let start = (2, 8);
+        let path = astar(start, (100, 8), is_land, NODE_BUDGET).expect("un chemin existe");
+        let first = path[0];
+        let (dx, dy) = ((first.0 - start.0) as f64, (first.1 - start.1) as f64);
+        let n = dx.hypot(dy).ceil() as i64;
+        let clear = (0..=n).all(|k| {
+            let t = k as f64 / n.max(1) as f64;
+            is_land((start.0 as f64 + dx * t).floor() as i64, (start.1 as f64 + dy * t).floor() as i64)
+        });
+        assert!(clear, "le premier tronçon {start:?} → {first:?} traverse l'eau");
     }
 }
