@@ -3921,6 +3921,79 @@ mod tests {
         assert!(drink <= 1.0, "sans urgence, le score de boire reste dans sa plage ordinaire ({drink:.2})");
     }
 
+    /// Piste F (run longue tempéré 42 : deux bandes à plus de 900 km l'une de
+    /// l'autre en 25 ans) : rien n'attachait une bande à ses terres, chaque
+    /// changement de maille faisait glisser le camp — une marche au hasard.
+    /// Une bande réelle parcourt un domaine qu'elle connaît. À richesse égale,
+    /// le pays connu (où l'on sait l'eau et la nourriture) doit l'emporter ;
+    /// rien n'interdit l'inconnu.
+    #[test]
+    fn a_richesse_egale_on_retourne_sur_ses_terres() {
+        let (mut sim, _) = scenario_au_foyer(5, 1, 0);
+        sim.time.tick = 160 * cairn_core::TICKS_PER_DAY; // été : ça pousse
+        let (id, pos) = sim
+            .agents
+            .query::<(&AgentId, &Position)>()
+            .iter()
+            .map(|(_, (a, p))| (*a, (p.x, p.y)))
+            .next()
+            .unwrap();
+        for (_, phys) in sim.agents.query_mut::<&mut Physiology>() {
+            phys.hunger = 0.8;
+        }
+        let side = crate::fauna::RANGE_ZONE_TILES;
+        let zone = crate::fauna::range_zone(pos);
+        let center = |dx: i64, dy: i64| (((zone.0 + dx) as f64 + 0.5) * side, ((zone.1 + dy) as f64 + 0.5) * side);
+        // Deux mailles riches parmi les voisines : l'inconnue (vue la première
+        // dans l'ordre de parcours) et la connue (vue la dernière). Le reste du
+        // pays alentour est vidé.
+        let order: Vec<(i64, i64)> =
+            (-1..=1).flat_map(|dy| (-1..=1).map(move |dx| (dx, dy))).filter(|&d| d != (0, 0)).collect();
+        let rich: Vec<(i64, i64)> = order
+            .iter()
+            .copied()
+            .filter(|&(dx, dy)| sim.world.edible_kcal(center(dx, dy), sim.time.tick) > 1.0e6)
+            .collect();
+        assert!(rich.len() >= 2, "il faut deux mailles riches autour du foyer");
+        let (unknown, familiar) = (rich[0], *rich.last().unwrap());
+        sim.world.gather(center(0, 0), sim.time.tick, f64::MAX);
+        for &(dx, dy) in &order {
+            if (dx, dy) != unknown && (dx, dy) != familiar {
+                sim.world.gather(center(dx, dy), sim.time.tick, f64::MAX);
+            }
+        }
+        let known = center(familiar.0, familiar.1);
+        for (_, mem) in sim.agents.query_mut::<&mut Memory>() {
+            let step = crate::memory::MEMORY_CELL_TILES as f64;
+            let mut y = known.1 - side / 2.0;
+            while y < known.1 + side / 2.0 {
+                let mut x = known.0 - side / 2.0;
+                while x < known.0 + side / 2.0 {
+                    mem.known.insert(crate::memory::cell_of((x as i64, y as i64)));
+                    x += step;
+                }
+                y += step;
+            }
+        }
+        let target = sim
+            .inspect_agent(id)
+            .unwrap()
+            .into_iter()
+            .filter(|m| m.kind == TaskKind::Wander && m.score > 0.0)
+            .map(|m| m.target)
+            // Le changement de pays vise le centre d'une maille voisine.
+            .find(|t| order.iter().any(|&(dx, dy)| {
+                let c = center(dx, dy);
+                (c.0 as i64, c.1 as i64) == *t
+            }));
+        let target = target.expect("une maille plus riche doit être envisagée");
+        assert_eq!(
+            crate::fauna::range_zone((target.0 as f64, target.1 as f64)),
+            (zone.0 + familiar.0, zone.1 + familiar.1),
+            "à richesse égale, la maille connue doit l'emporter"
+        );
+    }
+
     /// D10, le soir au campement : un membre de clan fatigué, la nuit, à 3 km
     /// du foyer, envisage de rentrer dormir près des siens — pas seulement de
     /// s'effondrer sur place. C'est là que les liens se nouent (les rencontres

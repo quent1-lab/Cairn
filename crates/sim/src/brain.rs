@@ -266,18 +266,26 @@ fn build_candidates(
     if share_here < 1.0 {
         let zone = crate::fauna::range_zone((pos.x, pos.y));
         let side = crate::fauna::RANGE_ZONE_TILES;
+        // Piste F : à richesse égale, le pays **connu** l'emporte — on sait
+        // où y sont l'eau et la nourriture. Sans cela, chaque changement de
+        // maille faisait glisser le camp au hasard : deux bandes à 900 km
+        // l'une de l'autre en 25 ans. Rien n'interdit l'inconnu.
         let mut best: Option<(f32, (i64, i64))> = None;
         for dz in [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
             let c = ((zone.0 + dz.0) as f64 + 0.5) * side;
             let r = ((zone.1 + dz.1) as f64 + 0.5) * side;
             let share = edible_share(world, (c, r), time.tick, humans);
-            if share > share_here && best.is_none_or(|(b, _)| share > b) {
-                best = Some((share, (c as i64, r as i64)));
+            if share <= share_here {
+                continue;
+            }
+            let pull = (share - share_here) * familiarity_weight(mem, (c, r), side);
+            if best.is_none_or(|(b, _)| pull > b) {
+                best = Some((pull, (c as i64, r as i64)));
             }
         }
-        if let Some((share, target)) = best {
+        if let Some((pull, target)) = best {
             let day = 1.0 / (1.0 + pos.distance_tiles(target) / (WALK_TILES_PER_TICK * 24.0));
-            candidates.push((TaskKind::Wander, target, urgency * (share - share_here) * day as f32));
+            candidates.push((TaskKind::Wander, target, urgency * pull * day as f32));
         }
     }
 
@@ -884,6 +892,10 @@ const GAME_MEMORY_DAYS: f64 = 3.0;
 /// Au-delà de cette distance du foyer de son clan (~500 m), on peut choisir
 /// de rentrer dormir au campement plutôt que sur place.
 const CAMP_RADIUS_TILES: f64 = 250.0;
+/// Ce que vaut une maille inconnue face à une maille connue de même richesse
+/// (piste F : l'attachement d'une bande à ses terres). Choix ; ordre de
+/// grandeur : l'inconnu n'est pas interdit, il pèse moitié moins.
+const FAMILIAR_FLOOR: f32 = 0.5;
 /// Portée d'une sortie à la journée depuis le camp (~10 km : Kelly 1995,
 /// *The Foraging Spectrum* — au-delà, on ne fait plus l'aller-retour, on
 /// déménage). C'est jusqu'où un affamé pousse sa quête de gibier (D2).
@@ -903,6 +915,26 @@ fn edible_share(world: &mut World, pos: (f64, f64), tick: u64, humans: &[HumanVi
     let here = humans.iter().filter(|h| crate::fauna::range_zone(h.pos) == zone).count().max(1);
     let kcal = world.edible_kcal(pos, tick);
     (kcal / (here as f64 * WEEK_KCAL)).min(1.0) as f32
+}
+
+/// Le poids d'une maille selon qu'on la connaît : `FAMILIAR_FLOOR` pour une
+/// maille où l'on n'a jamais mis les pieds, 1 pour une maille parcourue en
+/// entier (part des cellules de mémoire foulées).
+fn familiarity_weight(mem: &Memory, center: (f64, f64), side: f64) -> f32 {
+    let step = crate::memory::MEMORY_CELL_TILES as f64;
+    let (mut seen, mut all) = (0u32, 0u32);
+    let mut y = center.1 - side / 2.0;
+    while y < center.1 + side / 2.0 {
+        let mut x = center.0 - side / 2.0;
+        while x < center.0 + side / 2.0 {
+            all += 1;
+            seen += u32::from(mem.known.contains(&crate::memory::cell_of((x as i64, y as i64))));
+            x += step;
+        }
+        y += step;
+    }
+    let known = if all == 0 { 0.0 } else { seen as f32 / all as f32 };
+    FAMILIAR_FLOOR + (1.0 - FAMILIAR_FLOOR) * known
 }
 
 /// La tuile la plus fournie en biomasse autour de `from` (échantillonnage en
