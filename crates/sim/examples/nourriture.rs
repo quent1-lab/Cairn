@@ -87,6 +87,10 @@ fn main() {
     // Ce que font les affamés (faim > 0,5), relevé chaque heure : la
     // dispersion se juge à ce qu'ils choisissent quand le pays ne répond plus.
     let mut hungry_tasks: BTreeMap<String, u64> = BTreeMap::new();
+    // Les éloignés (à plus de 10 km du point médian de la population), heure
+    // par heure : ce qu'ils font, s'ils sont d'un clan, leur soif.
+    let mut far_tasks: BTreeMap<String, u64> = BTreeMap::new();
+    let (mut far_hours, mut far_clan_hours, mut far_thirsty_hours, mut all_hours) = (0u64, 0u64, 0u64, 0u64);
     let mut first_clan_day: Option<u64> = None;
     // D11 — la soif : le dernier état connu de chaque assoiffé (soif >= 0,95),
     // pour décrire ceux qui en meurent (l'agent mort n'est plus interrogeable).
@@ -260,6 +264,39 @@ fn main() {
                     .collect();
             }
 
+            {
+                let mut xs: Vec<f64> = sim.agents.query::<&Position>().iter().map(|(_, p)| p.x).collect();
+                let mut ys: Vec<f64> = sim.agents.query::<&Position>().iter().map(|(_, p)| p.y).collect();
+                xs.sort_by(f64::total_cmp);
+                ys.sort_by(f64::total_cmp);
+                if !xs.is_empty() {
+                    let m = (xs[xs.len() / 2], ys[ys.len() / 2]);
+                    let far = cairn_core::km_to_tiles(10.0);
+                    for (_, (pos, phys, behavior, clan)) in sim
+                        .agents
+                        .query::<(&Position, &Physiology, &Behavior, &cairn_sim::ClanMembership)>()
+                        .iter()
+                    {
+                        all_hours += 1;
+                        if (pos.x - m.0).hypot(pos.y - m.1) <= far {
+                            continue;
+                        }
+                        far_hours += 1;
+                        far_clan_hours += u64::from(clan.0.is_some());
+                        far_thirsty_hours += u64::from(phys.thirst > 0.7);
+                        let kind = match behavior.activity {
+                            cairn_sim::Activity::Walking => format!(
+                                "Marche→{}",
+                                behavior.task.map_or("?".to_string(), |t| {
+                                    format!("{:?}", t.kind).split('(').next().unwrap_or("").to_string()
+                                })
+                            ),
+                            a => format!("{a:?}"),
+                        };
+                        *far_tasks.entry(kind).or_insert(0) += 1;
+                    }
+                }
+            }
             for (_, (phys, behavior)) in sim.agents.query::<(&Physiology, &Behavior)>().iter() {
                 if phys.hunger > 0.5 {
                     // Ce que l'heure a réellement été : l'activité du tick, et pour
@@ -444,6 +481,24 @@ fn main() {
             .filter(|(_, m)| m.game.is_some())
             .count();
         hungry_tasks.clear();
+        {
+            let mut ft: Vec<(u64, String)> = far_tasks.iter().map(|(k, v)| (*v, k.clone())).collect();
+            ft.sort_by(|a, b| b.0.cmp(&a.0));
+            let txt: Vec<String> = ft
+                .iter()
+                .take(6)
+                .map(|(v, k)| format!("{k} {:.0}%", 100.0 * *v as f64 / far_hours.max(1) as f64))
+                .collect();
+            println!(
+                "      éloignés (> 10 km du point médian) : {:.1} % des heures-personnes ; dont en clan {:.0} %, assoiffés {:.0} % ; {}",
+                100.0 * far_hours as f64 / all_hours.max(1) as f64,
+                100.0 * far_clan_hours as f64 / far_hours.max(1) as f64,
+                100.0 * far_thirsty_hours as f64 / far_hours.max(1) as f64,
+                txt.join(", ")
+            );
+            far_tasks.clear();
+            (far_hours, far_clan_hours, far_thirsty_hours, all_hours) = (0, 0, 0, 0);
+        }
         let (fed, ev) = food_stats::take();
         let total: f64 = fed[0] + fed[1] + fed[4] + fed[6] + fed[7] + fed[8];
         let pct = |x: f64| 100.0 * x / total.max(1e-9);
