@@ -6,8 +6,8 @@
 //! caps et lacs, assez grossière pour qu'un budget de quelques milliers de
 //! nœuds porte à ~1 km. Deux garde-fous :
 //! - **budget de nœuds** par requête : au-delà, on rend le **meilleur chemin
-//!   partiel** (vers la cellule la plus proche du but atteinte) — l'agent
-//!   progresse et recalcule plus tard, plutôt que de figer le tick ;
+//!   partiel** (vers la cellule de la frontière au plus petit coût estimé) —
+//!   l'agent progresse et recalcule plus tard, plutôt que de figer le tick ;
 //! - **budget de requêtes** par tick (côté appelant) : on ne lance pas 5 000
 //!   A* d'un coup.
 //!
@@ -109,7 +109,20 @@ pub fn astar(
             continue;
         }
         if expanded >= node_budget {
-            break;
+            // Budget épuisé : on suit la cellule de la frontière au plus petit
+            // coût total estimé (celle que l'A* aurait explorée ensuite), et
+            // non la plus proche du but à vol d'oiseau — celle-là est souvent
+            // la rive d'en face, un cul-de-sac d'où l'on ne repart jamais
+            // (chantier de l'eau, piste E : on mourait de soif à 331 m d'une
+            // source de l'autre côté d'un lac).
+            let frontier = std::iter::once(Reverse((g[&cell] + heuristic(cell, goal), cell)))
+                .chain(open.into_iter())
+                .filter(|Reverse((_, c))| *c != start && (*c == cell || !closed.contains(c)))
+                .min_by_key(|Reverse(entry)| *entry);
+            return match frontier {
+                Some(Reverse((_, c))) => Some(reconstruct(&came, c, None)),
+                None => None,
+            };
         }
         expanded += 1;
 
@@ -239,5 +252,32 @@ mod tests {
         // Avec 10 nœuds on ne rejoint pas un but à 100 km ; on rend un partiel.
         assert!(path.is_some());
         assert!(path.unwrap().len() <= 12);
+    }
+
+    /// Piste E du chantier de l'eau : un lac dont le tour dépasse la portée
+    /// d'une recherche (~900 m). Le partiel visait la cellule la plus proche
+    /// du but à vol d'oiseau — la rive d'en face —, puis, relancé de là, ne
+    /// trouvait rien de plus proche : « cerné », la source était déclarée
+    /// inaccessible, et l'assoiffé mourait à 331 m de l'eau (trace réelle).
+    /// En suivant, recalcul après recalcul, ce que rend l'A*, on doit finir
+    /// par contourner le lac.
+    #[test]
+    fn un_long_detour_finit_par_contourner_le_lac() {
+        // Un mur d'eau de 4 km de large (y entre 0 et 47), le but juste derrière.
+        let is_land = |x: i64, y: i64| !((-1000..1000).contains(&x) && (0..48).contains(&y));
+        let goal = (0, 100);
+        let mut at = (0, -40);
+        for _ in 0..40 {
+            let Some(path) = astar(at, goal, is_land, NODE_BUDGET) else {
+                panic!("déclaré cerné en {at:?} alors que le lac se contourne");
+            };
+            let last = *path.last().unwrap();
+            if last == goal {
+                return;
+            }
+            assert_ne!(last, at, "le partiel doit faire progresser");
+            at = last;
+        }
+        panic!("40 recalculs sans contourner le lac (arrêté en {at:?})");
     }
 }
