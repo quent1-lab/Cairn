@@ -61,8 +61,10 @@ pub const CONCEPTION_DAILY_P: f64 = 0.012;
 /// Ce que l'allaitement retire par tick aux besoins du nourrisson (couvre
 /// faim et soif : le lait est les deux).
 pub const NURSE_RELIEF: f32 = 0.1;
-/// Au-delà de cette faim, la mère n'a plus de lait à donner.
-pub const STARVING_MOTHER_HUNGER: f32 = 0.95;
+/// Santé (réserves) en deçà de laquelle une femme qui allaite n'a plus de
+/// lait **à partager** : elle ne prend pas d'orphelin (allomaternage). Son
+/// propre enfant, lui, reçoit un lait qui suit sa santé (`nurse_infants`).
+pub const MILK_TO_SPARE_HEALTH: f32 = 0.5;
 /// Surcoût de faim de la mère qui allaite (+30 % du métabolisme de base).
 pub const NURSING_HUNGER_PER_TICK: f32 = HUNGER_PER_TICK * 0.3;
 /// Le lait coûte aussi de l'eau.
@@ -267,13 +269,19 @@ pub(crate) fn nurse_infants(sim: &mut Sim) {
             let pos = sim.agents.get::<&Position>(entity).ok()?;
             let phys = sim.agents.get::<&Physiology>(entity).ok()?;
             let behavior = sim.agents.get::<&Behavior>(entity).ok()?;
-            Some(((pos.x, pos.y), behavior.activity, phys.hunger))
+            Some(((pos.x, pos.y), behavior.activity, phys.health))
         });
 
-        let Some(((mx, my), mother_activity, mother_hunger)) = mother_state else {
+        let Some(((mx, my), mother_activity, mother_health)) = mother_state else {
             continue; // orphelin : cloué sur place, les besoins montent
         };
-        let has_milk = mother_hunger < STARVING_MOTHER_HUNGER;
+        // Le lait suit les **réserves** de la mère (sa santé), pas sa faim de
+        // l'heure : la lactation résiste à une sous-alimentation modérée et ne
+        // tarit que dans une famine qui dure (défaut G : une porte à 0,95 de
+        // faim coupait le lait quelques heures chaque jour dans les grandes
+        // bandes — 80 % des nourrissons morts de soif).
+        let milk = mother_health.clamp(0.0, 1.0);
+        let has_milk = milk > 0.0;
         if let Ok((pos, phys, behavior)) = sim
             .agents
             .query_one_mut::<(&mut Position, &mut Physiology, &mut Behavior)>(infant)
@@ -287,17 +295,18 @@ pub(crate) fn nurse_infants(sim: &mut Sim) {
                 _ => Activity::Idle,
             };
             if has_milk {
-                crate::food_stats::fed(crate::food_stats::Source::Milk, NURSE_RELIEF.min(phys.hunger));
-                phys.hunger = (phys.hunger - NURSE_RELIEF).max(0.0);
-                phys.thirst = (phys.thirst - NURSE_RELIEF).max(0.0);
+                let relief = NURSE_RELIEF * milk;
+                crate::food_stats::fed(crate::food_stats::Source::Milk, relief.min(phys.hunger));
+                phys.hunger = (phys.hunger - relief).max(0.0);
+                phys.thirst = (phys.thirst - relief).max(0.0);
             }
         }
         if has_milk
             && let Some(entity) = mother_entity
             && let Ok(phys) = sim.agents.query_one_mut::<&mut Physiology>(entity)
         {
-            phys.hunger = (phys.hunger + NURSING_HUNGER_PER_TICK).min(1.0);
-            phys.thirst = (phys.thirst + NURSING_THIRST_PER_TICK).min(1.0);
+            phys.hunger = (phys.hunger + NURSING_HUNGER_PER_TICK * milk).min(1.0);
+            phys.thirst = (phys.thirst + NURSING_THIRST_PER_TICK * milk).min(1.0);
         }
     }
 }
@@ -349,7 +358,7 @@ pub(crate) fn adopt_orphans(sim: &mut Sim) {
     let day = tick / TICKS_PER_DAY;
     struct V {
         pos: (f64, f64),
-        hunger: f32,
+        health: f32,
         female_adult: bool,
         infant: bool,
         mother: Option<u64>,
@@ -364,7 +373,7 @@ pub(crate) fn adopt_orphans(sim: &mut Sim) {
                 id.0,
                 V {
                     pos: (pos.x, pos.y),
-                    hunger: phys.hunger,
+                    health: phys.health,
                     female_adult: demo.sex == Sex::Female && demo.is_adult(tick),
                     infant: demo.is_infant(tick),
                     mother: kin.mother.map(|m| m.0),
@@ -400,7 +409,7 @@ pub(crate) fn adopt_orphans(sim: &mut Sim) {
             .filter_map(|w| views.get(w).map(|v| (*w, v)))
             .filter(|(_, v)| {
                 v.female_adult
-                    && v.hunger < STARVING_MOTHER_HUNGER
+                    && v.health >= MILK_TO_SPARE_HEALTH
                     && (v.pos.0 - c.pos.0).hypot(v.pos.1 - c.pos.1) <= crate::social::RESIDENCE_RADIUS_TILES
             })
             .map(|(w, v)| {

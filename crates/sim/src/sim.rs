@@ -2891,6 +2891,55 @@ mod tests {
         );
     }
 
+    /// Défaut G (run longue tempéré 7 : 1 118 nourrissons morts de soif en
+    /// 82 ans, 80 % des naissances à la fin) : le lait était une porte tout
+    /// ou rien — faim de la mère ≥ 0,95, plus une goutte. Une faim qui frôle
+    /// le maximum quelques heures par jour coupait le lait chaque jour. La
+    /// lactation résiste pourtant à une sous-alimentation modérée : elle ne
+    /// tarit que dans une famine qui dure, quand les réserves (la santé)
+    /// s'usent. Les deux bouts : quelques heures de faim ne coupent rien ;
+    /// une famine longue tarit le lait.
+    #[test]
+    fn le_lait_ne_tarit_que_dans_une_famine_qui_dure() {
+        let infant_thirst_after = |mother_health: f32| -> f32 {
+            let (mut sim, home) = scenario_setup(42, 0, 0);
+            let mother = sim.spawn_agent(home.0 as f64 + 0.5, home.1 as f64 + 0.5);
+            let infant = sim.spawn_child(
+                home.0 as f64 + 0.5,
+                home.1 as f64 + 0.5,
+                Sex::Male,
+                Traits::default(),
+                Kinship { mother: Some(mother), father: None },
+            );
+            for _ in 0..48 {
+                // La mère a très faim (au-dessus de l'ancien seuil), mais sa
+                // santé dit si ses réserves tiennent.
+                for (_, (id, phys)) in sim.agents.query_mut::<(&AgentId, &mut Physiology)>() {
+                    if *id == mother {
+                        phys.hunger = 0.97;
+                        phys.health = mother_health;
+                    }
+                }
+                demography::nurse_infants(&mut sim);
+                for (_, (id, phys)) in sim.agents.query_mut::<(&AgentId, &mut Physiology)>() {
+                    if *id == infant {
+                        phys.thirst = (phys.thirst + crate::agent::THIRST_PER_TICK).min(1.0);
+                    }
+                }
+            }
+            sim.agents
+                .query::<(&AgentId, &Physiology)>()
+                .iter()
+                .find(|(_, (id, _))| **id == infant)
+                .map(|(_, (_, p))| p.thirst)
+                .unwrap()
+        };
+        let reserves = infant_thirst_after(1.0);
+        assert!(reserves < 0.3, "une mère affamée mais pas épuisée allaite encore ({reserves:.2})");
+        let epuisee = infant_thirst_after(0.1);
+        assert!(epuisee > reserves + 0.3, "une mère épuisée par la famine n'a presque plus de lait ({epuisee:.2})");
+    }
+
     /// La proximité de parenté : sœur 0,5, grand-mère et tante 0,25, cousine
     /// 0,125, étrangère 0 — calculée depuis les naissances, qui survivent aux
     /// morts.
