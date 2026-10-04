@@ -96,6 +96,9 @@ fn main() {
     // pour décrire ceux qui en meurent (l'agent mort n'est plus interrogeable).
     let mut parched: BTreeMap<u64, (String, Option<f64>, f64, (f64, f64), f32)> = BTreeMap::new();
     let mut thirst_deaths: Vec<(String, Option<f64>, f64, (f64, f64), f32)> = Vec::new();
+    // Les assoiffés étaient-ils d'un clan à l'heure d'avant leur mort ?
+    let mut parched_clan: BTreeMap<u64, bool> = BTreeMap::new();
+    let (mut thirst_in_clan, mut thirst_alone) = (0u32, 0u32);
     let mut seen_deaths_t = 0usize;
     // Qui meurt, et à quel âge : l'âge de chaque vivant, relevé chaque heure,
     // sert d'âge au décès (l'agent mort n'est plus interrogeable).
@@ -130,12 +133,22 @@ fn main() {
         for _ in 0..TICKS_PER_DAY {
             sim.step();
             let tick_now = sim.time.tick;
+            let in_clan_now: BTreeMap<u64, bool> = sim
+                .agents
+                .query::<(&AgentId, &cairn_sim::ClanMembership)>()
+                .iter()
+                .map(|(_, (id, m))| (id.0, m.0.is_some()))
+                .collect();
+            let mut to_inspect: Vec<AgentId> = Vec::new();
             for (_, (id, pos, phys, behavior, mem, demo)) in sim
                 .agents
                 .query::<(&AgentId, &Position, &Physiology, &Behavior, &Memory, &Demographics)>()
                 .iter()
             {
                 ages.insert(id.0, demo.age_years(tick_now));
+                if phys.thirst >= 0.99 {
+                    to_inspect.push(*id);
+                }
                 if phys.thirst > 0.7 {
                     let tr = traces.entry(id.0).or_default();
                     let (tk, dist) = behavior.task.map_or(("—".to_string(), -1.0), |t| {
@@ -153,11 +166,25 @@ fn main() {
                             sim.world.worldgen().elevation((pos.x + dx * f) as i64, (pos.y + dy * f) as i64) <= 0.0
                         })
                     });
+                    // La grille de navigation de l'A* (cellules de 16 tuiles, jugées
+                    // sur leur centre) : la cellule de l'agent et ses 8 voisines
+                    // sont-elles « terre » à ses yeux ?
+                    let stride = cairn_sim::pathfind::NAV_STRIDE;
+                    let cell = (pos.x.floor() as i64).div_euclid(stride);
+                    let celly = (pos.y.floor() as i64).div_euclid(stride);
+                    let land_cells = (-1..=1)
+                        .flat_map(|dy| (-1..=1).map(move |dx| (dx, dy)))
+                        .filter(|&(dx, dy)| {
+                            let (cx, cy) = ((cell + dx) * stride + stride / 2, (celly + dy) * stride + stride / 2);
+                            sim.world.worldgen().elevation(cx, cy) > 0.0
+                        })
+                        .count();
                     tr.push_back(format!(
-                        "h{} {tk} {:?} cible {dist:.0} m soif {:.2} faim {:.2} santé {:.2} fatigue {:.2} | source connue à {} m, eau entre deux : {water_between}, sources connues {}",
+                        "h{} {tk} {:?} cible {dist:.0} m soif {:.2} faim {:.2} santé {:.2} fatigue {:.2} | source connue à {} m, eau entre deux : {water_between}, sources connues {}, bloquées {}, cellules de nav terre {land_cells}/9",
                         tick_now % 24, behavior.activity, phys.thirst, phys.hunger, phys.health, phys.fatigue,
                         spring.map_or(-1.0, |sp| (sp.0 as f64 - pos.x).hypot(sp.1 as f64 - pos.y) * 2.0) as i64,
-                        mem.springs.len()
+                        mem.springs.len(),
+                        mem.springs.iter().filter(|s| mem.is_blocked(**s, tick_now)).count()
                     ));
                     if tr.len() > 48 {
                         tr.pop_front();
@@ -173,6 +200,40 @@ fn main() {
                         cairn_core::tiles_to_km((s.0 as f64 - pos.x).hypot(s.1 as f64 - pos.y))
                     });
                     parched.insert(id.0, (task, known, demo.age_years(tick_now), (pos.x, pos.y), phys.hunger));
+                    parched_clan.insert(id.0, in_clan_now.get(&id.0).copied().unwrap_or(false));
+                }
+            }
+            // Ce qu'un assoiffé à saturation envisage cette heure (lecture seule) :
+            // les trois meilleurs candidats de sa délibération.
+            for id in to_inspect {
+                if let Some(mut m) = sim.inspect_agent(id) {
+                    m.sort_by(|a, b| b.score.total_cmp(&a.score));
+                    let top: Vec<String> = m
+                        .iter()
+                        .take(3)
+                        .map(|c| format!("{:?} {:.2}", c.kind, c.score).split('(').next().unwrap_or("").to_string() + &format!(" {:.2}", c.score))
+                        .collect();
+                    // L'A* depuis l'agent vers la cible de son meilleur candidat.
+                    let pos = sim
+                        .agents
+                        .query::<(&AgentId, &Position)>()
+                        .iter()
+                        .find(|(_, (a, _))| **a == id)
+                        .map(|(_, (_, p))| (p.x.floor() as i64, p.y.floor() as i64));
+                    let astar = match (pos, m.first()) {
+                        (Some(from), Some(best)) => {
+                            let wg = sim.world.worldgen();
+                            match cairn_sim::pathfind::astar(from, best.target, |x, y| wg.elevation(x, y) > 0.0, cairn_sim::pathfind::NODE_BUDGET) {
+                                None => "A* : aucun".to_string(),
+                                Some(p) if p.last() == Some(&best.target) => format!("A* : complet ({} étapes)", p.len()),
+                                Some(p) => format!("A* : partiel ({} étapes)", p.len()),
+                            }
+                        }
+                        _ => "A* : ?".to_string(),
+                    };
+                    if let Some(line) = traces.get_mut(&id.0).and_then(|t| t.back_mut()) {
+                        line.push_str(&format!(" | candidats : {} | {astar}", top.join(", ")));
+                    }
                 }
             }
             for d in &sim.deaths[seen_deaths_t..] {
@@ -195,6 +256,11 @@ fn main() {
                     }
                 }
                 if d.cause == DeathCause::Dehydration {
+                    match parched_clan.remove(&d.agent.0) {
+                        Some(true) => thirst_in_clan += 1,
+                        Some(false) => thirst_alone += 1,
+                        None => {}
+                    }
                     let snap = parched.remove(&d.agent.0).unwrap_or((
                         "?".to_string(),
                         None,
@@ -604,7 +670,8 @@ fn main() {
                     .sum::<f64>()
                     / thirst_deaths.len() as f64;
                 let starving = thirst_deaths.iter().filter(|t| t.4 >= 0.99).count();
-                println!("      soif : dont {starving} mourants qui avaient aussi faim à 1,0 (affamés comptés « soif »)");
+                println!("      soif : dont {starving} mourants qui avaient aussi faim à 1,0 (affamés comptés « soif ») ; en clan {thirst_in_clan}, hors clan {thirst_alone}");
+                (thirst_in_clan, thirst_alone) = (0, 0);
                 println!(
                     "      soif : {} morts — source connue la plus proche : médiane {}, aucune connue {} ; enfants {} ; humidité moyenne {:.2} ; tâches {:?}",
                     thirst_deaths.len(),
