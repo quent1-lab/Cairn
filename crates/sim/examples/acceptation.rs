@@ -91,6 +91,34 @@ struct Report {
     path_denied: u64,
     // Débit : ticks par seconde murale, année par année (instruments compris).
     tps_years: Vec<f64>,
+    // Mortalité par âge : morts par classe d'âge et par cause, jours-personnes
+    // vécus dans chaque classe (le dénominateur d'un taux).
+    deaths_by_age: [[usize; CAUSES.len()]; AGE_CLASSES.len()],
+    person_days: [u64; AGE_CLASSES.len()],
+}
+
+/// Classes d'âge du tableau de mortalité : bornes inférieures, en années.
+const AGE_CLASSES: [(f64, &str); 6] =
+    [(0.0, "<1"), (1.0, "1-4"), (5.0, "5-14"), (15.0, "15-39"), (40.0, "40-59"), (60.0, "60+")];
+
+fn age_class(age_years: f64) -> usize {
+    AGE_CLASSES.iter().rposition(|(lo, _)| age_years >= *lo).unwrap_or(0)
+}
+
+const CAUSES: [&str; 8] = ["faim", "soif", "froid", "âge", "préd", "mal", "viol", "foud"];
+
+fn cause_index(c: cairn_sim::DeathCause) -> usize {
+    use cairn_sim::DeathCause::*;
+    match c {
+        Starvation => 0,
+        Dehydration => 1,
+        Hypothermia => 2,
+        OldAge => 3,
+        Predation => 4,
+        Disease => 5,
+        Violence => 6,
+        Lightning => 7,
+    }
 }
 
 fn main() {
@@ -181,6 +209,14 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
     // 2 = mère sans lait, 3 = autre).
     let mut parched: BTreeMap<u64, (f32, bool, u8)> = BTreeMap::new();
     let mut seen_deaths = 0usize;
+    // Tick de naissance de chaque humain ayant vécu : l'âge au décès.
+    let mut born: BTreeMap<u64, i64> = sim
+        .agents
+        .query::<(&AgentId, &cairn_sim::Demographics)>()
+        .iter()
+        .map(|(_, (id, d))| (id.0, d.born_tick))
+        .collect();
+    let mut seen_births = 0usize;
     let total_days = years * 360;
     let mut year_started = std::time::Instant::now();
     for day in 1..=total_days {
@@ -235,7 +271,15 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                     }
                 }
             }
+            for b in &sim.births[seen_births..] {
+                born.insert(b.child.0, b.tick as i64);
+            }
+            seen_births = sim.births.len();
             for d in &sim.deaths[seen_deaths..] {
+                if let Some(&b) = born.get(&d.agent.0) {
+                    let age = (d.tick as i64 - b) as f64 / cairn_core::TICKS_PER_YEAR as f64;
+                    r.deaths_by_age[age_class(age)][cause_index(d.cause)] += 1;
+                }
                 if d.cause == cairn_sim::DeathCause::Dehydration {
                     r.thirst_deaths += 1;
                     if let Some(&(hunger, adult, infant)) = parched.get(&d.agent.0) {
@@ -353,6 +397,9 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
             }
             false
         });
+        for (_, demo) in sim.agents.query::<&cairn_sim::Demographics>().iter() {
+            r.person_days[age_class(demo.age_years(sim.time.tick))] += 1;
+        }
         r.clan_sizes.extend(sim.clans.iter().map(|c| c.members.len()));
         // Tensions entre clans, une fois par jour.
         for i in 0..sim.clans.len() {
@@ -420,6 +467,37 @@ fn pct(a: u64, b: u64) -> String {
     if b == 0 { "—".into() } else { format!("{:.0} %", 100.0 * a as f64 / b as f64) }
 }
 
+/// Taux de mortalité en pour mille par an ; « — » sans exposition.
+fn rate(deaths: usize, person_days: u64) -> String {
+    if person_days == 0 { "—".into() } else { format!("{:.0}", 1000.0 * deaths as f64 * 360.0 / person_days as f64) }
+}
+
+/// Table de mortalité de tous les runs réunis : taux par classe d'âge, morts
+/// par cause, et la probabilité de mourir avant 15 ans qu'impliquent les taux.
+/// Les runs se somment : chacun est un tirage, l'agrégat n'efface pas le
+/// détail par run imprimé plus haut.
+fn print_mortality(rs: &[Report]) {
+    println!("\nMortalité, {} runs réunis (régime : scènes du banc, effectifs de quelques centaines)", rs.len());
+    println!("{:<8}{:>10}{:>7}{:>8}  {}", "âge", "années-p", "morts", "‰/an", CAUSES.map(|c| format!("{c:>6}")).join(""));
+    let mut q15_hazard = 0.0;
+    for (k, (_, name)) in AGE_CLASSES.iter().enumerate() {
+        let pd: u64 = rs.iter().map(|r| r.person_days[k]).sum();
+        let by_cause: Vec<usize> = (0..CAUSES.len()).map(|c| rs.iter().map(|r| r.deaths_by_age[k][c]).sum()).collect();
+        let total: usize = by_cause.iter().sum();
+        if k < 3 && pd > 0 {
+            let width = AGE_CLASSES[k + 1].0 - AGE_CLASSES[k].0;
+            q15_hazard += total as f64 * 360.0 / pd as f64 * width;
+        }
+        println!(
+            "{name:<8}{:>10.0}{total:>7}{:>8}  {}",
+            pd as f64 / 360.0,
+            rate(total, pd),
+            by_cause.iter().map(|n| format!("{n:>6}")).collect::<String>()
+        );
+    }
+    println!("mourir avant 15 ans (impliqué par les taux) : {:.0} %", 100.0 * (1.0 - (-q15_hazard).exp()));
+}
+
 fn print_table(rs: &[Report], years: u64) {
     let col = |f: &dyn Fn(&Report) -> String| -> String {
         rs.iter().map(|r| format!("{:>12}", f(r))).collect::<Vec<_>>().join("")
@@ -450,6 +528,12 @@ fn print_table(rs: &[Report], years: u64) {
         format!("{} ; {} ; {}", r.infant_orphan, r.infant_dry_mother, r.infant_other)
     });
     line("trajets refusés faute de budget", &|r| r.path_denied.to_string());
+    line("mortalité ‰/an : <1 ; 1-4 ; 5-14", &|r| {
+        (0..3).map(|k| rate(r.deaths_by_age[k].iter().sum(), r.person_days[k])).collect::<Vec<_>>().join(";")
+    });
+    line("mortalité ‰/an : 15-39 ; 40-59 ; 60+", &|r| {
+        (3..6).map(|k| rate(r.deaths_by_age[k].iter().sum(), r.person_days[k])).collect::<Vec<_>>().join(";")
+    });
     println!("— Phase 3 : le nombre (projection, pas verdict)");
     // Après la cohorte des fondateurs (baby-boom puis allaitement) : de la fin
     // de l'an 2 à la fin du run, si le run dure au moins 5 ans.
@@ -514,6 +598,7 @@ fn print_table(rs: &[Report], years: u64) {
         distinct.len(),
         rs.len()
     );
+    print_mortality(rs);
     // Pic mémoire du processus entier (tous les fils ensemble).
     if let Ok(status) = std::fs::read_to_string("/proc/self/status")
         && let Some(l) = status.lines().find(|l| l.starts_with("VmHWM"))
