@@ -50,6 +50,11 @@ struct Report {
     dark_sleep_h: u64,
     /// Heures-adulte de sommeil, dont dans le noir.
     sleep_h: u64,
+    /// Chasse : têtes prélevées par les humains ; jours-adulte passés au moins
+    /// une heure à chasser (quête, piste, approche) ; jours-adulte vécus.
+    kills: f32,
+    hunter_days: u64,
+    adult_days: u64,
 }
 
 fn main() {
@@ -122,8 +127,27 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
         ..Report::default()
     };
     let first_day_hours = day_hours(&sim);
+    let mut hunted_today: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
     for _ in 0..days * TICKS_PER_DAY {
         sim.step();
+        if sim.time.tick % TICKS_PER_DAY == 0 {
+            r.hunter_days += hunted_today.len() as u64;
+            hunted_today.clear();
+            r.adult_days += sim
+                .agents
+                .query::<&Demographics>()
+                .iter()
+                .filter(|(_, d)| d.is_adult(sim.time.tick))
+                .count() as u64;
+        }
+        for (_, (id, demo, behavior)) in sim.agents.query::<(&cairn_sim::AgentId, &Demographics, &Behavior)>().iter() {
+            let hunting = behavior.task.is_some_and(|t| {
+                matches!(t.kind, cairn_sim::TaskKind::Hunt | cairn_sim::TaskKind::Track | cairn_sim::TaskKind::SeekGame)
+            });
+            if hunting && demo.is_adult(sim.time.tick) {
+                hunted_today.insert(id.0);
+            }
+        }
         let tick = sim.time.tick;
         let hour = (tick % TICKS_PER_DAY) as usize;
         let dark = sim.climate.light(home.1, sim.time) == 0.0;
@@ -145,11 +169,13 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
                     let name = format!("{:?}", t.kind);
                     name.split('(').next().unwrap_or("").to_string()
                 });
-                *r.walk_task[s].entry(task).or_insert(0) += 1;
+                let key = if dark { format!("{task} (noir)") } else { task };
+                *r.walk_task[s].entry(key).or_insert(0) += 1;
             }
         }
     }
     r.day_hours = (first_day_hours, day_hours(&sim));
+    r.kills = sim.hunted_head;
     r
 }
 
@@ -194,6 +220,12 @@ fn print(rs: &[Report]) {
             println!("  {k:<18}{:>6.2}", per_day(*n));
         }
     }
+    let (k, hd, ad): (f32, u64, u64) = rs.iter().fold((0.0, 0, 0), |a, r| (a.0 + r.kills, a.1 + r.hunter_days, a.2 + r.adult_days));
+    println!(
+        "\n## chasse (tous runs) : {k:.0} têtes ; {hd} jours-chasseur sur {ad} jours-adulte ({:.0} %) ; {:.2} % de prise par jour-chasseur (Hadza : 1 à 3 %)",
+        100.0 * hd as f64 / ad.max(1) as f64,
+        100.0 * f64::from(k) / hd.max(1) as f64
+    );
     println!("\n## par run : régime (latitude, heures de jour départ → fin) ; marche km/j femmes ; hommes ; sommeil dans le noir ; noir passé à dormir");
     for r in rs {
         let km = |s: usize| {

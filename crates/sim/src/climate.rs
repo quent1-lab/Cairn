@@ -86,6 +86,15 @@ impl Climate {
         daylight(self.sun_elevation_deg(y, time))
     }
 
+    /// Heures de jour qui restent à `y` depuis l'heure en cours : tant que la
+    /// lumière suffit à voir à moitié (MAR-4 : une sortie rentre avant la nuit).
+    /// 24 si le soleil ne se couche pas.
+    pub fn daylight_left_hours(&self, y: i64, time: SimTime) -> f32 {
+        (0..24u64)
+            .position(|h| self.light(y, SimTime { tick: time.tick + h }) < 0.5)
+            .map_or(24.0, |h| h as f32)
+    }
+
     /// La végétation pousse-t-elle ce jour-là sur cette tuile ?
     pub fn grows(&self, tile: &Tile, y: i64, time: SimTime) -> bool {
         self.daily_mean(tile, y, time) > GROWTH_THRESHOLD_C
@@ -146,6 +155,19 @@ pub fn sun_elevation_deg(lat_deg: f64, time: SimTime) -> f64 {
 /// faut pour voir) ; linéaire entre les deux. Choix de forme.
 pub fn daylight(elevation_deg: f64) -> f32 {
     ((elevation_deg - CIVIL_TWILIGHT_DEG) / (2.0 * -CIVIL_TWILIGHT_DEG)).clamp(0.0, 1.0) as f32
+}
+
+/// Vue de nuit sans lune, en part de la vue de jour : l'œil adapté à
+/// l'obscurité ne reconnaît un objet qu'à partir de ~0,007 lux, quand une nuit
+/// étoilée en donne ~0,001 (une nuit de lune 0,1-0,3) — de l'ordre de quelques
+/// dizaines de mètres pour un gros animal. Ordre de grandeur, choix.
+pub const NIGHT_SIGHT: f32 = 0.02;
+
+/// Ce que l'on voit, en part de la vue de jour, selon la lumière : la portée à
+/// laquelle on aperçoit du gibier, et le rendement de ce qui se fait à vue
+/// (cueillir, approcher une bête, explorer).
+pub fn sight(light: f32) -> f32 {
+    NIGHT_SIGHT + (1.0 - NIGHT_SIGHT) * light.clamp(0.0, 1.0)
 }
 
 /// Latitude signée en deçà de laquelle on ne nomme pas de saison : l'amplitude

@@ -65,6 +65,9 @@ pub struct Memory {
     /// sans contournement trouvé). Sans ce souvenir, un assoiffé revisait la
     /// même source inaccessible jusqu'à en mourir à 300 m (D11).
     pub blocked: Vec<((i64, i64), u64)>,
+    /// Où l'on a dormi en dernier : le gîte d'où part et où revient une sortie
+    /// de chasse quand on n'a pas de clan (MAR-4).
+    pub lodge: Option<(i64, i64)>,
     /// Dernière cellule notée — évite une insertion par tick quand on
     /// piétine dans la même cellule (le cas de très loin le plus fréquent).
     last_cell: Option<(i64, i64)>,

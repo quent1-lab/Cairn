@@ -148,6 +148,8 @@ pub struct AgentCtx<'a> {
     pub wound: f32,
     /// La lumière du jour là où il se tient (`Climate::light`), 0 à 1.
     pub light: f32,
+    /// Heures de jour qui restent (`Climate::daylight_left_hours`).
+    pub daylight_left_h: f32,
 }
 
 /// Choisit la prochaine tâche de l'agent. Déterministe : le tirage dérive de
@@ -180,7 +182,7 @@ pub fn decide(
     }
     // Le gibier aussi s'apprend en le voyant : on retient le dernier troupeau
     // aperçu. Arrivé sur une piste sans rien y voir, on l'oublie.
-    match nearest_herd(agent.pos, herds) {
+    match nearest_herd(agent.pos, herds, crate::climate::sight(agent.light)) {
         Some(herd) => {
             mem.game = Some(((herd.pos.0.floor() as i64, herd.pos.1.floor() as i64), time.tick));
         }
@@ -231,6 +233,10 @@ fn build_candidates(
         agent.carrying, agent.knows_agriculture,
     );
     let adult = demo.is_adult(time.tick);
+    // Ce qu'on voit (MAR-2) : de nuit, ce qui se fait à vue — cueillir,
+    // repérer et approcher le gibier, explorer, errer — ne rapporte presque
+    // plus rien, et on le sait.
+    let sight = crate::climate::sight(agent.light);
     let here = pos.tile();
     let mut candidates: Vec<(TaskKind, (i64, i64), f32)> = Vec::new();
 
@@ -258,7 +264,7 @@ fn build_candidates(
     if forage_biomass >= FORAGE_MIN_BIOMASS {
         let abundance = (f32::from(forage_biomass) / 255.0).sqrt() * share_here;
         let score =
-            urgency * abundance * travel_discount(pos.distance_tiles(forage_target));
+            urgency * abundance * sight * travel_discount(pos.distance_tiles(forage_target));
         candidates.push((TaskKind::Forage, forage_target, score));
     }
     // — Changer de pays quand le sien s'épuise : un cueilleur connaît les
@@ -310,13 +316,13 @@ fn build_candidates(
         own.max(clan_gap)
     };
     let hunt_urgency = Curve::Logistic { steepness: 6.0, midpoint: 0.4 }.eval(meat_need);
-    let nearest_herd = if adult { nearest_herd(pos, herds) } else { None };
+    let nearest_herd = if adult { nearest_herd(pos, herds, sight) } else { None };
     if let Some(herd) = nearest_herd {
         let target = (herd.pos.0.floor() as i64, herd.pos.1.floor() as i64);
         let urgency = hunt_urgency;
         // Un gros troupeau est une proie plus sûre (plus de bêtes à approcher).
         let size = Curve::Power { k: 0.5 }.eval(herd.population / 60.0);
-        let score = urgency * (0.55 + 0.45 * size) * travel_discount(pos.distance_tiles(target));
+        let score = urgency * (0.55 + 0.45 * size) * sight * travel_discount(pos.distance_tiles(target));
         candidates.push((TaskKind::Hunt, target, score));
     }
 
@@ -333,25 +339,30 @@ fn build_candidates(
         let freshness = (-age_days / GAME_MEMORY_DAYS).exp() as f32;
         let urgency = hunt_urgency;
         let day = 1.0 / (1.0 + pos.distance_tiles(spot) / (WALK_TILES_PER_TICK * 24.0));
-        candidates.push((TaskKind::Track, spot, urgency * 0.55 * freshness * day as f32));
+        candidates.push((TaskKind::Track, spot, urgency * 0.55 * freshness * day as f32 * sight));
     }
 
-    // — Partir en quête (adultes d'un clan, D10) : ni troupeau en vue, ni piste
-    //   fraîche, et besoin de viande. On part du foyer et on balaie le
-    //   territoire du clan (jusqu'au rayon de résidence), du regard sur 2 km de
-    //   part et d'autre : le fourrage « à place centrale » des chasseurs, qui
-    //   partent du campement et y reviennent (le rappel au clan les ramène).
-    //   Sans clan, pas de foyer d'où partir ni où revenir : on erre près des
-    //   autres, ce qui laisse aux liens le temps de se nouer — une quête
-    //   solitaire et sans retour dispersait les fondateurs avant qu'aucun clan
-    //   ne naisse (mesuré : trois tests de formation de clan cassés).
+    // — Partir à la rencontre du gibier (D10, refait en MAR-4 sur les sorties
+    //   hadza : O'Connell, Hawkes et Blurton Jones, 1985-86). Ni troupeau en
+    //   vue, ni piste fraîche, et besoin de viande : on part de son camp — le
+    //   foyer du clan, ou le gîte où l'on a dormi —, on balaie le pays du
+    //   regard (2 km de part et d'autre), et on **rentre avant la nuit** : la
+    //   cible n'est offerte que si l'aller et le retour tiennent dans le jour
+    //   qui reste. Personne n'écrit d'horaire : c'est la lumière qui borne la
+    //   sortie. Ouverte à tout adulte, clan ou pas (les femmes chassent dans la
+    //   plupart des sociétés de fourrageurs, et un nourrisson porté ne gêne ni
+    //   leur mobilité ni leur rendement — BaYaka, Agta).
     let fresh_track = mem.game.is_some_and(|(_, seen)| {
         time.tick.saturating_sub(seen) < cairn_core::TICKS_PER_DAY * GAME_MEMORY_DAYS as u64
     });
+    let base: Option<(f64, f64)> = clan
+        .and_then(|c| clan_views.get(&c))
+        .map(|v| v.home)
+        .or_else(|| mem.lodge.map(|(x, y)| (x as f64 + 0.5, y as f64 + 0.5)));
     if adult
         && nearest_herd.is_none()
         && !fresh_track
-        && let Some(view) = clan.and_then(|c| clan_views.get(&c))
+        && let Some(home) = base
     {
         let mut rng = Pcg32::new(world.seed().derive(salt::WANDER) ^ splitmix64(time.tick ^ 0x5eed), id.0);
         let angle = rng.next_f64() * std::f64::consts::TAU;
@@ -369,18 +380,26 @@ fn build_candidates(
         let reach_beyond = Curve::Logistic { steepness: 10.0, midpoint: 0.6 }.eval(own_hunger) as f64;
         let max_d = 0.9 * RESIDENCE_RADIUS_TILES
             + reach_beyond * (FORAY_RADIUS_TILES - 0.9 * RESIDENCE_RADIUS_TILES).max(0.0);
+        // Le chemin qu'on peut faire avant la nuit : aller jusqu'au point, puis
+        // revenir au camp.
+        let walkable = f64::from(agent.daylight_left_h) * WALK_TILES_PER_TICK;
+        let dist = |a: (f64, f64), b: (f64, f64)| ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt();
         let mut target = None;
         let mut d = 80.0;
         while d <= max_d {
-            let p = ((view.home.0 + dx * d).floor() as i64, (view.home.1 + dy * d).floor() as i64);
+            let pf = (home.0 + dx * d, home.1 + dy * d);
+            let p = (pf.0.floor() as i64, pf.1.floor() as i64);
             if world.worldgen().elevation(p.0, p.1) <= 0.0 {
                 break; // eau : on s'arrête à la dernière terre
+            }
+            if dist((pos.x, pos.y), pf) + dist(pf, home) > walkable {
+                break; // la nuit tomberait avant le retour
             }
             target = Some(p);
             d += 80.0;
         }
         if let Some(target) = target {
-            candidates.push((TaskKind::SeekGame, target, hunt_urgency * 0.55));
+            candidates.push((TaskKind::SeekGame, target, hunt_urgency * 0.55 * sight));
         }
     }
 
@@ -411,7 +430,8 @@ fn build_candidates(
             let score = PREDATOR_DEFENSE_DRIVE
                 * traits.aggression
                 * (0.4 + 0.6 * traits.strength)
-                * urgency;
+                * urgency
+                * sight;
             let target = (ppos.0.floor() as i64, ppos.1.floor() as i64);
             candidates.push((TaskKind::HuntPredator, target, score));
         }
@@ -502,8 +522,9 @@ fn build_candidates(
     //   sociabilité qui y pousse, et la longueur du chemin qui en détourne
     //   (jugée sur quelques heures de marche). C'est le soir, autour du foyer,
     //   que les liens se nouent : les rencontres se font à moins de 120 m.
-    if let Some(view) = clan.and_then(|c| clan_views.get(&c)) {
-        let camp = (view.home.0.floor() as i64, view.home.1.floor() as i64);
+    // Le camp : celui du clan, ou, sans clan, le gîte de la nuit d'avant (MAR-4).
+    if let Some(home) = base {
+        let camp = (home.0.floor() as i64, home.1.floor() as i64);
         let d = pos.distance_tiles(camp);
         if d > CAMP_RADIUS_TILES {
             let walk = 1.0 / (1.0 + d / (WALK_TILES_PER_TICK * 6.0));
@@ -730,7 +751,7 @@ fn build_candidates(
             let mut rng =
                 Pcg32::new(world.seed().derive(salt::EXPLORE) ^ splitmix64(time.tick), id.0);
             let target = unknown[(rng.next_u32() as usize) % unknown.len()];
-            let score = 0.15 * traits.curiosity * comfort;
+            let score = 0.15 * traits.curiosity * comfort * sight;
             candidates.push((TaskKind::Explore, target, score));
         }
     }
@@ -749,7 +770,7 @@ fn build_candidates(
     if (forage_biomass < 30 || share_here < LEAN_SHARE) && nearest_herd.is_none() {
         desperation += 0.5 * phys.hunger;
     }
-    let wander_score = (0.06 + desperation).min(1.0);
+    let wander_score = (0.06 + desperation).min(1.0) * sight;
     let mut wander_rng =
         Pcg32::new(world.seed().derive(salt::WANDER) ^ splitmix64(time.tick), id.0);
     let angle = wander_rng.next_f64() * std::f64::consts::TAU;
@@ -876,13 +897,15 @@ fn travel_discount(dist_tiles: f64) -> f32 {
     (1.0 / (1.0 + dist_tiles / WALK_TILES_PER_TICK)) as f32
 }
 
-/// Le troupeau visible le plus proche. Départage déterministe : distance,
-/// puis ordre de l'instantané.
-fn nearest_herd(pos: &Position, herds: &[HerdView]) -> Option<HerdView> {
+/// Le troupeau visible le plus proche, à 2 km de jour et quelques dizaines de
+/// mètres de nuit (`sight`, MAR-2). Départage déterministe : distance, puis
+/// ordre de l'instantané.
+fn nearest_herd(pos: &Position, herds: &[HerdView], sight: f32) -> Option<HerdView> {
     let mut best: Option<(f64, HerdView)> = None;
+    let range = HERD_SIGHT_TILES * f64::from(sight);
     for h in herds {
         let d2 = (pos.x - h.pos.0).powi(2) + (pos.y - h.pos.1).powi(2);
-        if d2 <= HERD_SIGHT_TILES * HERD_SIGHT_TILES && best.is_none_or(|(bd, _)| d2 < bd) {
+        if d2 <= range * range && best.is_none_or(|(bd, _)| d2 < bd) {
             best = Some((d2, *h));
         }
     }

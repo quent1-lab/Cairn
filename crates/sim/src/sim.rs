@@ -156,9 +156,10 @@ const HUNT_SUCCESS_PER_HOUR: f32 = 0.02;
 /// L'approche de `hunter`, à portée au tick `tick`, tue-t-elle ? Tirage
 /// déterministe (seed, tick, chasseur), chance `HUNT_SUCCESS_PER_HOUR` que la
 /// compétence double au mieux.
-fn hunt_succeeds(seed: WorldSeed, tick: u64, hunter: AgentId, skill: f32) -> bool {
+/// De nuit, l'approche se fait à l'aveugle : la chance suit la vue (MAR-2).
+fn hunt_succeeds(seed: WorldSeed, tick: u64, hunter: AgentId, skill: f32, sight: f32) -> bool {
     let mut rng = Pcg32::new(seed.derive(crate::salt::HUNT) ^ cairn_core::splitmix64(tick), hunter.0);
-    rng.next_f32() < HUNT_SUCCESS_PER_HOUR * (0.5 + skill)
+    rng.next_f32() < HUNT_SUCCESS_PER_HOUR * (0.5 + skill) * sight
 }
 
 /// Portée d'une mise à mort : le chasseur doit être à ~200 m du troupeau.
@@ -893,6 +894,7 @@ impl Sim {
             fervor,
             wound,
             light: self.climate.light(pos.tile().1, time),
+            daylight_left_h: self.climate.daylight_left_hours(pos.tile().1, time),
         };
         Some(brain::inspect(
             &mut self.world, time, &ctx, &mem, current, &herds, &packs, &humans, &clan_views,
@@ -1010,6 +1012,7 @@ impl Sim {
                         fervor: faith.fervor,
                         wound: wound.0,
                         light: self.climate.light(pos.tile().1, time),
+                        daylight_left_h: self.climate.daylight_left_hours(pos.tile().1, time),
                     };
                     behavior.task = brain::decide(
                         &mut self.world,
@@ -1095,6 +1098,7 @@ impl Sim {
                 &mut clashes,
                 &mut shares,
                 time.tick,
+                crate::climate::sight(self.climate.light(pos.tile().1, time)),
             );
             // La viande portée se gâte comme une réserve sans technique.
             if carrying.0 > 0.0 {
@@ -1102,6 +1106,9 @@ impl Sim {
             }
             // Où que la tâche l'ait mené, l'agent note où il a mis les pieds.
             mem.note_visit(pos.tile());
+            if behavior.activity == Activity::Sleeping {
+                mem.lodge = Some(pos.tile()); // le gîte d'où partira la sortie de demain
+            }
             if let Some(kill) = outcome {
                 kills.push(kill);
             }
@@ -1621,6 +1628,7 @@ fn execute(
     clashes: &mut Vec<Clash>,
     shares: &mut Vec<Share>,
     tick: u64,
+    sight: f32,
 ) -> Option<Kill> {
     // Manger ce qu'on porte quand la faim revient : la viande d'une prise est
     // sur le dos, pas au foyer — ni trajet ni tâche pour y mordre.
@@ -1662,7 +1670,7 @@ fn execute(
         // double ou divise (`HUNT_SUCCESS_PER_HOUR`). Manquée, la chasse
         // continue : la tâche reste, on suit toujours le troupeau.
         crate::food_stats::event(crate::food_stats::Event::HuntReachHours, 1);
-        if !hunt_succeeds(world.seed(), tick, id, agent_skills.hunting) {
+        if !hunt_succeeds(world.seed(), tick, id, agent_skills.hunting, sight) {
             return None;
         }
         // Un bon chasseur tire tout de sa bête (dépeçage, rien de perdu), un
@@ -1830,7 +1838,8 @@ fn execute(
             behavior.activity = Activity::Eating;
             // Le rendement d'une heure de cueillette : l'âge (capacité) et
             // le savoir-faire, qui se forge à chaque heure pratiquée.
-            let bite = EAT_HUNGER_PER_TICK * work * (0.6 + 0.8 * agent_skills.foraging);
+            // De nuit, on ne trouve presque rien à tâtons (MAR-2).
+            let bite = EAT_HUNGER_PER_TICK * work * (0.6 + 0.8 * agent_skills.foraging) * sight;
             skills::practice(&mut agent_skills.foraging, skills::forage_cap(traits), 1.0);
             // D10 : on ne mange que ce que la maille offre de comestible. La
             // tuile, elle, est toujours foulée et entamée comme avant — c'est
@@ -2352,7 +2361,7 @@ mod tests {
     /// ce qu'une prise **rapporte** (et non combien on en fait) chassent à
     /// ce tick-là.
     fn tick_de_prise(sim: &Sim, hunter: AgentId, skill: f32) -> u64 {
-        (0..).find(|&t| hunt_succeeds(sim.world.seed(), t, hunter, skill)).unwrap()
+        (0..).find(|&t| hunt_succeeds(sim.world.seed(), t, hunter, skill, 1.0)).unwrap()
     }
 
     /// Une tuile de terre ferme proche de `home + (dx, 0)`, pour poser un
@@ -2384,6 +2393,9 @@ mod tests {
     #[test]
     fn le_bord_de_la_faune_renvoie_le_fuyard() {
         let (mut sim, home) = scenario_setup(5, 1, 0);
+        // Midi (MAR-2) : le test porte sur le bord de la faune, pas sur la nuit — au tick 0
+        // il fait nuit noire, et l'on ne voit plus le gibier à 2 km.
+        sim.time.tick = 12;
         sim.allow_fauna_immigration = true; // le monde ouvert
         let (x, y) = land_near(&mut sim, home, cairn_core::km_to_tiles(9.0));
         let id = sim.spawn_herd(x, y, 40.0);
@@ -2761,14 +2773,13 @@ mod tests {
         let cheptel = |agents: u32| {
             let (mut sim, home) = scenario_au_foyer(42, agents, 4);
             let depart = local_herbivores(&sim, home, 3.0);
+            // La pression de chasse vient de la vie même : la faim qui revient,
+            // la réserve du clan qui manque. On ne force plus la faim à 0,9
+            // (D10) : depuis la nuit et la sortie de chasse (MAR-2, MAR-4), un
+            // affamé forcé en permanence cueille ce qui est à portée plutôt que
+            // de chercher un gibier hors de vue — mesuré : 3 têtes en 30 j
+            // forcés, 53 sans forçage.
             for _ in 0..jours {
-                // La surchasse suppose une pression de chasse : des chasseurs
-                // qui ont faim et ne portent rien (D10 : repus ou pourvus, on ne
-                // chasse plus).
-                for (_, (phys, carrying)) in sim.agents.query_mut::<(&mut Physiology, &mut Carrying)>() {
-                    phys.hunger = phys.hunger.max(0.9);
-                    carrying.0 = 0.0;
-                }
                 sim.step();
             }
             (depart, local_herbivores(&sim, home, 3.0), sim.hunted_head)
@@ -3156,20 +3167,30 @@ mod tests {
             }
         }
 
-        for _ in 0..24 * 3 {
+        // La distance mère-enfant, relevée toutes les trois heures après le
+        // premier jour (le temps de la rejoindre). On juge la **médiane**, pas
+        // un instantané : depuis MAR-4, la mère part en sortie de jour et
+        // l'enfant de 8 ans reste au camp — chez les Hadza aussi, les enfants
+        // ne suivent pas les sorties de chasse. Un instantané pris pendant une
+        // sortie mesurerait la sortie, pas l'attachement.
+        let mut distances = Vec::new();
+        for h in 0..24 * 3 {
             sim.step();
+            if h >= 24 && h % 3 == 0 {
+                let mut positions = BTreeMap::new();
+                for (_, (id, pos)) in sim.agents.query::<(&AgentId, &Position)>().iter() {
+                    positions.insert(id.0, (pos.x, pos.y));
+                }
+                let m = positions.get(&mother.0).expect("mère morte : scénario invalide");
+                let c = positions.get(&child.0).expect("enfant mort : scénario invalide");
+                distances.push((c.0 - m.0).hypot(c.1 - m.1));
+            }
         }
-
-        let mut positions = BTreeMap::new();
-        for (_, (id, pos)) in sim.agents.query::<(&AgentId, &Position)>().iter() {
-            positions.insert(id.0, (pos.x, pos.y));
-        }
-        let m = positions.get(&mother.0).expect("mère morte : scénario invalide");
-        let c = positions.get(&child.0).expect("enfant mort : scénario invalide");
-        let d = (c.0 - m.0).hypot(c.1 - m.1);
+        distances.sort_by(f64::total_cmp);
+        let d = distances[distances.len() / 2];
         assert!(
             d < 200.0,
-            "l'enfant devrait graviter autour de sa mère (à {d:.0} tuiles après 3 jours, départ 300)"
+            "l'enfant devrait graviter autour de sa mère (médiane {d:.0} tuiles sur les jours 2-3, départ 300)"
         );
     }
 
@@ -3515,7 +3536,7 @@ mod tests {
             &mut Vec::new(),
             &mut Vec::new(),
             &mut shares,
-            tick,
+            tick, 1.0,
         );
 
         assert!(kill.is_some(), "le troupeau est à portée : la chasse doit réussir");
@@ -3576,7 +3597,7 @@ mod tests {
                 AgentId(9_999), &mut pos, &mut phys, &mut behavior, &[herd], &[], &[], 1.0,
                 &traits, &mut Skills::default(), None, &mut BTreeMap::new(),
                 &mut Carrying::default(), &mut Prestige::default(), &mut Vec::new(),
-                &mut Vec::new(), &mut Vec::new(), &mut shares, tick,
+                &mut Vec::new(), &mut Vec::new(), &mut shares, tick, 1.0,
             );
             resolve_shares(&mut sim, &shares);
             sim.agents
@@ -3693,6 +3714,9 @@ mod tests {
     #[test]
     fn perdre_un_troupeau_de_vue_n_efface_pas_son_souvenir() {
         let (mut sim, home) = scenario_setup(5, 1, 0);
+        // Midi (MAR-2) : le test porte sur la mémoire du gibier, pas sur la nuit — au tick 0
+        // il fait nuit noire, et l'on ne voit plus le gibier à 2 km.
+        sim.time.tick = 12;
         let herd = sim.spawn_herd(home.0 as f64 + 750.0, home.1 as f64, 30.0);
         for (_, phys) in sim.agents.query_mut::<&mut Physiology>() {
             phys.hunger = 0.8;
@@ -3739,7 +3763,7 @@ mod tests {
                 AgentId(0), pos, phys, &mut behavior, &[herd], &[], &[], 1.0, &traits,
                 &mut Skills::default(), None, &mut BTreeMap::new(), carrying,
                 &mut Prestige::default(), &mut Vec::new(), &mut Vec::new(), &mut Vec::new(),
-                &mut Vec::new(), tick,
+                &mut Vec::new(), tick, 1.0,
             );
         };
         run(Some(Task { kind: TaskKind::Hunt, target: home }), &mut phys, &mut carrying, &mut pos);
@@ -3758,6 +3782,7 @@ mod tests {
     fn qui_porte_deja_de_la_viande_ne_chasse_guere() {
         let score = |porte: f32| -> f32 {
             let (mut sim, home) = scenario_setup(5, 1, 0);
+            sim.time.tick = 12; // midi (MAR-2) : de nuit, le troupeau n'est pas à vue
             sim.spawn_herd(home.0 as f64 + 300.0, home.1 as f64, 30.0);
             let id = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).next().unwrap();
             for (_, (phys, carrying)) in sim.agents.query_mut::<(&mut Physiology, &mut Carrying)>() {
@@ -3780,8 +3805,9 @@ mod tests {
 
     /// D10, partir en quête : un membre de clan affamé, sans troupeau en vue
     /// ni piste, envisage de balayer le territoire du clan loin du foyer ; un
-    /// repu, guère ; un humain sans clan, jamais (il n'a pas de foyer où
-    /// revenir). Lu via `inspect_agent`.
+    /// repu, guère ; un humain sans clan **qui n'a encore dormi nulle part**,
+    /// jamais (depuis MAR-4, le gîte de la dernière nuit sert de camp aux
+    /// sans-clan). Lu via `inspect_agent`.
     #[test]
     fn un_affame_d_un_clan_part_en_quete_sur_le_territoire() {
         let quete = |faim: f32, avec_clan: bool, reserve: f32| -> Option<(f32, f64)> {
@@ -4184,7 +4210,7 @@ mod tests {
             &mut Vec::new(),
             &mut Vec::new(),
             &mut Vec::new(),
-            0,
+            0, 1.0,
         );
 
         assert_eq!(carrying.0, 0.0, "le surplus rapporté doit être entièrement déposé, plus rien porté");
@@ -4243,7 +4269,7 @@ mod tests {
             &mut Vec::new(),
             &mut Vec::new(),
             &mut Vec::new(),
-            0,
+            0, 1.0,
         );
 
         let stock_apres = clan_stock[&clan_id];
@@ -4306,7 +4332,7 @@ mod tests {
             &mut Vec::new(),
             &mut Vec::new(),
             &mut Vec::new(),
-            0,
+            0, 1.0,
         );
 
         assert_eq!(structures.len(), 1, "une structure doit avoir été bâtie");
@@ -4346,7 +4372,7 @@ mod tests {
             &mut Vec::new(),
             &mut Vec::new(),
             &mut Vec::new(),
-            0,
+            0, 1.0,
         );
         assert_eq!(structures.len(), 1, "une hutte existe déjà : pas de doublon");
         assert_eq!(clan_stock[&clan_id], stock_intermediaire, "no-op : le stock ne bouge pas");
@@ -4385,7 +4411,7 @@ mod tests {
             &mut sim.world, &mut routes, &mut budget, AgentId(0), &mut pos, &mut phys,
             &mut behavior, &[], &[], &[], 1.0, &traits, &mut skills, None, &mut clan_stock,
             &mut carrying, &mut prestige, &mut structures, &mut Vec::new(), &mut Vec::new(),
-            &mut Vec::new(), 0,
+            &mut Vec::new(), 0, 1.0,
         );
 
         let tile = sim.world.tile(field.0, field.1);
@@ -4530,7 +4556,7 @@ mod tests {
             &mut sim.world, &mut routes, &mut budget, AgentId(0), &mut pos, &mut phys,
             &mut behavior, &[cheptel], &[], &[], 1.0, &traits, &mut skills, Some(clan_id),
             &mut clan_stock, &mut carrying, &mut prestige, &mut structures, &mut Vec::new(),
-            &mut Vec::new(), &mut Vec::new(), 0,
+            &mut Vec::new(), &mut Vec::new(), 0, 1.0,
         );
 
         assert!(
