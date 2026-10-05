@@ -30,7 +30,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use cairn_core::{Pcg32, SimTime, TICKS_PER_DAY, WorldSeed};
+use cairn_core::{Pcg32, SimTime, TICKS_PER_DAY, WorldSeed, splitmix64};
 use cairn_worldgen::WorldGenConfig;
 
 use crate::agent::{
@@ -43,6 +43,7 @@ use crate::climate::Climate;
 use crate::combat::{self, Clash, Engagement};
 use crate::commerce::{self, Expedition};
 use crate::demography::{self, Demographics, HumanView, Kinship, Sex, Traits};
+use crate::disease::{self, Illness};
 use crate::ecology;
 use crate::exposure::Exposures;
 use crate::fire::{self, Fire};
@@ -583,6 +584,8 @@ impl Sim {
         // Ajouté après coup, `hecs` plafonnant un bundle à 15 composants — un
         // agent en porte désormais seize.
         let _ = self.agents.insert_one(entity, crate::faith::Faith::default());
+        // Un adulte a un passé infectieux : son immunité acquise.
+        let _ = self.agents.insert_one(entity, crate::disease::Illness::founder());
         id
     }
 
@@ -633,6 +636,8 @@ impl Sim {
         ));
         // Un nouveau-né naît incroyant : le monde ne se souvient pas pour lui.
         let _ = self.agents.insert_one(entity, crate::faith::Faith::default());
+        // Un système immunitaire vierge : tout reste à rencontrer.
+        let _ = self.agents.insert_one(entity, crate::disease::Illness::default());
         id
     }
 
@@ -1168,9 +1173,14 @@ impl Sim {
             .filter(|s| s.kind == StructureKind::Hut)
             .map(|s| (s.pos.0, s.pos.1, s.clan))
             .collect();
+        // Instantané des positions humaines : la souillure d'une eau se lit
+        // aux humains présents autour (voir `disease`).
+        let humans_at: Vec<(f64, f64)> =
+            self.agents.query::<(&Position, &AgentId)>().iter().map(|(_, (p, _))| (p.x, p.y)).collect();
+        let disease_seed = self.world.seed().derive(crate::salt::DISEASE) ^ splitmix64(time.tick);
         let mut dead = Vec::new();
         let mut sheltered = 0u64;
-        for (entity, (id, pos, phys, traits, demo, behavior, membership, exposures, wound)) in
+        for (entity, (id, pos, phys, traits, demo, behavior, membership, exposures, wound, illness)) in
             self.agents.query_mut::<(
                 &AgentId,
                 &Position,
@@ -1181,6 +1191,7 @@ impl Sim {
                 &ClanMembership,
                 &mut Exposures,
                 &mut Wound,
+                &mut Illness,
             )>()
         {
             let (x, y) = pos.tile();
@@ -1207,6 +1218,29 @@ impl Sim {
             // La plaie se referme lentement, quoi qu'il arrive (§3.1) — elle
             // handicape le temps de guérir, mais ne s'infecte pas ici.
             wound.0 = (wound.0 - WOUND_HEAL_PER_TICK).max(0.0);
+            // La maladie : boire à une eau souillée peut infecter ; toute
+            // infection en cours ronge la santé selon la lutte de l'heure.
+            if behavior.activity == Activity::Drinking {
+                let r2 = disease::SOIL_RADIUS_TILES * disease::SOIL_RADIUS_TILES;
+                let near = humans_at
+                    .iter()
+                    .filter(|(hx, hy)| (pos.x - hx).powi(2) + (pos.y - hy).powi(2) <= r2)
+                    .count();
+                let mut rng = Pcg32::new(disease_seed, id.0);
+                if rng.next_f64() < disease::water_risk(near) {
+                    illness.infect(disease::Route::Gut, time.tick, &mut rng);
+                }
+            }
+            let defense = disease::defense(demo.age_years(time.tick), illness.milk, phys.hunger, phys.cold);
+            illness.milk = false;
+            let sick = illness.course(defense, time.tick);
+            if sick > 0.0 {
+                // La cause retenue reste la plus mordante de l'heure.
+                if sick > phys.need_bite() {
+                    phys.last_damage = Some(DeathCause::Disease);
+                }
+                phys.health = (phys.health - sick).max(0.0);
+            }
             // Une grossesse se nourrit : le surcoût s'ajoute à la dérive.
             if demo.pregnancy.is_some() {
                 phys.hunger = (phys.hunger + demography::PREGNANCY_HUNGER_PER_TICK).min(1.0);
@@ -1241,6 +1275,7 @@ impl Sim {
         if time.tick.is_multiple_of(TICKS_PER_DAY) {
             let _pa = phase();
             demography::daily(self);
+            disease::daily(self);
             let _pa = phase();
             self.end("d demographie", _pa);
             social::daily(self);

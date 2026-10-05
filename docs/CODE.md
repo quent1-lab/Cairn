@@ -42,6 +42,8 @@ Les feux (`fire`) naissent 10 % des jours, à 0,5-3 km d'un humain, sur une tuil
 
 **Physiologie** (`agent`, chaque tick). Faim +1/48 h, soif +1/24 h, fatigue +1/16 h éveillé. Le froid monte sous 0 °C ressenti (+4 °C en forêt, +8 °C abrité, chaleur d'une hutte de son clan). Les besoins saturés entament la santé ; la mort survient à santé nulle, avec sa cause.
 
+**Maladie** (`disease`, chantier de la mortalité de fond, 2026-10-05). Un hôte contre un pathogène, en trois voies (digestive, respiratoire, plaie ; seule la **digestive** a des sources à ce jour). Une infection naît d'une exposition — une gorgée d'eau (souillure de fond 0,002 + 0,0002 par humain à 100 m de l'eau), une nuit à 10 m d'un malade (0,05 par malade) — avec une virulence log-normale ; l'hôte la combat par une clairance × immunité (maturité 0,4 → 1 à 5 ans, plancher 0,8 sous le lait maternel ; expérience `1 − 0,4·0,7^épisodes` ; `1 − 0,5·faim` ; `1 − 0,3·froid`). La gravité ronge la santé (1/48 par heure à gravité pleine) ; guérie, la voie est fermée 30 j. **Aucune létalité n'est paramétrée** : elle émerge de la lutte (test : 0,4 % par épisode pour un adulte aguerri, 7 % pour un nourrisson allaité, 33 % pour un orphelin).
+
 **Cerveau** (`brain::decide`). Un agent re-délibère **tous les 4 ticks** (décalé selon son identifiant) ou quand sa tâche est finie. Il score jusqu'à **22 tâches** candidates par des courbes de réponse sur ses besoins, les pondère par le coût du trajet, et tire au softmax (τ = 0,12). Les tâches : boire, cueillir, chasser, pister, partir en quête, dormir (sur place ou au campement), s'abriter, errer, suivre un parent, rejoindre un congénère, explorer, pèlerinage, revenir au clan, manger au stock, rapporter la chasse, bâtir, expédition, cultiver, attaquer une meute, garder le cheptel, razzier. Une tâche en cours reçoit un petit bonus.
 
 **Ce qui tient un humain près des autres**, lu dans les scores :
@@ -102,8 +104,8 @@ Les feux (`fire`) naissent 10 % des jours, à 0,5-3 km d'un humain, sur une tuil
 | 2 · exécution | chaque tick | `execute` (marche, A* budgété à 8 requêtes, cueillette, chasse, bâtir…) puis `combat::resolve`, `resolve_clashes` | tâche, tuiles | position, besoins, stock de clan, structures, prises |
 | 2t · expéditions | chaque tick | `commerce::advance` | positions | exposition à l'étain |
 | 2b · nourrissons | chaque tick | `demography::nurse_infants` | mères | besoins des nourrissons |
-| 3 · physiologie | chaque tick | `Physiology::drift`, `note_tile` | tuile sous l'agent, climat, huttes | besoins, santé, exposition, morts |
-| 3 bis · passes du jour | minuit | `demography::daily`, `social::daily`, `pressure::measure`, `tech::insight`, `tech::forget`, `commerce::dispatch`, `structures::maintain` / `plan` / `anchor_homes`, `pastoral::daily`, `faith::daily`, `weather::daily`, `fire::daily` | tout | naissances, clans, pression, savoirs, expéditions, structures, cheptel, foi, météo, feux |
+| 3 · physiologie | chaque tick | `Physiology::drift`, `note_tile`, infection par l'eau bue, `Illness::course` | tuile sous l'agent, climat, huttes, humains près de l'eau | besoins, santé, maladie, exposition, morts |
+| 3 bis · passes du jour | minuit | `demography::daily`, `disease::daily` (contagion), `social::daily`, `pressure::measure`, `tech::insight`, `tech::forget`, `commerce::dispatch`, `structures::maintain` / `plan` / `anchor_homes`, `pastoral::daily`, `faith::daily`, `weather::daily`, `fire::daily` | tout | naissances, clans, pression, savoirs, expéditions, structures, cheptel, foi, météo, feux |
 | 3t · rencontres | toutes les 4 h | `memory::exchange_knowledge`, `social::encounter`, `tech::diffuse`, `faith::preach` | paires à portée | sources connues, liens, savoirs, foi |
 | 4a · meutes | chaque tick | `fauna::update_packs` | vue des troupeaux | prises, croissance, fissions |
 | 4b · prises | chaque tick | `fauna::apply_kills` | prises (meutes et chasse humaine) | effectifs des troupeaux |

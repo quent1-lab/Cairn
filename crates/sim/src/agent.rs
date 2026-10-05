@@ -342,6 +342,22 @@ impl Physiology {
         self.health = self.health.max(0.0);
     }
 
+    /// L'atteinte de l'heure par les besoins saturés, la plus forte : ce
+    /// contre quoi une autre cause se compare pour être retenue.
+    pub fn need_bite(&self) -> f32 {
+        let mut bite: f32 = 0.0;
+        if self.thirst >= 1.0 {
+            bite = bite.max(DAMAGE_DEHYDRATION);
+        }
+        if self.hunger >= 1.0 {
+            bite = bite.max(DAMAGE_STARVATION);
+        }
+        if self.cold >= 1.0 {
+            bite = bite.max(DAMAGE_HYPOTHERMIA);
+        }
+        bite
+    }
+
     pub fn is_dead(&self) -> bool {
         self.health <= 0.0
     }

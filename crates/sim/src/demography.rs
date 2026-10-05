@@ -282,10 +282,12 @@ pub(crate) fn nurse_infants(sim: &mut Sim) {
         // bandes — 80 % des nourrissons morts de soif).
         let milk = mother_health.clamp(0.0, 1.0);
         let has_milk = milk > 0.0;
-        if let Ok((pos, phys, behavior)) = sim
+        if let Ok((pos, phys, behavior, illness)) = sim
             .agents
-            .query_one_mut::<(&mut Position, &mut Physiology, &mut Behavior)>(infant)
+            .query_one_mut::<(&mut Position, &mut Physiology, &mut Behavior, &mut crate::disease::Illness)>(infant)
         {
+            // Les anticorps passent avec le lait.
+            illness.milk = has_milk;
             pos.x = mx;
             pos.y = my;
             // Porté, le nourrisson partage le sommeil et l'abri de sa mère.

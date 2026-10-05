@@ -28,6 +28,7 @@ pub mod climate;
 pub mod cult;
 pub mod curves;
 pub mod demography;
+pub mod disease;
 pub mod divine;
 pub mod ecology;
 pub mod exposure;
@@ -60,6 +61,7 @@ pub use chunk::{CHUNK_AREA, CHUNK_SIZE, Chunk, ChunkCoord};
 pub use commerce::Expedition;
 pub use climate::Climate;
 pub use demography::{Demographics, HumanView, Kinship, Pregnancy, Sex, Traits};
+pub use disease::{Illness, Route};
 pub use divine::{DivineError, Intervention, Miracle, Outcome};
 pub use exposure::{Exposure, Exposures};
 pub use cult::{Creed, Theology};
@@ -132,4 +134,8 @@ pub(crate) mod salt {
     pub const HUNT: u64 = 1019;
     /// Allomaternage : une femme qui allaite prend-elle un orphelin aujourd'hui ?
     pub const ADOPTION: u64 = 1020;
+    /// Maladie : infection par une exposition de l'heure (gorgée d'eau…).
+    pub const DISEASE: u64 = 1021;
+    /// Maladie : contagion de la nuit entre dormeurs proches.
+    pub const CONTAGION: u64 = 1022;
 }
