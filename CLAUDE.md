@@ -8,6 +8,7 @@ Simulateur d'évolution culturelle et technologique **émergente** : monde infin
 
 - Projet d'**apprentissage Rust** + pièce de portfolio (étudiant ingénieur, fort en C/C++/embarqué, Rust en cours d'acquisition).
 - Répondre **en français**. Expliquer les idiomes Rust nouveaux dans la réponse (pas en commentaires tutoriels dans le code — les commentaires du code documentent le domaine, pas le langage).
+- **Économie de tokens** (règle de l'utilisateur, 2026-10-05) : ne lui écrire **que** les conclusions d'une mesure ou d'un chantier, et les questions de fonctionnement (décision de modèle, vision, blocage). Pas de compte rendu d'étape, pas de récit de ce qu'on va faire ; le détail va dans les fichiers (prédictions, journal, carte), pas dans la réponse.
 
 ## Règles non négociables (BRIEF §0 et §11)
 
