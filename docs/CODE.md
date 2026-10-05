@@ -171,6 +171,7 @@ Demande de l'utilisateur : chaque chantier a un code, chaque étape un jalon num
 | **ENE** | Bilan énergétique | ✔ ENE-1 dépense · ✔ ENE-2 réserves · ✔ ENE-3 lait selon les réserves · ○ ENE-4 remesurer D10 (banc `nourriture`) une fois la marche corrigée · ○ ENE-5 fécondité selon le bilan (Ellison), **seulement si la mesure le demande** (réfuté pour l'instant) | `out/energie/predictions.md` |
 | **MAR** | La marche (33-40 km/j contre 5,8-11,4) | ✔ MAR-1 la lumière (soleil selon latitude, date, heure ; le sommeil la lit) · ✔ MAR-2 l'obscurité gêne la vue · ✔ MAR-4 la sortie de chasse (ouverte à tous, rentre avant la nuit ; gêne du nourrisson réfutée par les sources) — la marche reste à 8,9 h/j · ○ MAR-6 les décisions pèsent le rendement contre le coût en énergie (fourragement optimal ; rendements hadza en kcal/h à sourcer) · ○ MAR-7 l'effort à court terme (souffle, pauses dans la journée ; marcher ≠ courir — idée de l'utilisateur) · ○ MAR-3 soleil et ombre dans le ressenti · ○ MAR-5 les trajets d'eau (1,8 h/j) · plus tard : lune (affût), chaleur (coup de chaleur, sueur) | `out/marche/predictions.md` |
 | **CHA** | La chasse comme les vrais chasseurs (soulevé par l'utilisateur, 2026-10-05) | ○ CHA-1 le gibier reste dans son domaine vital (fidélité ; déplacements de 1,5-2 km/j) · ○ CHA-2 les traces (le troupeau laisse une piste qui se lit quelques heures à jours ; pistage systématique) · ○ CHA-3 les blessures (une flèche blesse plus qu'elle ne tue ; la bête blessée se piste le lendemain) · ○ CHA-4 l'affût au point d'eau (quand le gibier boira) | `out/marche/predictions.md` (sources) |
+| **CUR** | La curiosité n'élargit qu'à peine le territoire connu (critère BRIEF « les curieux explorent plus loin, mesurablement ») | ○ lire pourquoi : test sur 4 seeds, curieux/ternes 1,03-1,30 (1,12 en tout) ; banc d'acceptation, r curiosité ↔ territoire de −0,35 à +0,37 selon le run — déjà avant MAR | test `les_curieux_explorent_plus_loin` |
 | **BAN** | Bandes sans limite de taille | ○ (ligne « Bandes » ci-dessous) | — |
 | **D13** | Violence | ▶ prototype R1 en attente de décision | ligne D13 |
 | **D2**, **D9**, **D7**, **PERF**, **D1/D3**, **D6/D5/D8** | voir le tableau ci-dessous | — | — |
@@ -180,7 +181,7 @@ Demande de l'utilisateur : chaque chantier a un code, chaque étape un jalon num
 1. **MAR-6** (rendement contre coût : la piste la plus prometteuse contre la marche), **MAR-7** (souffle, pauses, marcher/courir), puis **CHA-1 → CHA-3** (domaine vital, traces, blessures : ce qui fait trouver le gibier au matin), puis **MAR-5**, **MAR-3** ; **CHA-4** quand le gibier boira.
 2. **ENE-4** — remesurer l'alimentation (D10) avec la dépense réelle.
 3. **MOR-4** sevrage, puis **MOR-5**, **MOR-6**, **MOR-7**.
-4. **ENE-5** si la mesure le demande.
+4. **ENE-5** si la mesure le demande ; **CUR** (lecture).
 5. **BAN** — taille des bandes.
 6. **D13** — violence (prototype R1).
 7. **D2**, **D9** ; **D7** avant la phase 6 ; **PERF** ; **D1/D3** bloqués (500 ans).
