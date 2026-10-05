@@ -494,7 +494,7 @@ fn rate(deaths: usize, person_days: u64) -> String {
 /// Les runs se somment : chacun est un tirage, l'agrégat n'efface pas le
 /// détail par run imprimé plus haut.
 fn print_mortality(rs: &[Report]) {
-    println!("\nMortalité, {} runs réunis (régime : scènes du banc, effectifs de quelques centaines)", rs.len());
+    println!("\nMortalité, {} runs réunis (régime : scènes du banc ; années-personnes ci-dessous)", rs.len());
     println!("{:<8}{:>10}{:>7}{:>8}  {}", "âge", "années-p", "morts", "‰/an", CAUSES.map(|c| format!("{c:>6}")).join(""));
     let mut q15_hazard = 0.0;
     for (k, (_, name)) in AGE_CLASSES.iter().enumerate() {
