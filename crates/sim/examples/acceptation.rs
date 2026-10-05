@@ -101,6 +101,22 @@ struct Report {
     disease_hungry: usize,
     sick_h: [u64; 2],
     lived_h: [u64; 2],
+    // Énergie, par classe (femmes adultes, hommes adultes, < 3 ans, 3-13 ans) :
+    // kcal dépensées, métabolisme de base cumulé, heures vécues, heures de marche.
+    burn: [f64; 4],
+    bmr: [f64; 4],
+    hours: [u64; 4],
+    walk_h: [u64; 4],
+}
+
+fn energy_class(demo: &cairn_sim::Demographics, tick: u64) -> usize {
+    if demo.is_adult(tick) {
+        usize::from(demo.sex == cairn_sim::Sex::Male)
+    } else if demo.is_infant(tick) {
+        2
+    } else {
+        3
+    }
 }
 
 /// Classes d'âge du tableau de mortalité : bornes inférieures, en années.
@@ -370,6 +386,17 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                 .iter()
                 .map(|(_, (id, p))| (id.0, p.hunger))
                 .collect();
+            for (_, (demo, phys, behavior)) in
+                sim.agents.query::<(&cairn_sim::Demographics, &Physiology, &Behavior)>().iter()
+            {
+                let tick = sim.time.tick;
+                let c = energy_class(demo, tick);
+                let body = cairn_sim::energy::Body::of(demo.age_years(tick), demo.sex);
+                r.burn[c] += f64::from(phys.burn_kcal);
+                r.bmr[c] += f64::from(body.bmr_day) / 24.0;
+                r.hours[c] += 1;
+                r.walk_h[c] += u64::from(behavior.activity == Activity::Walking);
+            }
             for (_, (demo, ill)) in sim.agents.query::<(&cairn_sim::Demographics, &cairn_sim::Illness)>().iter() {
                 let k = usize::from(demo.is_adult(sim.time.tick));
                 r.lived_h[k] += 1;
@@ -547,6 +574,19 @@ fn print_table(rs: &[Report], years: u64) {
     line("morts de maladie (dont affamés)", &|r| format!("{} ({})", r.disease_deaths, r.disease_hungry));
     line("malades : part du temps, enfants ; adultes", &|r| {
         format!("{} ; {}", pct(r.sick_h[0], r.lived_h[0]), pct(r.sick_h[1], r.lived_h[1]))
+    });
+    let kcal = |r: &Report, c: usize| -> String {
+        if r.hours[c] == 0 { "—".into() } else { format!("{:.0}", 24.0 * r.burn[c] / r.hours[c] as f64) }
+    };
+    let pal = |r: &Report, c: usize| -> String {
+        if r.bmr[c] == 0.0 { "—".into() } else { format!("{:.2}", r.burn[c] / r.bmr[c]) }
+    };
+    line("kcal/j : femmes ; hommes", &|r| format!("{} ; {}", kcal(r, 0), kcal(r, 1)));
+    line("kcal/j : < 3 ans ; 3-13 ans", &|r| format!("{} ; {}", kcal(r, 2), kcal(r, 3)));
+    line("PAL : femmes ; hommes (Hadza 1,78 ; 2,26)", &|r| format!("{} ; {}", pal(r, 0), pal(r, 1)));
+    line("marche km/j : femmes ; hommes (5,8 ; 11,4)", &|r| {
+        let km = |c: usize| if r.hours[c] == 0 { "—".into() } else { format!("{:.1}", 24.0 * 4.0 * r.walk_h[c] as f64 / r.hours[c] as f64) };
+        format!("{} ; {}", km(0), km(1))
     });
     line("trajets refusés faute de budget", &|r| r.path_denied.to_string());
     line("mortalité ‰/an : <1 ; 1-4 ; 5-14", &|r| {
