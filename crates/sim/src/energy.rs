@@ -140,6 +140,20 @@ impl Body {
         Self { mass_kg, bmr_day: bmr_kcal_day(mass_kg, age_years, sex), growth_day: growth_kcal_day(age_years) }
     }
 
+    /// Réserves pleines (kcal) : la graisse au-dessus de la graisse
+    /// essentielle. Femmes hadza 21 % de graisse, hommes 13,5 % (Pontzer et
+    /// al. 2012) ; graisse essentielle ~10 % et ~3 % ; enfants, ordre de
+    /// grandeur : 15 % dont 5 % essentiels. Un jeûne total avec eau dure 30 à
+    /// 70 jours chez l'adulte : réserves, puis phase protéique (la santé).
+    pub fn reserve_target(&self, age_years: f64, sex: Sex) -> f32 {
+        let usable = match (age_years >= 15.0, sex) {
+            (false, _) => 0.10,
+            (true, Sex::Female) => 0.11,
+            (true, Sex::Male) => 0.105,
+        };
+        usable * self.mass_kg * KCAL_PER_KG_FAT
+    }
+
     /// Besoin de référence (kcal/j) : celui qui fixe l'échelle de la faim.
     pub fn reference_day(&self) -> f32 {
         self.bmr_day * REFERENCE_PAL + self.growth_day

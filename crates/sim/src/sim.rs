@@ -560,7 +560,7 @@ impl Sim {
         let entity = self.agents.spawn((
             id,
             Position { x, y },
-            Physiology::default(),
+            Physiology::with_full_reserves(&demo, self.time.tick),
             Behavior::default(),
             traits,
             demo,
@@ -610,7 +610,10 @@ impl Sim {
                 cold: 0.0,
                 health: 1.0,
                 last_damage: None,
-                ..Physiology::default()
+                ..Physiology::with_full_reserves(
+                    &Demographics { sex, born_tick: self.time.tick as i64, pregnancy: None },
+                    self.time.tick,
+                )
             },
             Behavior::default(),
             traits,
@@ -1231,6 +1234,7 @@ impl Sim {
             let age = demo.age_years(time.tick);
             let body = energy::Body::of(age, demo.sex);
             phys.scale = body.scale();
+            phys.reserve_target = body.reserve_target(age, demo.sex);
             let load_kg = carried_kg.get(&id.0).copied().unwrap_or(0.0) + carrying.0 * energy::KG_PER_MEAT_POINT;
             let fever = illness.active.iter().flatten().map(|i| i.severity).fold(0.0f32, f32::max);
             let mut kcal = body.hourly_kcal(behavior.activity, felt, load_kg, fever);
@@ -3091,22 +3095,30 @@ mod tests {
     }
 
     /// La rencontre suffit : un campement mixte produit des conceptions en
-    /// quelques semaines, sans aucune intervention.
+    /// quelques semaines, sans aucune intervention. Sur quatre seeds (règle 7) :
+    /// sur une seule, l'espérance est d'une ou deux conceptions et zéro reste un
+    /// tirage possible (mesuré au bilan énergétique : 1/1/3/3 avant les
+    /// réserves, 0/1/2/1 après — on endure désormais la faim saturée sur ses
+    /// réserves, et la porte de fécondité lit la faim).
     #[test]
     fn les_conceptions_surviennent_au_campement() {
-        let (mut sim, _) = scenario_setup(42, 30, 0);
-        for _ in 0..24 * 45 {
-            sim.step();
+        let mut conceptions = 0;
+        for seed in [42u64, 7, 1337, 2024] {
+            let (mut sim, _) = scenario_setup(seed, 30, 0);
+            for _ in 0..24 * 45 {
+                sim.step();
+            }
+            let pregnancies = sim
+                .agents
+                .query::<&Demographics>()
+                .iter()
+                .filter(|(_, d)| d.pregnancy.is_some())
+                .count();
+            conceptions += pregnancies + sim.births.len();
         }
-        let pregnancies = sim
-            .agents
-            .query::<&Demographics>()
-            .iter()
-            .filter(|(_, d)| d.pregnancy.is_some())
-            .count();
         assert!(
-            pregnancies + sim.births.len() > 0,
-            "30 adultes mêlés pendant 45 jours : au moins une conception attendue"
+            conceptions >= 2,
+            "30 adultes mêlés pendant 45 jours, 4 seeds : des conceptions attendues ({conceptions})"
         );
     }
 

@@ -49,6 +49,11 @@ pub const WALK_TILES_PER_TICK: f64 = km_to_tiles(4.0);
 /// La faim sature en 2 jours sans manger — pour l'adulte de référence ; chaque
 /// corps la creuse à sa dépense (`energy`).
 pub const HUNGER_PER_TICK: f32 = 1.0 / 48.0;
+/// Plancher de la faim par unité de réserves perdues : des réserves vides
+/// laissent une faim de 0,5 même repu de l'heure — l'appétit qui pousse à
+/// refaire ses réserves après une disette. Choix (forme : la leptine baisse
+/// avec la masse grasse et entretient la faim).
+pub const HUNGER_FLOOR_PER_DEPLETION: f32 = 0.5;
 /// Dépense horaire de l'adulte de référence (2 500 kcal/j) : celle qui creuse
 /// la faim de `HUNGER_PER_TICK` à l'échelle 1.
 pub const REFERENCE_KCAL_PER_TICK: f32 = 2_500.0 / 24.0;
@@ -275,6 +280,12 @@ pub struct Physiology {
     pub scale: f32,
     /// Dépense de la dernière heure, en kcal (instrument).
     pub burn_kcal: f32,
+    /// Réserves (graisse au-dessus de la graisse essentielle), en kcal : la
+    /// dépense y puise quand la faim est saturée ; vides, la santé s'érode.
+    pub reserves_kcal: f32,
+    /// Réserves pleines de ce corps (`energy::Body::reserve_target`), tenu à
+    /// jour par la physiologie. 0 : un corps sans réserves (tests).
+    pub reserve_target: f32,
 }
 
 impl Default for Physiology {
@@ -288,6 +299,8 @@ impl Default for Physiology {
             last_damage: None,
             scale: 1.0,
             burn_kcal: 0.0,
+            reserves_kcal: 0.0,
+            reserve_target: 0.0,
         }
     }
 }
@@ -303,7 +316,16 @@ impl Physiology {
     /// l'échelle de ce corps.
     pub fn drift(&mut self, felt_c: f64, activity: Activity, endurance: f32, kcal: f32) {
         self.burn_kcal = kcal;
-        self.hunger = (self.hunger + self.hunger_of_kcal(kcal)).min(1.0);
+        // La faim d'abord ; saturée, la dépense puise dans les réserves.
+        let dh = self.hunger_of_kcal(kcal);
+        let room = 1.0 - self.hunger;
+        if dh <= room {
+            self.hunger += dh;
+        } else {
+            self.hunger = 1.0;
+            let over = (dh - room) * self.scale * crate::energy::KCAL_PER_POINT as f32;
+            self.reserves_kcal = (self.reserves_kcal - over).max(0.0);
+        }
         self.thirst = (self.thirst + THIRST_PER_TICK).min(1.0);
 
         if activity == Activity::Sleeping {
@@ -325,6 +347,7 @@ impl Physiology {
 
         // Érosion : chaque besoin saturé mord ; on retient le plus mordant
         // comme cause dominante.
+        let starving = self.starving();
         let mut worst: Option<(f32, DeathCause)> = None;
         let mut bite = |damage: f32, cause: DeathCause, worst: &mut Option<(f32, DeathCause)>| {
             self.health -= damage;
@@ -335,7 +358,7 @@ impl Physiology {
         if self.thirst >= 1.0 {
             bite(DAMAGE_DEHYDRATION, DeathCause::Dehydration, &mut worst);
         }
-        if self.hunger >= 1.0 {
+        if starving {
             bite(DAMAGE_STARVATION, DeathCause::Starvation, &mut worst);
         }
         if self.cold >= 1.0 {
@@ -362,17 +385,54 @@ impl Physiology {
         (f64::from(kcal) / (f64::from(self.scale) * crate::energy::KCAL_PER_POINT)) as f32
     }
 
-    /// Ce que ce corps peut encore manger, en points de nourriture.
+    /// Un corps bien nourri : réserves pleines pour son âge et son sexe.
+    pub fn with_full_reserves(demo: &crate::demography::Demographics, tick: u64) -> Self {
+        let age = demo.age_years(tick);
+        let body = crate::energy::Body::of(age, demo.sex);
+        let target = body.reserve_target(age, demo.sex);
+        Self { scale: body.scale(), reserves_kcal: target, reserve_target: target, ..Self::default() }
+    }
+
+    /// Le jeûne a vidé les réserves : la faim saturée ronge le corps.
+    pub fn starving(&self) -> bool {
+        self.hunger >= 1.0 && self.reserves_kcal <= 0.0
+    }
+
+    /// Part des réserves perdue (0 : pleines, 1 : vides).
+    pub fn depletion(&self) -> f32 {
+        if self.reserve_target <= 0.0 { 0.0 } else { (1.0 - self.reserves_kcal / self.reserve_target).clamp(0.0, 1.0) }
+    }
+
+    fn reserve_gap_points(&self) -> f32 {
+        ((self.reserve_target - self.reserves_kcal).max(0.0) / crate::energy::KCAL_PER_POINT as f32).max(0.0)
+    }
+
+    /// Ce que ce corps peut encore manger, en points de nourriture : sa faim
+    /// et ce qui manque à ses réserves (on mange davantage après une disette).
     pub fn appetite_points(&self) -> f32 {
-        self.hunger * self.scale
+        self.hunger * self.scale + self.reserve_gap_points()
     }
 
     /// Mange jusqu'à `points` de nourriture, au plus son appétit ; renvoie ce
     /// qui a été mangé, en points (la source le perd au même montant).
+    /// La faim s'apaise d'abord, mais pas sous un plancher que fixent les
+    /// réserves entamées (on reste en appétit après une disette) ; le reste
+    /// refait les réserves ; réserves pleines, la faim s'apaise tout à fait.
     pub fn eat_points(&mut self, points: f32) -> f32 {
-        let eaten = points.min(self.appetite_points()).max(0.0);
-        self.hunger = (self.hunger - eaten / self.scale).max(0.0);
-        eaten
+        let mut left = points.max(0.0);
+        let calm = |phys: &mut Self, floor: f32, left: &mut f32| {
+            let room = (phys.hunger - floor).max(0.0) * phys.scale;
+            let calmed = left.min(room);
+            phys.hunger -= calmed / phys.scale;
+            *left -= calmed;
+        };
+        calm(self, HUNGER_FLOOR_PER_DEPLETION * self.depletion(), &mut left);
+        let refill = left.min(self.reserve_gap_points());
+        self.reserves_kcal += refill * crate::energy::KCAL_PER_POINT as f32;
+        left -= refill;
+        calm(self, 0.0, &mut left);
+        self.hunger = self.hunger.max(0.0);
+        points.max(0.0) - left
     }
 
     /// L'atteinte de l'heure par les besoins saturés, la plus forte : ce
@@ -382,7 +442,7 @@ impl Physiology {
         if self.thirst >= 1.0 {
             bite = bite.max(DAMAGE_DEHYDRATION);
         }
-        if self.hunger >= 1.0 {
+        if self.starving() {
             bite = bite.max(DAMAGE_STARVATION);
         }
         if self.cold >= 1.0 {
@@ -500,5 +560,43 @@ mod tests {
         }
         assert!(expose.cold > 0.15, "à découvert le froid s'accumule");
         assert_eq!(abrite.cold, 0.0, "abrité, aucun stress thermique");
+    }
+
+    /// Un adulte bien nourri privé de nourriture (mais pas d'eau) tient des
+    /// semaines : 30 à 70 jours dans la réalité (grévistes de la faim de
+    /// 1981 : 46 à 73 jours). Sans réserves, il mourait en ~16 jours.
+    #[test]
+    fn un_jeune_total_dure_des_semaines() {
+        let demo = crate::demography::Demographics {
+            sex: crate::demography::Sex::Female,
+            born_tick: -(30 * cairn_core::TICKS_PER_YEAR as i64),
+            pregnancy: None,
+        };
+        let mut p = Physiology::with_full_reserves(&demo, 0);
+        let body = crate::energy::Body::of(30.0, crate::demography::Sex::Female);
+        let mut hours = 0u32;
+        while !p.is_dead() && hours < 24 * 200 {
+            p.thirst = 0.0;
+            p.drift(20.0, Activity::Idle, 0.5, body.hourly_kcal(Activity::Idle, 20.0, 0.0, 0.0));
+            hours += 1;
+        }
+        let days = hours / 24;
+        assert!((25..=90).contains(&days), "mort de faim après {days} jours");
+        assert_eq!(p.last_damage, Some(DeathCause::Starvation));
+    }
+
+    /// Manger après une disette apaise la faim jusqu'au plancher des réserves,
+    /// refait les réserves, puis apaise le reste.
+    #[test]
+    fn manger_refait_les_reserves() {
+        // Réserves entamées de moitié : plancher de faim 0,25.
+        let mut p = Physiology { hunger: 0.9, reserves_kcal: 5_000.0, reserve_target: 10_000.0, ..Default::default() };
+        let eaten = p.eat_points(0.65 + 0.5);
+        assert!((p.hunger - 0.25).abs() < 1e-4, "faim au plancher : {}", p.hunger);
+        assert!((p.reserves_kcal - 7_500.0).abs() < 1.0, "réserves en partie refaites : {}", p.reserves_kcal);
+        assert!((eaten - 1.15).abs() < 1e-4);
+        // Assez pour tout : réserves pleines, faim nulle.
+        p.eat_points(10.0);
+        assert!(p.hunger == 0.0 && (p.reserves_kcal - 10_000.0).abs() < 1.0);
     }
 }
