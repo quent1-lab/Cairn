@@ -169,14 +169,15 @@ Demande de l'utilisateur : chaque chantier a un code, chaque étape un jalon num
 |---|---|---|---|
 | **MOR** | Mortalité de fond, causée | ✔ MOR-1 maladie digestive · ✔ MOR-2 respiratoire · ✔ MOR-3 plaies · ○ MOR-4 sevrage (exclusif 6 mois, lait 70/55/40 %, eau bue avec la mère, nourriture donnée, sevré à 3 ans) · ○ MOR-5 relire la maladie des adultes (14-24 ‰ contre ~5-7 réels) et la défense sur les réserves (synergie faim-maladie invisible) · ○ MOR-6 accidents (chasse, chute) · ○ MOR-7 accouchement | `out/mortalite/predictions.md` |
 | **ENE** | Bilan énergétique | ✔ ENE-1 dépense · ✔ ENE-2 réserves · ✔ ENE-3 lait selon les réserves · ○ ENE-4 remesurer D10 (banc `nourriture`) une fois la marche corrigée · ○ ENE-5 fécondité selon le bilan (Ellison), **seulement si la mesure le demande** (réfuté pour l'instant) | `out/energie/predictions.md` |
-| **MAR** | La marche (33-40 km/j contre 5,8-11,4) | ✔ MAR-1 la lumière (soleil selon latitude, date, heure ; le sommeil la lit) · ○ MAR-2 l'obscurité gêne (vue, rendement, vitesse) · ○ MAR-3 soleil et ombre dans le ressenti · ○ MAR-4 la quête (manque de réserve du clan permanent ; 4,6 h/j) · ○ MAR-5 les trajets d'eau (1,8 h/j) · plus tard : lune (affût), chaleur (coup de chaleur, sueur) | `out/marche/predictions.md` |
+| **MAR** | La marche (33-40 km/j contre 5,8-11,4) | ✔ MAR-1 la lumière (soleil selon latitude, date, heure ; le sommeil la lit) · ▶ MAR-2 l'obscurité gêne (vue, rendement ; codé, non commité : casse la chasse sans MAR-4) · ▶ MAR-4 la sortie de chasse (ouverte à tous, part au jour, rentre quand la lumière ne suffit plus au retour ; la gêne du nourrisson porté, à sourcer) · ○ MAR-3 soleil et ombre dans le ressenti · ○ MAR-5 les trajets d'eau (1,8 h/j) · plus tard : lune (affût), chaleur (coup de chaleur, sueur) | `out/marche/predictions.md` |
+| **CHA** | La chasse comme les vrais chasseurs (soulevé par l'utilisateur, 2026-10-05) | ○ CHA-1 le gibier reste dans son domaine vital (fidélité ; déplacements de 1,5-2 km/j) · ○ CHA-2 les traces (le troupeau laisse une piste qui se lit quelques heures à jours ; pistage systématique) · ○ CHA-3 les blessures (une flèche blesse plus qu'elle ne tue ; la bête blessée se piste le lendemain) · ○ CHA-4 l'affût au point d'eau (quand le gibier boira) | `out/marche/predictions.md` (sources) |
 | **BAN** | Bandes sans limite de taille | ○ (ligne « Bandes » ci-dessous) | — |
 | **D13** | Violence | ▶ prototype R1 en attente de décision | ligne D13 |
 | **D2**, **D9**, **D7**, **PERF**, **D1/D3**, **D6/D5/D8** | voir le tableau ci-dessous | — | — |
 
-### 5.2 Ordre (révisé 2026-10-05)
+### 5.2 Ordre (révisé 2026-10-05, soir)
 
-1. **MAR** (1 → 5) — en amont de tout ce qui se nourrit : la marche fausse la dépense.
+1. **MAR-2 + MAR-4** ensemble (la sortie de chasse rend la nuit vivable aux chasseurs), puis **CHA-1 → CHA-3** (domaine vital, traces, blessures : ce qui fait trouver le gibier au matin), puis **MAR-5**, **MAR-3** ; **CHA-4** quand le gibier boira.
 2. **ENE-4** — remesurer l'alimentation (D10) avec la dépense réelle.
 3. **MOR-4** sevrage, puis **MOR-5**, **MOR-6**, **MOR-7**.
 4. **ENE-5** si la mesure le demande.
