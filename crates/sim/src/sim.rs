@@ -44,6 +44,7 @@ use crate::combat::{self, Clash, Engagement};
 use crate::commerce::{self, Expedition};
 use crate::demography::{self, Demographics, HumanView, Kinship, Sex, Traits};
 use crate::disease::{self, Illness};
+use crate::energy;
 use crate::ecology;
 use crate::exposure::Exposures;
 use crate::fire::{self, Fire};
@@ -68,10 +69,9 @@ const WALK_SAMPLE_TILES: f64 = 8.0;
 const EAT_HUNGER_PER_TICK: f32 = 0.3;
 /// Valeur nutritive d'une unité de biomasse, en points de faim.
 const NUTRITION_PER_BIOMASS: f32 = 0.02;
-/// Énergie d'un point de faim. La faim monte de 0,5 par jour (`HUNGER_PER_TICK`) :
-/// un point, c'est deux rations quotidiennes d'un adulte actif, ~2 500 kcal
-/// chacune (FAO/OMS, dépense d'un chasseur-cueilleur).
-pub(crate) const KCAL_PER_HUNGER: f64 = 5_000.0;
+/// Énergie d'un point de nourriture (`energy::KCAL_PER_POINT`) : deux jours
+/// de l'adulte de référence ; chaque mangeur le convertit à son échelle.
+pub(crate) const KCAL_PER_HUNGER: f64 = energy::KCAL_PER_POINT;
 /// Ration quotidienne correspondante, en kcal.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) const KCAL_PER_DAY: f64 = KCAL_PER_HUNGER * crate::agent::HUNGER_PER_TICK as f64 * 24.0;
@@ -123,8 +123,7 @@ fn resolve_shares(sim: &mut Sim, shares: &[Share]) {
                 break;
             }
             if let Ok(ph) = sim.agents.query_one_mut::<&mut Physiology>(entity) {
-                let eaten = left.min(ph.hunger);
-                ph.hunger -= eaten;
+                let eaten = ph.eat_points(left);
                 left -= eaten;
                 crate::food_stats::fed(crate::food_stats::Source::Shared, eaten);
             }
@@ -611,6 +610,7 @@ impl Sim {
                 cold: 0.0,
                 health: 1.0,
                 last_damage: None,
+                ..Physiology::default()
             },
             Behavior::default(),
             traits,
@@ -1178,9 +1178,20 @@ impl Sim {
         let humans_at: Vec<(f64, f64)> =
             self.agents.query::<(&Position, &AgentId)>().iter().map(|(_, (p, _))| (p.x, p.y)).collect();
         let disease_seed = self.world.seed().derive(crate::salt::DISEASE) ^ splitmix64(time.tick);
+        // Les nourrissons portés : leur masse alourdit la marche de qui les
+        // porte (la mère, ou celle qui l'a recueilli).
+        let mut carried_kg: BTreeMap<u64, f32> = BTreeMap::new();
+        for (_, (id, demo, kin)) in self.agents.query::<(&AgentId, &Demographics, &Kinship)>().iter() {
+            if demo.is_infant(time.tick)
+                && let Some(carer) = self.fosters.get(&id.0).copied().or(kin.mother)
+            {
+                *carried_kg.entry(carer.0).or_insert(0.0) +=
+                    energy::body_mass_kg(demo.age_years(time.tick), demo.sex);
+            }
+        }
         let mut dead = Vec::new();
         let mut sheltered = 0u64;
-        for (entity, (id, pos, phys, traits, demo, behavior, membership, exposures, wound, illness)) in
+        for (entity, (id, pos, phys, traits, demo, behavior, membership, exposures, wound, illness, carrying)) in
             self.agents.query_mut::<(
                 &AgentId,
                 &Position,
@@ -1192,6 +1203,7 @@ impl Sim {
                 &mut Exposures,
                 &mut Wound,
                 &mut Illness,
+                &Carrying,
             )>()
         {
             let (x, y) = pos.tile();
@@ -1214,7 +1226,19 @@ impl Sim {
                 sheltered += 1;
             }
             felt += structures::hut_warmth((pos.x, pos.y), membership.0, &huts);
-            phys.drift(felt, behavior.activity, traits.endurance);
+            // La dépense de l'heure : le corps, ce qu'il fait, ce qu'il porte,
+            // le froid, la fièvre, la grossesse (voir `energy`).
+            let age = demo.age_years(time.tick);
+            let body = energy::Body::of(age, demo.sex);
+            phys.scale = body.scale();
+            let load_kg = carried_kg.get(&id.0).copied().unwrap_or(0.0) + carrying.0 * energy::KG_PER_MEAT_POINT;
+            let fever = illness.active.iter().flatten().map(|i| i.severity).fold(0.0f32, f32::max);
+            let mut kcal = body.hourly_kcal(behavior.activity, felt, load_kg, fever);
+            if let Some(pregnancy) = demo.pregnancy {
+                let days_left = pregnancy.due_tick.saturating_sub(time.tick) as f64 / TICKS_PER_DAY as f64;
+                kcal += energy::pregnancy_kcal_day(demography::GESTATION_DAYS as f64 - days_left) / 24.0;
+            }
+            phys.drift(felt, behavior.activity, traits.endurance, kcal);
             // La plaie se referme lentement, quoi qu'il arrive (§3.1) — elle
             // handicape le temps de guérir, et peut s'infecter (plus bas).
             wound.0 = (wound.0 - WOUND_HEAL_PER_TICK).max(0.0);
@@ -1244,7 +1268,7 @@ impl Sim {
                     illness.infect(disease::Route::Wound, time.tick, &mut rng);
                 }
             }
-            let defense = disease::defense(demo.age_years(time.tick), illness.milk, phys.hunger, phys.cold);
+            let defense = disease::defense(age, illness.milk, phys.hunger, phys.cold);
             illness.milk = false;
             let sick = illness.course(defense, time.tick);
             if sick > 0.0 {
@@ -1253,10 +1277,6 @@ impl Sim {
                     phys.last_damage = Some(DeathCause::Disease);
                 }
                 phys.health = (phys.health - sick).max(0.0);
-            }
-            // Une grossesse se nourrit : le surcoût s'ajoute à la dérive.
-            if demo.pregnancy.is_some() {
-                phys.hunger = (phys.hunger + demography::PREGNANCY_HUNGER_PER_TICK).min(1.0);
             }
             if phys.is_dead() {
                 let cause = phys.last_damage.unwrap_or(DeathCause::Starvation);
@@ -1599,9 +1619,8 @@ fn execute(
     // Manger ce qu'on porte quand la faim revient : la viande d'une prise est
     // sur le dos, pas au foyer — ni trajet ni tâche pour y mordre.
     if phys.hunger > EAT_CARRIED_HUNGER && carrying.0 > 0.0 {
-        let eaten = carrying.0.min(phys.hunger);
+        let eaten = phys.eat_points(carrying.0);
         carrying.0 -= eaten;
-        phys.hunger -= eaten;
         crate::food_stats::fed(crate::food_stats::Source::Carried, eaten);
     }
     let task = match behavior.task {
@@ -1654,10 +1673,10 @@ fn execute(
         // le commentaire de module de `social`) — il faut d'abord le
         // rapporter au foyer (`Carrying`, `TaskKind::BringSurplusHome`),
         // sans quoi la viande se téléporterait depuis le lieu de la chasse.
-        let mut surplus = (nutrition - phys.hunger).max(0.0);
-        crate::food_stats::fed(crate::food_stats::Source::HuntEaten, nutrition.min(phys.hunger));
+        let eaten = phys.eat_points(nutrition);
+        let mut surplus = nutrition - eaten;
+        crate::food_stats::fed(crate::food_stats::Source::HuntEaten, eaten);
         crate::food_stats::event(crate::food_stats::Event::Kills, 1);
-        phys.hunger = (phys.hunger - nutrition).max(0.0);
         // Partager la prise avec ceux qui ont faim autour : ni une règle, ni un
         // devoir de clan — une disposition. La part offerte suit la
         // sociabilité héritée ; ce qui n'est pas offert est rapporté au clan
@@ -1815,7 +1834,7 @@ fn execute(
             // averse met aussi la biomasse au-dessus de la capacité).
             let tile = world.tile_mut(task.target.0, task.target.1);
             let cultivated = false;
-            let wanted = (phys.hunger.min(bite) / NUTRITION_PER_BIOMASS).ceil() as u8;
+            let wanted = (phys.appetite_points().min(bite) / NUTRITION_PER_BIOMASS).ceil() as u8;
             let taken = wanted.min(tile.biomass);
             tile.biomass -= taken;
             let want_kcal = f64::from(f32::from(taken) * NUTRITION_PER_BIOMASS) * KCAL_PER_HUNGER;
@@ -1824,15 +1843,14 @@ fn execute(
             } else {
                 world.gather((pos.x, pos.y), tick, want_kcal)
             };
-            let eaten = (got_kcal / KCAL_PER_HUNGER) as f32;
-            crate::food_stats::fed(crate::food_stats::Source::Forage, eaten.min(phys.hunger));
+            let eaten = phys.eat_points((got_kcal / KCAL_PER_HUNGER) as f32);
+            crate::food_stats::fed(crate::food_stats::Source::Forage, eaten);
             crate::food_stats::event(crate::food_stats::Event::BiomassTaken, u64::from(taken));
             crate::food_stats::event(crate::food_stats::Event::ForageHours, 1);
             crate::food_stats::event(
                 crate::food_stats::Event::ForageShort,
                 u64::from(taken < wanted || got_kcal < want_kcal),
             );
-            phys.hunger = (phys.hunger - eaten).max(0.0);
             let bare = world.tile(task.target.0, task.target.1).biomass == 0;
             if phys.hunger <= 0.05 || bare || got_kcal < want_kcal {
                 behavior.task = None; // rassasié, ou tuile épuisée
@@ -1859,10 +1877,9 @@ fn execute(
             if let Some(clan_id) = clan
                 && let Some(stock) = clan_stock.get_mut(&clan_id)
             {
-                let taken = stock.min(phys.hunger);
+                let taken = phys.eat_points(*stock);
                 *stock -= taken;
                 crate::food_stats::fed(crate::food_stats::Source::Stock, taken);
-                phys.hunger = (phys.hunger - taken).max(0.0);
             }
             behavior.task = None; // un puisage, puis on redélibère
         }

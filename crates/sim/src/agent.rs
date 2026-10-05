@@ -46,8 +46,12 @@ pub const WALK_TILES_PER_TICK: f64 = km_to_tiles(4.0);
 
 // — Rythmes physiologiques, par tick (= par heure) —
 
-/// La faim sature en 2 jours sans manger.
+/// La faim sature en 2 jours sans manger — pour l'adulte de référence ; chaque
+/// corps la creuse à sa dépense (`energy`).
 pub const HUNGER_PER_TICK: f32 = 1.0 / 48.0;
+/// Dépense horaire de l'adulte de référence (2 500 kcal/j) : celle qui creuse
+/// la faim de `HUNGER_PER_TICK` à l'échelle 1.
+pub const REFERENCE_KCAL_PER_TICK: f32 = 2_500.0 / 24.0;
 /// La soif sature en 24 h sans boire.
 pub const THIRST_PER_TICK: f32 = 1.0 / 24.0;
 /// La fatigue sature après 16 h d'éveil…
@@ -265,6 +269,12 @@ pub struct Physiology {
     /// Le besoin qui a rongé la santé en dernier — le futur « cause du
     /// décès » de la Chronique.
     pub last_damage: Option<DeathCause>,
+    /// Points de nourriture par unité de faim : deux jours du besoin de
+    /// référence de **ce** corps (`energy::Body::scale`) ; 1 pour l'adulte de
+    /// référence. Tenu à jour par la physiologie.
+    pub scale: f32,
+    /// Dépense de la dernière heure, en kcal (instrument).
+    pub burn_kcal: f32,
 }
 
 impl Default for Physiology {
@@ -276,6 +286,8 @@ impl Default for Physiology {
             cold: 0.0,
             health: 1.0,
             last_damage: None,
+            scale: 1.0,
+            burn_kcal: 0.0,
         }
     }
 }
@@ -286,9 +298,12 @@ impl Physiology {
     /// se répare. Pure — c'est ce qui la rend testable sans monde.
     ///
     /// `endurance` est le trait hérité (0–1) : un corps endurant fatigue
-    /// moins vite (×0,75 à endurance 1, ×1,25 à endurance 0).
-    pub fn drift(&mut self, felt_c: f64, activity: Activity, endurance: f32) {
-        self.hunger = (self.hunger + HUNGER_PER_TICK).min(1.0);
+    /// moins vite (×0,75 à endurance 1, ×1,25 à endurance 0). `kcal` : la
+    /// dépense de l'heure (`energy::Body::hourly_kcal`), qui creuse la faim à
+    /// l'échelle de ce corps.
+    pub fn drift(&mut self, felt_c: f64, activity: Activity, endurance: f32, kcal: f32) {
+        self.burn_kcal = kcal;
+        self.hunger = (self.hunger + self.hunger_of_kcal(kcal)).min(1.0);
         self.thirst = (self.thirst + THIRST_PER_TICK).min(1.0);
 
         if activity == Activity::Sleeping {
@@ -342,6 +357,24 @@ impl Physiology {
         self.health = self.health.max(0.0);
     }
 
+    /// La faim que représentent `kcal`, à l'échelle de ce corps.
+    pub fn hunger_of_kcal(&self, kcal: f32) -> f32 {
+        (f64::from(kcal) / (f64::from(self.scale) * crate::energy::KCAL_PER_POINT)) as f32
+    }
+
+    /// Ce que ce corps peut encore manger, en points de nourriture.
+    pub fn appetite_points(&self) -> f32 {
+        self.hunger * self.scale
+    }
+
+    /// Mange jusqu'à `points` de nourriture, au plus son appétit ; renvoie ce
+    /// qui a été mangé, en points (la source le perd au même montant).
+    pub fn eat_points(&mut self, points: f32) -> f32 {
+        let eaten = points.min(self.appetite_points()).max(0.0);
+        self.hunger = (self.hunger - eaten / self.scale).max(0.0);
+        eaten
+    }
+
     /// L'atteinte de l'heure par les besoins saturés, la plus forte : ce
     /// contre quoi une autre cause se compare pour être retenue.
     pub fn need_bite(&self) -> f32 {
@@ -386,14 +419,15 @@ mod tests {
             cold: 0.0,
             health: 0.0,
             last_damage: Some(DeathCause::Violence),
+            ..Default::default()
         };
-        tue.drift(15.0, Activity::Idle, 0.5);
+        tue.drift(15.0, Activity::Idle, 0.5, REFERENCE_KCAL_PER_TICK);
         assert!(tue.is_dead(), "un mort au combat ne se relève pas (santé {})", tue.health);
         assert_eq!(tue.last_damage, Some(DeathCause::Violence), "la cause reste la violence");
 
         // Contre-épreuve : un vivant entamé, lui, se soigne bien.
         let mut blesse = Physiology { health: 0.5, ..tue };
-        blesse.drift(15.0, Activity::Idle, 0.5);
+        blesse.drift(15.0, Activity::Idle, 0.5, REFERENCE_KCAL_PER_TICK);
         assert!(blesse.health > 0.5, "un vivant aux besoins couverts récupère");
     }
 
@@ -403,7 +437,7 @@ mod tests {
         let mut heures = 0;
         while !p.is_dead() && heures < 24 * 10 {
             // Climat doux, repos : seule la soif tue.
-            p.drift(15.0, Activity::Idle, 0.5);
+            p.drift(15.0, Activity::Idle, 0.5, REFERENCE_KCAL_PER_TICK);
             p.hunger = 0.5; // nourri de force : isole la soif
             heures += 1;
         }
@@ -419,7 +453,7 @@ mod tests {
         let mut gele = Physiology::default();
         let mut heures_froid = 0;
         while !gele.is_dead() && heures_froid < 24 * 30 {
-            gele.drift(-25.0, Activity::Idle, 0.5);
+            gele.drift(-25.0, Activity::Idle, 0.5, REFERENCE_KCAL_PER_TICK);
             gele.thirst = 0.5;
             gele.hunger = 0.5;
             heures_froid += 1;
@@ -435,7 +469,7 @@ mod tests {
     fn bien_pourvu_on_recupere() {
         let mut p = Physiology { health: 0.5, ..Default::default() };
         for _ in 0..24 {
-            p.drift(15.0, Activity::Idle, 0.5);
+            p.drift(15.0, Activity::Idle, 0.5, REFERENCE_KCAL_PER_TICK);
             p.hunger = 0.2;
             p.thirst = 0.2;
         }
@@ -446,7 +480,7 @@ mod tests {
     fn dormir_efface_la_fatigue() {
         let mut p = Physiology { fatigue: 0.9, ..Default::default() };
         for _ in 0..8 {
-            p.drift(15.0, Activity::Sleeping, 0.5);
+            p.drift(15.0, Activity::Sleeping, 0.5, REFERENCE_KCAL_PER_TICK);
         }
         assert!(p.fatigue < 0.05);
     }
@@ -461,8 +495,8 @@ mod tests {
         let mut expose = Physiology::default();
         let mut abrite = Physiology::default();
         for _ in 0..48 {
-            expose.drift(felt_expose, Activity::Idle, 0.5);
-            abrite.drift(felt_abrite, Activity::Sheltering, 0.5);
+            expose.drift(felt_expose, Activity::Idle, 0.5, REFERENCE_KCAL_PER_TICK);
+            abrite.drift(felt_abrite, Activity::Sheltering, 0.5, REFERENCE_KCAL_PER_TICK);
         }
         assert!(expose.cold > 0.15, "à découvert le froid s'accumule");
         assert_eq!(abrite.cold, 0.0, "abrité, aucun stress thermique");

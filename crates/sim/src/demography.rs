@@ -28,7 +28,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use cairn_core::{DAYS_PER_YEAR, Pcg32, TICKS_PER_DAY, TICKS_PER_YEAR, WorldSeed, km_to_tiles, splitmix64};
 
 use crate::agent::{
-    Activity, AgentId, Behavior, DeathCause, HUNGER_PER_TICK, Physiology, Position,
+    Activity, AgentId, Behavior, DeathCause, Physiology, Position,
     THIRST_PER_TICK,
 };
 use crate::salt;
@@ -58,19 +58,15 @@ pub const CONCEPTION_DAILY_P: f64 = 0.012;
 
 // — Coûts de l'enfance —
 
-/// Ce que l'allaitement retire par tick aux besoins du nourrisson (couvre
-/// faim et soif : le lait est les deux).
+/// Ce que l'allaitement retire par tick aux besoins du nourrisson, en part de
+/// sa faim (couvre faim et soif : le lait est les deux).
 pub const NURSE_RELIEF: f32 = 0.1;
 /// Santé (réserves) en deçà de laquelle une femme qui allaite n'a plus de
 /// lait **à partager** : elle ne prend pas d'orphelin (allomaternage). Son
 /// propre enfant, lui, reçoit un lait qui suit sa santé (`nurse_infants`).
 pub const MILK_TO_SPARE_HEALTH: f32 = 0.5;
-/// Surcoût de faim de la mère qui allaite (+30 % du métabolisme de base).
-pub const NURSING_HUNGER_PER_TICK: f32 = HUNGER_PER_TICK * 0.3;
 /// Le lait coûte aussi de l'eau.
 pub const NURSING_THIRST_PER_TICK: f32 = THIRST_PER_TICK * 0.3;
-/// Surcoût de faim d'une grossesse (+20 %).
-pub const PREGNANCY_HUNGER_PER_TICK: f32 = HUNGER_PER_TICK * 0.2;
 
 /// Écart-type de la mutation gaussienne à l'hérédité d'un trait.
 pub const MUTATION_SIGMA: f64 = 0.06;
@@ -281,6 +277,7 @@ pub(crate) fn nurse_infants(sim: &mut Sim) {
         // faim coupait le lait quelques heures chaque jour dans les grandes
         // bandes — 80 % des nourrissons morts de soif).
         let milk = mother_health.clamp(0.0, 1.0);
+        let mut milk_kcal = 0.0f64;
         let has_milk = milk > 0.0;
         if let Ok((pos, phys, behavior, illness)) = sim
             .agents
@@ -298,16 +295,19 @@ pub(crate) fn nurse_infants(sim: &mut Sim) {
             };
             if has_milk {
                 let relief = NURSE_RELIEF * milk;
-                crate::food_stats::fed(crate::food_stats::Source::Milk, relief.min(phys.hunger));
-                phys.hunger = (phys.hunger - relief).max(0.0);
+                let drunk = phys.eat_points(relief * phys.scale);
+                crate::food_stats::fed(crate::food_stats::Source::Milk, drunk);
+                milk_kcal = f64::from(drunk) * crate::energy::KCAL_PER_POINT;
                 phys.thirst = (phys.thirst - relief).max(0.0);
             }
         }
+        // La mère paie l'énergie du lait que l'enfant a bu (FAO/OMS/UNU 2004 :
+        // ~+505 kcal/j en allaitement exclusif), et son eau.
         if has_milk
             && let Some(entity) = mother_entity
             && let Ok(phys) = sim.agents.query_one_mut::<&mut Physiology>(entity)
         {
-            phys.hunger = (phys.hunger + NURSING_HUNGER_PER_TICK * milk).min(1.0);
+            phys.hunger = (phys.hunger + phys.hunger_of_kcal(milk_kcal as f32)).min(1.0);
             phys.thirst = (phys.thirst + NURSING_THIRST_PER_TICK * milk).min(1.0);
         }
     }

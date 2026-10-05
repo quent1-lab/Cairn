@@ -29,6 +29,7 @@ pub mod cult;
 pub mod curves;
 pub mod demography;
 pub mod disease;
+pub mod energy;
 pub mod divine;
 pub mod ecology;
 pub mod exposure;
