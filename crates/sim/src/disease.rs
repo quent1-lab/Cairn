@@ -83,6 +83,10 @@ const LUNG_CONTACT_P: f64 = 0.10;
 /// par an au chaud, cinq fois par an transi en permanence.
 const LUNG_ONSET_P: f64 = 1.0 / (360.0 * 24.0);
 const LUNG_COLD_FACTOR: f64 = 4.0;
+/// Plaie, par heure et par unité de gravité de la plaie : une plaie ouverte
+/// s'infecte. Choix (ordre de grandeur, ère sans antisepsie) : une plaie à
+/// mi-gravité, refermée en une semaine, s.infecte environ une fois sur six.
+const WOUND_INFECT_P: f64 = 0.004;
 
 /// Une infection en cours.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -173,6 +177,11 @@ pub fn water_risk(humans_near: usize) -> f64 {
 /// Probabilité horaire que le portage respiratoire devienne maladie.
 pub fn lung_onset_risk(cold: f32) -> f64 {
     LUNG_ONSET_P * (1.0 + LUNG_COLD_FACTOR * f64::from(cold))
+}
+
+/// Probabilité horaire qu'une plaie de gravité `wound` s'infecte.
+pub fn wound_infection_risk(wound: f32) -> f64 {
+    WOUND_INFECT_P * f64::from(wound)
 }
 
 /// Écart normal centré réduit (Box-Muller).

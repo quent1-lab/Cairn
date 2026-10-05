@@ -1216,9 +1216,10 @@ impl Sim {
             felt += structures::hut_warmth((pos.x, pos.y), membership.0, &huts);
             phys.drift(felt, behavior.activity, traits.endurance);
             // La plaie se referme lentement, quoi qu'il arrive (§3.1) — elle
-            // handicape le temps de guérir, mais ne s'infecte pas ici.
+            // handicape le temps de guérir, et peut s'infecter (plus bas).
             wound.0 = (wound.0 - WOUND_HEAL_PER_TICK).max(0.0);
-            // La maladie : boire à une eau souillée, avoir froid peuvent infecter ; toute
+            // La maladie : boire à une eau souillée, avoir froid, être blessé peuvent
+            // infecter ; toute
             // infection en cours ronge la santé selon la lutte de l'heure.
             if behavior.activity == Activity::Drinking {
                 let r2 = disease::SOIL_RADIUS_TILES * disease::SOIL_RADIUS_TILES;
@@ -1235,6 +1236,12 @@ impl Sim {
                 let mut rng = Pcg32::new(disease_seed ^ disease::Route::Lung as u64, id.0);
                 if rng.next_f64() < disease::lung_onset_risk(phys.cold) {
                     illness.infect(disease::Route::Lung, time.tick, &mut rng);
+                }
+            }
+            if wound.0 > 0.0 {
+                let mut rng = Pcg32::new(disease_seed ^ disease::Route::Wound as u64, id.0);
+                if rng.next_f64() < disease::wound_infection_risk(wound.0) {
+                    illness.infect(disease::Route::Wound, time.tick, &mut rng);
                 }
             }
             let defense = disease::defense(demo.age_years(time.tick), illness.milk, phys.hunger, phys.cold);
