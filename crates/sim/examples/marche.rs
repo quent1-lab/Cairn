@@ -59,6 +59,8 @@ struct Report {
     /// déplacement net médian (km) des troupeaux présents du début à la fin.
     herds_near: (usize, usize),
     herd_net_km: f64,
+    /// Herbivores, toutes têtes, au départ et à la fin (règle 5 : la faune).
+    herbivores: (f32, f32),
 }
 
 fn herds_at(sim: &Sim) -> BTreeMap<u64, (f64, f64)> {
@@ -143,6 +145,7 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
         m.values().filter(|p| ((p.0 - home.0 as f64).hypot(p.1 - home.1 as f64)) < km_to_tiles(10.0)).count()
     };
     let herds0 = herds_at(&sim);
+    r.herbivores.0 = sim.fauna_census().0;
     let mut hunted_today: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
     for _ in 0..days * TICKS_PER_DAY {
         sim.step();
@@ -200,6 +203,7 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
     nets.sort_by(f64::total_cmp);
     r.herd_net_km = nets.get(nets.len() / 2).copied().unwrap_or(f64::NAN);
     r.herds_near = (near(&herds0), near(&herds1));
+    r.herbivores.1 = sim.fauna_census().0;
     r
 }
 
@@ -257,7 +261,7 @@ fn print(rs: &[Report]) {
             4.0 * 24.0 * w as f64 / r.adult_h[s].max(1) as f64
         };
         println!(
-            "  {:<14}{:>5.0}° {:>2} → {:>2} h{:>8.1} ;{:>6.1}{:>8.0} %{:>8.0} %   troupeaux à 10 km {} → {}, déplacement net médian {:.1} km",
+            "  {:<14}{:>5.0}° {:>2} → {:>2} h{:>8.1} ;{:>6.1}{:>8.0} %{:>8.0} %   troupeaux à 10 km {} → {}, déplacement net médian {:.1} km, herbivores {:.0} → {:.0}",
             r.label,
             r.lat,
             r.day_hours.0,
@@ -268,7 +272,9 @@ fn print(rs: &[Report]) {
             100.0 * r.dark_sleep_h as f64 / r.dark_h.max(1) as f64,
             r.herds_near.0,
             r.herds_near.1,
-            r.herd_net_km
+            r.herd_net_km,
+            r.herbivores.0,
+            r.herbivores.1
         );
     }
 }

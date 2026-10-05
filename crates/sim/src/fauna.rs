@@ -395,6 +395,17 @@ impl Species {
         }
     }
 
+    /// L'espèce part-elle l'hiver vers le chaud (CHA-1b) ? Le renne, oui :
+    /// les caribous font jusqu'à ~1 200 km aller-retour par an, 19-55 km par
+    /// jour en migration. Le cerf est un migrateur **partiel** (une partie
+    /// des populations glisse de quelques dizaines de km vers un quartier
+    /// d'hiver ; le reste est résident) ; le bison passe l'hiver sur place en
+    /// grattant la neige, son domaine se resserre (8 km² contre 70). Faute de
+    /// modéliser le quartier d'hiver, cerf, aurochs et gazelle restent.
+    pub fn migrates_in_winter(self) -> bool {
+        matches!(self, Species::Reindeer)
+    }
+
     /// Rayon du domaine vital (CHA-1), d'après son aire A (r = √(A/π)) :
     /// biche de cerf 2-4 km² (Rùm, Clutton-Brock) ; bison d'Europe, proxy de
     /// l'aurochs, ~30 km² sur l'année (8 l'hiver, 70 l'été ; Białowieża) ;
@@ -983,10 +994,10 @@ pub fn update_herds(
                 {
                     prof[2] += t0.elapsed().as_nanos() as u64;
                 }
-            } else if winter {
+            } else if winter && herd.species.migrates_in_winter() {
                 // Seul l'hiver — la pâture gelée sur toute la bande — met le
-                // troupeau en route vers le chaud. Lentement. Le domaine suit
-                // le troupeau qui migre (CHA-1 ne touche pas l'hiver : CHA-1b).
+                // migrateur en route vers le chaud. Lentement. Le domaine suit
+                // le troupeau qui migre ; les résidents restent (CHA-1b).
                 herd.home = Some((pos.x, pos.y));
                 herd.state = HerdState::Migrating;
                 let dir = migration_heading(world, climate, (pos.x, pos.y), time);
