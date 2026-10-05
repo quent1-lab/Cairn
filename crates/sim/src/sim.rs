@@ -892,6 +892,7 @@ impl Sim {
             knows_agriculture,
             fervor,
             wound,
+            light: self.climate.light(pos.tile().1, time),
         };
         Some(brain::inspect(
             &mut self.world, time, &ctx, &mem, current, &herds, &packs, &humans, &clan_views,
@@ -1008,6 +1009,7 @@ impl Sim {
                         knows_agriculture: agriculture.is_some_and(|a| knowledge.has(a)),
                         fervor: faith.fervor,
                         wound: wound.0,
+                        light: self.climate.light(pos.tile().1, time),
                     };
                     behavior.task = brain::decide(
                         &mut self.world,

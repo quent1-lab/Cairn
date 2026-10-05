@@ -146,6 +146,8 @@ pub struct AgentCtx<'a> {
     /// La plaie de cet agent (`crate::agent::Wound`), dans [0, 1] : un blessé
     /// ne cherche pas la bagarre.
     pub wound: f32,
+    /// La lumière du jour là où il se tient (`Climate::light`), 0 à 1.
+    pub light: f32,
 }
 
 /// Choisit la prochaine tâche de l'agent. Déterministe : le tirage dérive de
@@ -491,7 +493,8 @@ fn build_candidates(
     }
 
     // — Dormir : sur place, surtout la nuit ; la fatigue extrême s'impose.
-    let night_factor = if time.is_night() { 1.15 } else { 0.55 };
+    // La nuit suit le soleil (MAR-1) : longue l'hiver et vers les pôles.
+    let night_factor = 0.55 + 0.6 * (1.0 - agent.light);
     let sleep_score = Curve::Power { k: 2.5 }.eval(phys.fatigue) * night_factor;
     candidates.push((TaskKind::Sleep, here, sleep_score));
     // — Ou rentrer dormir au campement (D10) : un membre de clan loin du foyer
