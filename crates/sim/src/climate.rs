@@ -69,6 +69,23 @@ impl Climate {
         self.daily_mean(tile, y, time) + diurnal
     }
 
+    /// Latitude en degrés à `y` : 0 sur un équateur, ±90 sur un pôle (la même
+    /// géométrie triangulaire que les saisons).
+    pub fn latitude_deg(&self, y: i64) -> f64 {
+        90.0 * self.latitude.signed_fraction(y)
+    }
+
+    /// Hauteur du soleil (degrés) au milieu de l'heure en cours, à `y`.
+    pub fn sun_elevation_deg(&self, y: i64, time: SimTime) -> f64 {
+        sun_elevation_deg(self.latitude_deg(y), time)
+    }
+
+    /// La lumière du jour, 0 (nuit noire) à 1 (plein jour), à `y` : voir
+    /// [`daylight`]. Sans la lune, qui viendra plus tard.
+    pub fn light(&self, y: i64, time: SimTime) -> f32 {
+        daylight(self.sun_elevation_deg(y, time))
+    }
+
     /// La végétation pousse-t-elle ce jour-là sur cette tuile ?
     pub fn grows(&self, tile: &Tile, y: i64, time: SimTime) -> bool {
         self.daily_mean(tile, y, time) > GROWTH_THRESHOLD_C
@@ -101,6 +118,36 @@ impl Climate {
     }
 }
 
+/// Inclinaison de l'axe du monde : la déclinaison du soleil oscille entre
+/// ±23,44° sur l'année (celle de la Terre).
+pub const AXIAL_TILT_DEG: f64 = 23.44;
+/// Fin du crépuscule civil : soleil à 6° sous l'horizon. Au-delà, il fait nuit
+/// pour l'œil (convention astronomique).
+pub const CIVIL_TWILIGHT_DEG: f64 = -6.0;
+
+/// Déclinaison du soleil (degrés) : −23,44° au solstice d'hiver « nord »
+/// (phase 0, comme les saisons), +23,44° six mois plus tard.
+pub fn declination_deg(time: SimTime) -> f64 {
+    -AXIAL_TILT_DEG * (std::f64::consts::TAU * time.year_phase()).cos()
+}
+
+/// Hauteur du soleil (degrés) à la latitude `lat_deg`, au milieu de l'heure en
+/// cours, midi solaire à 12 h : sin h = sin φ sin δ + cos φ cos δ cos ω,
+/// ω = 15° par heure depuis midi. La durée du jour en découle (cos ω₀ =
+/// −tan φ tan δ) : nuits longues l'hiver et vers les pôles.
+pub fn sun_elevation_deg(lat_deg: f64, time: SimTime) -> f64 {
+    let (phi, delta) = (lat_deg.to_radians(), declination_deg(time).to_radians());
+    let omega = (15.0 * (time.hour_of_day() as f64 + 0.5 - 12.0)).to_radians();
+    (phi.sin() * delta.sin() + phi.cos() * delta.cos() * omega.cos()).asin().to_degrees()
+}
+
+/// Lumière pour l'œil selon la hauteur du soleil : nulle sous le crépuscule
+/// civil (−6°), pleine à +6° (l'éclairement y dépasse déjà de loin ce qu'il
+/// faut pour voir) ; linéaire entre les deux. Choix de forme.
+pub fn daylight(elevation_deg: f64) -> f32 {
+    ((elevation_deg - CIVIL_TWILIGHT_DEG) / (2.0 * -CIVIL_TWILIGHT_DEG)).clamp(0.0, 1.0) as f32
+}
+
 /// Latitude signée en deçà de laquelle on ne nomme pas de saison : l'amplitude
 /// y vaut moins de ~3 °C sur l'année (voir [`SEASONAL_AMPLITUDE_C`]).
 const SEASONLESS_LATITUDE: f64 = 0.15;
@@ -131,6 +178,29 @@ mod tests {
     use super::*;
     use cairn_core::{TICKS_PER_YEAR, WorldSeed};
     use cairn_worldgen::WorldGen;
+
+    /// Heures de jour (soleil au-dessus de l'horizon) d'un jour donné.
+    fn day_hours(lat_deg: f64, day: u64) -> usize {
+        (0..24).filter(|h| sun_elevation_deg(lat_deg, SimTime { tick: day * cairn_core::TICKS_PER_DAY + h }) > 0.0).count()
+    }
+
+    /// La durée du jour suit la latitude et la saison, comme sur Terre : 12 h
+    /// toute l'année à l'équateur ; à 60°, ~6 h au solstice d'hiver et ~18 h
+    /// au solstice d'été ; nuit polaire et soleil de minuit au-delà du cercle.
+    #[test]
+    fn la_duree_du_jour_suit_latitude_et_saison() {
+        assert_eq!(day_hours(0.0, 0), 12);
+        assert_eq!(day_hours(0.0, 180), 12);
+        let (hiver, ete) = (day_hours(60.0, 0), day_hours(60.0, 180));
+        assert!((5..=7).contains(&hiver), "60° en hiver : {hiver} h");
+        assert!((17..=19).contains(&ete), "60° en été : {ete} h");
+        assert_eq!(day_hours(80.0, 0), 0, "nuit polaire");
+        assert_eq!(day_hours(80.0, 180), 24, "soleil de minuit");
+        // Hémisphère opposé : saisons inversées.
+        assert!(day_hours(-60.0, 0) > 15);
+        assert_eq!(daylight(-10.0), 0.0);
+        assert_eq!(daylight(10.0), 1.0);
+    }
 
     fn setup() -> (Climate, Tile) {
         let wg = WorldGen::new(WorldSeed(42));

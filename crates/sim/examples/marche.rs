@@ -42,6 +42,14 @@ struct Report {
     /// [sexe] tâche → heures de marche.
     walk_task: [BTreeMap<String, u64>; 2],
     adult_h: [u64; 2],
+    /// Régime : latitude du foyer (°), heures de jour au départ et à la fin.
+    lat: f64,
+    day_hours: (usize, usize),
+    /// Heures-adulte dans le noir (lumière nulle au foyer) ; dont endormis.
+    dark_h: u64,
+    dark_sleep_h: u64,
+    /// Heures-adulte de sommeil, dont dans le noir.
+    sleep_h: u64,
 }
 
 fn main() {
@@ -101,15 +109,24 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
             sim.spawn_pack(x as f64, y as f64, fauna::PACK_START);
         }
     }
+    let day_hours = |sim: &Sim| {
+        let day = sim.time.tick / TICKS_PER_DAY * TICKS_PER_DAY;
+        (0..TICKS_PER_DAY)
+            .filter(|h| sim.climate.sun_elevation_deg(home.1, cairn_core::SimTime { tick: day + h }) > 0.0)
+            .count()
+    };
     let mut r = Report {
         label: format!("{} {seed}", if cold { "froid" } else { "tempéré" }),
         by_hour: vec![vec![[0; 10]; 24]; 2],
+        lat: sim.climate.latitude_deg(home.1),
         ..Report::default()
     };
+    let first_day_hours = day_hours(&sim);
     for _ in 0..days * TICKS_PER_DAY {
         sim.step();
         let tick = sim.time.tick;
         let hour = (tick % TICKS_PER_DAY) as usize;
+        let dark = sim.climate.light(home.1, sim.time) == 0.0;
         for (_, (demo, behavior)) in sim.agents.query::<(&Demographics, &Behavior)>().iter() {
             if !demo.is_adult(tick) {
                 continue;
@@ -117,6 +134,12 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
             let s = usize::from(demo.sex == Sex::Male);
             r.adult_h[s] += 1;
             r.by_hour[s][hour][slot(behavior.activity)] += 1;
+            let asleep = behavior.activity == Activity::Sleeping;
+            r.sleep_h += u64::from(asleep);
+            if dark {
+                r.dark_h += 1;
+                r.dark_sleep_h += u64::from(asleep);
+            }
             if behavior.activity == Activity::Walking {
                 let task = behavior.task.map_or("(aucune)".to_string(), |t| {
                     let name = format!("{:?}", t.kind);
@@ -126,6 +149,7 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
             }
         }
     }
+    r.day_hours = (first_day_hours, day_hours(&sim));
     r
 }
 
@@ -170,12 +194,22 @@ fn print(rs: &[Report]) {
             println!("  {k:<18}{:>6.2}", per_day(*n));
         }
     }
-    println!("\n## par run : marche km/j femmes ; hommes");
+    println!("\n## par run : régime (latitude, heures de jour départ → fin) ; marche km/j femmes ; hommes ; sommeil dans le noir ; noir passé à dormir");
     for r in rs {
         let km = |s: usize| {
             let w: u64 = (0..24).map(|h| r.by_hour[s][h][2]).sum();
             4.0 * 24.0 * w as f64 / r.adult_h[s].max(1) as f64
         };
-        println!("  {:<14}{:>6.1} ;{:>6.1}", r.label, km(0), km(1));
+        println!(
+            "  {:<14}{:>5.0}° {:>2} → {:>2} h{:>8.1} ;{:>6.1}{:>8.0} %{:>8.0} %",
+            r.label,
+            r.lat,
+            r.day_hours.0,
+            r.day_hours.1,
+            km(0),
+            km(1),
+            100.0 * r.dark_sleep_h as f64 / r.sleep_h.max(1) as f64,
+            100.0 * r.dark_sleep_h as f64 / r.dark_h.max(1) as f64
+        );
     }
 }
