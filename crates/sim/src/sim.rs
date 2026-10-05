@@ -1218,7 +1218,7 @@ impl Sim {
             // La plaie se referme lentement, quoi qu'il arrive (§3.1) — elle
             // handicape le temps de guérir, mais ne s'infecte pas ici.
             wound.0 = (wound.0 - WOUND_HEAL_PER_TICK).max(0.0);
-            // La maladie : boire à une eau souillée peut infecter ; toute
+            // La maladie : boire à une eau souillée, avoir froid peuvent infecter ; toute
             // infection en cours ronge la santé selon la lutte de l'heure.
             if behavior.activity == Activity::Drinking {
                 let r2 = disease::SOIL_RADIUS_TILES * disease::SOIL_RADIUS_TILES;
@@ -1229,6 +1229,12 @@ impl Sim {
                 let mut rng = Pcg32::new(disease_seed, id.0);
                 if rng.next_f64() < disease::water_risk(near) {
                     illness.infect(disease::Route::Gut, time.tick, &mut rng);
+                }
+            }
+            {
+                let mut rng = Pcg32::new(disease_seed ^ disease::Route::Lung as u64, id.0);
+                if rng.next_f64() < disease::lung_onset_risk(phys.cold) {
+                    illness.infect(disease::Route::Lung, time.tick, &mut rng);
                 }
             }
             let defense = disease::defense(demo.age_years(time.tick), illness.milk, phys.hunger, phys.cold);

@@ -16,8 +16,8 @@
 //! source, plus on y tombe malade).
 //!
 //! Trois voies, parce qu'elles n'ont ni les mêmes sources ni les mêmes
-//! remèdes futurs : **digestive** (eau, contact), **respiratoire** (portage,
-//! contagion), **plaie** (infection d'une blessure). Les remèdes, l'hygiène,
+//! remèdes futurs : **digestive** (eau, contact), **respiratoire** (portage
+//! réveillé par le froid, contagion), **plaie** (infection d'une blessure). Les remèdes, l'hygiène,
 //! l'immunisation viendront des techniques (vision de l'utilisateur) : ils
 //! agiront sur l'exposition, l'immunité ou la clairance — jamais sur une
 //! létalité, qui n'existe pas comme paramètre.
@@ -75,6 +75,14 @@ pub const SOIL_RADIUS_TILES: f64 = km_to_tiles(0.1);
 /// par malade (voie digestive : mains, nourriture partagée).
 const CONTACT_RADIUS_TILES: f64 = km_to_tiles(0.01);
 const GUT_CONTACT_P: f64 = 0.05;
+/// Respiratoire : la contagion par l'air porte plus loin dans le sommeil
+/// partagé que les mains sales.
+const LUNG_CONTACT_P: f64 = 0.10;
+/// Respiratoire, par heure : le portage (des germes que chacun héberge sans
+/// mal) devient maladie, d'autant plus que le corps a froid. Choix : une fois
+/// par an au chaud, cinq fois par an transi en permanence.
+const LUNG_ONSET_P: f64 = 1.0 / (360.0 * 24.0);
+const LUNG_COLD_FACTOR: f64 = 4.0;
 
 /// Une infection en cours.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -162,6 +170,11 @@ pub fn water_risk(humans_near: usize) -> f64 {
     WATER_BACKGROUND_P + WATER_PER_HUMAN_P * humans_near as f64
 }
 
+/// Probabilité horaire que le portage respiratoire devienne maladie.
+pub fn lung_onset_risk(cold: f32) -> f64 {
+    LUNG_ONSET_P * (1.0 + LUNG_COLD_FACTOR * f64::from(cold))
+}
+
 /// Écart normal centré réduit (Box-Muller).
 fn gaussian(rng: &mut Pcg32) -> f32 {
     let u1 = rng.next_f64().max(f64::MIN_POSITIVE);
@@ -170,33 +183,36 @@ fn gaussian(rng: &mut Pcg32) -> f32 {
 }
 
 /// La contagion de la nuit, à minuit : chaque dormeur sain s'expose aux
-/// malades couchés près de lui.
+/// malades couchés près de lui, voie par voie (une plaie ne se transmet pas).
 pub(crate) fn daily(sim: &mut Sim) {
     let tick = sim.time.tick;
     let seed = sim.world.seed();
-    let sick: Vec<(f64, f64)> = sim
-        .agents
-        .query::<(&Position, &Illness)>()
-        .iter()
-        .filter(|(_, (_, ill))| ill.is_sick(Route::Gut))
-        .map(|(_, (pos, _))| (pos.x, pos.y))
-        .collect();
-    if sick.is_empty() {
-        return;
-    }
-    let r2 = CONTACT_RADIUS_TILES * CONTACT_RADIUS_TILES;
-    for (_, (id, pos, ill)) in sim.agents.query_mut::<(&AgentId, &Position, &mut Illness)>() {
-        if ill.is_sick(Route::Gut) {
+    for (route, beta) in [(Route::Gut, GUT_CONTACT_P), (Route::Lung, LUNG_CONTACT_P)] {
+        let sick: Vec<(f64, f64)> = sim
+            .agents
+            .query::<(&Position, &Illness)>()
+            .iter()
+            .filter(|(_, (_, ill))| ill.is_sick(route))
+            .map(|(_, (pos, _))| (pos.x, pos.y))
+            .collect();
+        if sick.is_empty() {
             continue;
         }
-        let k = sick.iter().filter(|(x, y)| (pos.x - x).powi(2) + (pos.y - y).powi(2) <= r2).count();
-        if k == 0 {
-            continue;
-        }
-        let p = 1.0 - (1.0 - GUT_CONTACT_P).powi(k as i32);
-        let mut rng = Pcg32::new(seed.derive(salt::CONTAGION) ^ splitmix64(tick), id.0);
-        if rng.next_f64() < p {
-            ill.infect(Route::Gut, tick, &mut rng);
+        let r2 = CONTACT_RADIUS_TILES * CONTACT_RADIUS_TILES;
+        let stream = seed.derive(salt::CONTAGION) ^ splitmix64(tick) ^ route as u64;
+        for (_, (id, pos, ill)) in sim.agents.query_mut::<(&AgentId, &Position, &mut Illness)>() {
+            if ill.is_sick(route) {
+                continue;
+            }
+            let k = sick.iter().filter(|(x, y)| (pos.x - x).powi(2) + (pos.y - y).powi(2) <= r2).count();
+            if k == 0 {
+                continue;
+            }
+            let p = 1.0 - (1.0 - beta).powi(k as i32);
+            let mut rng = Pcg32::new(stream, id.0);
+            if rng.next_f64() < p {
+                ill.infect(route, tick, &mut rng);
+            }
         }
     }
 }
