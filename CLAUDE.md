@@ -54,9 +54,7 @@ Chacune vient d'une erreur réelle, pas d'un principe. Elles priment sur l'intui
 
 ## Où reprendre
 
-**Chantier suivant : la mortalité de fond** (maladie, accidents, mortalité infantile). Le chantier de l'eau est soldé (2026-10-05) : morts de soif 18 → 0 sur 8 runs × 3 ans, mais la mortalité est désormais **nulle sur 6/8** — la soif était le seul régulateur (croissance 10-17 %/an, réel ≈ 0,1-0,5 %). Question posée à l'utilisateur avant toute lecture : mécanismes causés (contagion selon contact et densité, accidents selon l'activité) ou taux de fond par âge tiré des tables réelles ?
-
-Ensuite : taille des bandes (400 sans scission) ; D13 (violence, prototype R1 sur `d13-blesses` en attente de décision) ; D9 ; D7 avant la phase 6 ; la performance (objectif de sortie du chantier de dérive : ≥ 20 tps chaque année, 50 ans, 4 seeds, 2 scènes) ; D1 et D3 bloqués (500 ans). Phase 6 (serveur) suspendue.
+**Registre des chantiers et ordre : [docs/CODE.md](docs/CODE.md) §5.1-5.2** (codes et jalons ; demande de l'utilisateur, 2026-10-05 : redonner l'ordre à chaque modification). **En cours : MAR-1** (la lumière : soleil selon latitude, date et heure), puis MAR-2 à 5 ; ensuite ENE-4, MOR-4 (sevrage) à MOR-7, ENE-5, BAN, D13, D2, D9, D7, PERF ; D1/D3 bloqués. Phase 6 (serveur) suspendue. Principe redit par l'utilisateur : « on laisse les contraintes dicter leurs actes, on ne scripte rien (on modélise juste le réel) ».
 
 **Où lire** : [docs/BRIEF.md](docs/BRIEF.md) (référence) · [docs/CODE.md](docs/CODE.md) (lecture du code, défauts, ordre des chantiers) · [docs/CARTE.md](docs/CARTE.md) (chantier de performance) · [docs/ETAT.md](docs/ETAT.md) (état détaillé, acquis négatifs à ne pas retenter) · [docs/COMMANDES.md](docs/COMMANDES.md) (bancs, arguments, durées, environnement) · [docs/JOURNAL.md](docs/JOURNAL.md) (historique, par `grep`) · [docs/CARNET.md](docs/CARNET.md) (récit en prose ; n'y écrire que quand la pensée a vraiment bougé, ou sur demande).
 
