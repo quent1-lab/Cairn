@@ -322,11 +322,11 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                 }
             }
             seen_deaths = sim.deaths.len();
-            let health_by_id: BTreeMap<u64, f32> = sim
+            let milk_by_id: BTreeMap<u64, f32> = sim
                 .agents
                 .query::<(&AgentId, &Physiology)>()
                 .iter()
-                .map(|(_, (id, p))| (id.0, p.health))
+                .map(|(_, (id, p))| (id.0, cairn_sim::demography::milk_flow(p)))
                 .collect();
             parched = sim
                 .agents
@@ -337,10 +337,10 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                     let infant = if !demo.is_infant(sim.time.tick) {
                         0
                     } else {
-                        // Mère « sans lait » : réserves sous la moitié (le lait suit la santé).
-                        match kin.mother.and_then(|m| health_by_id.get(&m.0)) {
+                        // Mère « sans lait » : pas de lait à partager (`milk_flow`).
+                        match kin.mother.and_then(|m| milk_by_id.get(&m.0)) {
                             None => 1,
-                            Some(&h) if h < cairn_sim::demography::MILK_TO_SPARE_HEALTH => 2,
+                            Some(&h) if h < cairn_sim::demography::MILK_TO_SPARE => 2,
                             Some(_) => 3,
                         }
                     };

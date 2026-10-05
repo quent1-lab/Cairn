@@ -61,10 +61,24 @@ pub const CONCEPTION_DAILY_P: f64 = 0.012;
 /// Ce que l'allaitement retire par tick aux besoins du nourrisson, en part de
 /// sa faim (couvre faim et soif : le lait est les deux).
 pub const NURSE_RELIEF: f32 = 0.1;
-/// Santé (réserves) en deçà de laquelle une femme qui allaite n'a plus de
-/// lait **à partager** : elle ne prend pas d'orphelin (allomaternage). Son
-/// propre enfant, lui, reçoit un lait qui suit sa santé (`nurse_infants`).
-pub const MILK_TO_SPARE_HEALTH: f32 = 0.5;
+/// Débit de lait (voir [`milk_flow`]) en deçà duquel une femme qui allaite
+/// n'en a plus **à partager** : elle ne prend pas d'orphelin (allomaternage).
+/// 0,85 : réserves à moitié entamées.
+pub const MILK_TO_SPARE: f32 = 0.85;
+/// Baisse du lait quand les réserves de la mère sont vides, par rapport à des
+/// réserves pleines. Prentice et al. (Gambie) : −31 % d'apport à la mère,
+/// −11 % de lait bu ; un supplément ne l'augmente pas — la lactation est
+/// tamponnée par les réserves.
+pub const MILK_DEPLETION_LOSS: f32 = 0.3;
+
+/// Le lait d'une mère (0 à 1) : il suit ses **réserves**, pas sa santé de
+/// l'heure — une mère malade continue d'allaiter (décision de l'utilisateur,
+/// option a, 2026-10-05). Réserves vides (phase protéique), il tarit avec
+/// le corps.
+pub fn milk_flow(mother: &Physiology) -> f32 {
+    let buffered = 1.0 - MILK_DEPLETION_LOSS * mother.depletion();
+    if mother.reserves_kcal > 0.0 { buffered } else { buffered * mother.health.clamp(0.0, 1.0) }
+}
 /// Le lait coûte aussi de l'eau.
 pub const NURSING_THIRST_PER_TICK: f32 = THIRST_PER_TICK * 0.3;
 
@@ -265,18 +279,16 @@ pub(crate) fn nurse_infants(sim: &mut Sim) {
             let pos = sim.agents.get::<&Position>(entity).ok()?;
             let phys = sim.agents.get::<&Physiology>(entity).ok()?;
             let behavior = sim.agents.get::<&Behavior>(entity).ok()?;
-            Some(((pos.x, pos.y), behavior.activity, phys.health))
+            Some(((pos.x, pos.y), behavior.activity, milk_flow(&phys)))
         });
 
-        let Some(((mx, my), mother_activity, mother_health)) = mother_state else {
+        let Some(((mx, my), mother_activity, milk)) = mother_state else {
             continue; // orphelin : cloué sur place, les besoins montent
         };
-        // Le lait suit les **réserves** de la mère (sa santé), pas sa faim de
-        // l'heure : la lactation résiste à une sous-alimentation modérée et ne
-        // tarit que dans une famine qui dure (défaut G : une porte à 0,95 de
-        // faim coupait le lait quelques heures chaque jour dans les grandes
-        // bandes — 80 % des nourrissons morts de soif).
-        let milk = mother_health.clamp(0.0, 1.0);
+        // Le lait suit les **réserves** de la mère (`milk_flow`), pas sa faim
+        // de l'heure ni sa santé : la lactation résiste à une sous-alimentation
+        // modérée et ne tarit que dans une famine qui dure (défaut G : une
+        // porte à 0,95 de faim coupait le lait quelques heures chaque jour).
         let mut milk_kcal = 0.0f64;
         let has_milk = milk > 0.0;
         if let Ok((pos, phys, behavior, illness)) = sim
@@ -360,7 +372,7 @@ pub(crate) fn adopt_orphans(sim: &mut Sim) {
     let day = tick / TICKS_PER_DAY;
     struct V {
         pos: (f64, f64),
-        health: f32,
+        milk: f32,
         female_adult: bool,
         infant: bool,
         mother: Option<u64>,
@@ -375,7 +387,7 @@ pub(crate) fn adopt_orphans(sim: &mut Sim) {
                 id.0,
                 V {
                     pos: (pos.x, pos.y),
-                    health: phys.health,
+                    milk: milk_flow(phys),
                     female_adult: demo.sex == Sex::Female && demo.is_adult(tick),
                     infant: demo.is_infant(tick),
                     mother: kin.mother.map(|m| m.0),
@@ -411,7 +423,7 @@ pub(crate) fn adopt_orphans(sim: &mut Sim) {
             .filter_map(|w| views.get(w).map(|v| (*w, v)))
             .filter(|(_, v)| {
                 v.female_adult
-                    && v.health >= MILK_TO_SPARE_HEALTH
+                    && v.milk >= MILK_TO_SPARE
                     && (v.pos.0 - c.pos.0).hypot(v.pos.1 - c.pos.1) <= crate::social::RESIDENCE_RADIUS_TILES
             })
             .map(|(w, v)| {
@@ -593,6 +605,19 @@ mod tests {
         let a = Traits::inherit(&Traits::default(), &Traits::default(), &mut Pcg32::new(9, 1));
         let b = Traits::inherit(&Traits::default(), &Traits::default(), &mut Pcg32::new(9, 1));
         assert_eq!(a, b);
+    }
+
+    /// Le lait suit les réserves, pas la santé : une mère malade (santé 0,3)
+    /// aux réserves pleines allaite pleinement ; une mère aux réserves vides
+    /// en donne moins (Prentice), et plus du tout si son corps s'effondre.
+    #[test]
+    fn le_lait_suit_les_reserves_pas_la_maladie() {
+        let sick = Physiology { health: 0.3, reserves_kcal: 30_000.0, reserve_target: 30_000.0, ..Physiology::default() };
+        assert!((milk_flow(&sick) - 1.0).abs() < 1e-6, "mère malade : {}", milk_flow(&sick));
+        let lean = Physiology { health: 1.0, reserves_kcal: 1.0, reserve_target: 30_000.0, ..Physiology::default() };
+        assert!((0.65..0.75).contains(&milk_flow(&lean)), "réserves presque vides : {}", milk_flow(&lean));
+        let wasted = Physiology { health: 0.1, reserves_kcal: 0.0, reserve_target: 30_000.0, ..Physiology::default() };
+        assert!(milk_flow(&wasted) < 0.1);
     }
 
     #[test]

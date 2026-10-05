@@ -2965,12 +2965,13 @@ mod tests {
     /// ou rien — faim de la mère ≥ 0,95, plus une goutte. Une faim qui frôle
     /// le maximum quelques heures par jour coupait le lait chaque jour. La
     /// lactation résiste pourtant à une sous-alimentation modérée : elle ne
-    /// tarit que dans une famine qui dure, quand les réserves (la santé)
-    /// s'usent. Les deux bouts : quelques heures de faim ne coupent rien ;
-    /// une famine longue tarit le lait.
+    /// tarit que dans une famine qui dure, quand les réserves s'épuisent
+    /// (depuis le bilan énergétique, les réserves de graisse ; avant, la santé
+    /// en tenait lieu). Les deux bouts : quelques heures de faim ne coupent
+    /// rien ; une famine longue tarit le lait.
     #[test]
     fn le_lait_ne_tarit_que_dans_une_famine_qui_dure() {
-        let infant_thirst_after = |mother_health: f32| -> f32 {
+        let infant_thirst_after = |exhausted: bool| -> f32 {
             let (mut sim, home) = scenario_setup(42, 0, 0);
             let mother = sim.spawn_agent(home.0 as f64 + 0.5, home.1 as f64 + 0.5);
             let infant = sim.spawn_child(
@@ -2981,12 +2982,16 @@ mod tests {
                 Kinship { mother: Some(mother), father: None },
             );
             for _ in 0..48 {
-                // La mère a très faim (au-dessus de l'ancien seuil), mais sa
-                // santé dit si ses réserves tiennent.
+                // La mère a très faim (au-dessus de l'ancien seuil) ; ses
+                // réserves tiennent, ou la famine les a vidées et le corps
+                // s'effondre.
                 for (_, (id, phys)) in sim.agents.query_mut::<(&AgentId, &mut Physiology)>() {
                     if *id == mother {
                         phys.hunger = 0.97;
-                        phys.health = mother_health;
+                        if exhausted {
+                            phys.reserves_kcal = 0.0;
+                            phys.health = 0.1;
+                        }
                     }
                 }
                 demography::nurse_infants(&mut sim);
@@ -3003,9 +3008,9 @@ mod tests {
                 .map(|(_, (_, p))| p.thirst)
                 .unwrap()
         };
-        let reserves = infant_thirst_after(1.0);
+        let reserves = infant_thirst_after(false);
         assert!(reserves < 0.3, "une mère affamée mais pas épuisée allaite encore ({reserves:.2})");
-        let epuisee = infant_thirst_after(0.1);
+        let epuisee = infant_thirst_after(true);
         assert!(epuisee > reserves + 0.3, "une mère épuisée par la famine n'a presque plus de lait ({epuisee:.2})");
     }
 
