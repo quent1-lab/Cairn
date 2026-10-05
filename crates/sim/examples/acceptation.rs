@@ -95,6 +95,12 @@ struct Report {
     // vécus dans chaque classe (le dénominateur d'un taux).
     deaths_by_age: [[usize; CAUSES.len()]; AGE_CLASSES.len()],
     person_days: [u64; AGE_CLASSES.len()],
+    // Maladie : morts, dont affamés l'heure d'avant (faim > 0,7) ;
+    // heures-personnes malades contre vécues, enfants (< 15 ans) et adultes.
+    disease_deaths: usize,
+    disease_hungry: usize,
+    sick_h: [u64; 2],
+    lived_h: [u64; 2],
 }
 
 /// Classes d'âge du tableau de mortalité : bornes inférieures, en années.
@@ -217,6 +223,7 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
         .map(|(_, (id, d))| (id.0, d.born_tick))
         .collect();
     let mut seen_births = 0usize;
+    let mut prev_hunger: BTreeMap<u64, f32> = BTreeMap::new();
     let total_days = years * 360;
     let mut year_started = std::time::Instant::now();
     for day in 1..=total_days {
@@ -279,6 +286,10 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                 if let Some(&b) = born.get(&d.agent.0) {
                     let age = (d.tick as i64 - b) as f64 / cairn_core::TICKS_PER_YEAR as f64;
                     r.deaths_by_age[age_class(age)][cause_index(d.cause)] += 1;
+                }
+                if d.cause == cairn_sim::DeathCause::Disease {
+                    r.disease_deaths += 1;
+                    r.disease_hungry += usize::from(prev_hunger.get(&d.agent.0).is_some_and(|&h| h > 0.7));
                 }
                 if d.cause == cairn_sim::DeathCause::Dehydration {
                     r.thirst_deaths += 1;
@@ -359,6 +370,11 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                 .iter()
                 .map(|(_, (id, p))| (id.0, p.hunger))
                 .collect();
+            for (_, (demo, ill)) in sim.agents.query::<(&cairn_sim::Demographics, &cairn_sim::Illness)>().iter() {
+                let k = usize::from(demo.is_adult(sim.time.tick));
+                r.lived_h[k] += 1;
+                r.sick_h[k] += u64::from(ill.active.iter().any(Option::is_some));
+            }
             prev = sim
                 .clans
                 .iter()
@@ -369,6 +385,7 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                     (c.id.0, members, h)
                 })
                 .collect();
+            prev_hunger = hunger_of;
         }
         if day % 360 == 0 {
             r.pop_years.push(sim.population());
@@ -526,6 +543,10 @@ fn print_table(rs: &[Report], years: u64) {
     });
     line("…nourrissons : orphelins ; mère sans lait ; autre", &|r| {
         format!("{} ; {} ; {}", r.infant_orphan, r.infant_dry_mother, r.infant_other)
+    });
+    line("morts de maladie (dont affamés)", &|r| format!("{} ({})", r.disease_deaths, r.disease_hungry));
+    line("malades : part du temps, enfants ; adultes", &|r| {
+        format!("{} ; {}", pct(r.sick_h[0], r.lived_h[0]), pct(r.sick_h[1], r.lived_h[1]))
     });
     line("trajets refusés faute de budget", &|r| r.path_denied.to_string());
     line("mortalité ‰/an : <1 ; 1-4 ; 5-14", &|r| {
