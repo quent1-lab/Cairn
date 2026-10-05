@@ -2765,44 +2765,47 @@ mod tests {
     /// La zone se vide des deux façons — on en tue, et les autres décampent.
     #[test]
     fn la_surchasse_effondre_le_gibier_local() {
-        // Trente jours et non quinze : la mise à mort est incertaine depuis D10
-        // (~10 % par journée de chasse). Au-delà, les troupeaux quittent d'eux-mêmes les 3 km
-        // même sans chasseur (mesuré : 100 → 0 à 90 jours), et le témoin ne
-        // témoigne plus de rien.
+        // Trente jours, **en été** et sur **quatre seeds** (CHA-1, règle 7). En
+        // hiver (départ au jour 0), le gibier migre vers le chaud et quitte la
+        // zone même sans chasseur : le témoin n'y témoignait de rien sur deux
+        // seeds sur quatre (7 et 2024 : 100 → 0 têtes sans un humain) — un
+        // défaut de ce test, présent avant CHA-1. En été, mesuré : le témoin
+        // reste (101-134 têtes à 3 km) et la zone chassée se vide sur 4/4
+        // (9 à 58 têtes tuées par seed). Depuis la fidélité au domaine (CHA-1),
+        // un troupeau dérangé revient : la zone ne se vide plus seulement par la
+        // fuite, mais par les prises.
         let jours = 24 * 30;
-        let cheptel = |agents: u32| {
-            let (mut sim, home) = scenario_au_foyer(42, agents, 4);
-            let depart = local_herbivores(&sim, home, 3.0);
-            // La pression de chasse vient de la vie même : la faim qui revient,
-            // la réserve du clan qui manque. On ne force plus la faim à 0,9
-            // (D10) : depuis la nuit et la sortie de chasse (MAR-2, MAR-4), un
-            // affamé forcé en permanence cueille ce qui est à portée plutôt que
-            // de chercher un gibier hors de vue — mesuré : 3 têtes en 30 j
-            // forcés, 53 sans forçage.
-            for _ in 0..jours {
-                sim.step();
-            }
-            (depart, local_herbivores(&sim, home, 3.0), sim.hunted_head)
-        };
-
-        let (depart, temoin, tue_temoin) = cheptel(0);
-        let (_, surchasse, tue_surchasse) = cheptel(60);
-
-        assert_eq!(tue_temoin, 0.0, "témoin : personne ne chasse");
-        assert!(
-            temoin > depart * 0.5,
-            "témoin : le gibier doit rester sur place ({depart:.0} → {temoin:.0} têtes) — \
-             sinon le test ne mesure pas la chasse mais la dérive des troupeaux"
-        );
-        assert!(
-            tue_surchasse > 20.0,
-            "les chasseurs doivent prélever du gibier ({tue_surchasse:.0} têtes)"
-        );
-        assert!(
-            surchasse < temoin * 0.2,
-            "effondrement local attendu : {surchasse:.0} têtes à 3 km sous 60 chasseurs, \
-             contre {temoin:.0} sans (départ {depart:.0})"
-        );
+        let mut tues = 0.0;
+        for seed in [42u64, 7, 1337, 2024] {
+            let cheptel = |agents: u32| {
+                let (mut sim, home) = scenario_au_foyer(seed, agents, 4);
+                sim.time.tick = 135 * cairn_core::TICKS_PER_DAY;
+                let depart = local_herbivores(&sim, home, 3.0);
+                // La pression de chasse vient de la vie même : la faim qui
+                // revient, la réserve du clan qui manque (on ne force plus la
+                // faim : un affamé forcé cueille plutôt que de chercher un
+                // gibier hors de vue — MAR-2, MAR-4).
+                for _ in 0..jours {
+                    sim.step();
+                }
+                (depart, local_herbivores(&sim, home, 3.0), sim.hunted_head)
+            };
+            let (depart, temoin, tue_temoin) = cheptel(0);
+            let (_, surchasse, tue_surchasse) = cheptel(60);
+            tues += tue_surchasse;
+            assert_eq!(tue_temoin, 0.0, "témoin : personne ne chasse");
+            assert!(
+                temoin > depart * 0.5,
+                "seed {seed}, témoin : le gibier doit rester sur place ({depart:.0} → {temoin:.0} têtes) — \
+                 sinon le test ne mesure pas la chasse mais la dérive des troupeaux"
+            );
+            assert!(
+                surchasse < temoin * 0.2,
+                "seed {seed} : effondrement local attendu : {surchasse:.0} têtes à 3 km sous 60 chasseurs, \
+                 contre {temoin:.0} sans (départ {depart:.0})"
+            );
+        }
+        assert!(tues > 20.0, "les chasseurs doivent prélever du gibier ({tues:.0} têtes sur 4 seeds)");
     }
 
     #[test]

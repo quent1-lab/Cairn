@@ -55,6 +55,18 @@ struct Report {
     kills: f32,
     hunter_days: u64,
     adult_days: u64,
+    /// Gibier : troupeaux à moins de 10 km du foyer au départ et à la fin ;
+    /// déplacement net médian (km) des troupeaux présents du début à la fin.
+    herds_near: (usize, usize),
+    herd_net_km: f64,
+}
+
+fn herds_at(sim: &Sim) -> BTreeMap<u64, (f64, f64)> {
+    sim.fauna
+        .query::<(&cairn_sim::FaunaId, &cairn_sim::Herd, &cairn_sim::Position)>()
+        .iter()
+        .map(|(_, (id, _, p))| (id.0, (p.x, p.y)))
+        .collect()
 }
 
 fn main() {
@@ -127,6 +139,10 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
         ..Report::default()
     };
     let first_day_hours = day_hours(&sim);
+    let near = |m: &BTreeMap<u64, (f64, f64)>| {
+        m.values().filter(|p| ((p.0 - home.0 as f64).hypot(p.1 - home.1 as f64)) < km_to_tiles(10.0)).count()
+    };
+    let herds0 = herds_at(&sim);
     let mut hunted_today: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
     for _ in 0..days * TICKS_PER_DAY {
         sim.step();
@@ -176,6 +192,14 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
     }
     r.day_hours = (first_day_hours, day_hours(&sim));
     r.kills = sim.hunted_head;
+    let herds1 = herds_at(&sim);
+    let mut nets: Vec<f64> = herds0
+        .iter()
+        .filter_map(|(id, a)| herds1.get(id).map(|b| cairn_core::tiles_to_km((a.0 - b.0).hypot(a.1 - b.1))))
+        .collect();
+    nets.sort_by(f64::total_cmp);
+    r.herd_net_km = nets.get(nets.len() / 2).copied().unwrap_or(f64::NAN);
+    r.herds_near = (near(&herds0), near(&herds1));
     r
 }
 
@@ -233,7 +257,7 @@ fn print(rs: &[Report]) {
             4.0 * 24.0 * w as f64 / r.adult_h[s].max(1) as f64
         };
         println!(
-            "  {:<14}{:>5.0}° {:>2} → {:>2} h{:>8.1} ;{:>6.1}{:>8.0} %{:>8.0} %",
+            "  {:<14}{:>5.0}° {:>2} → {:>2} h{:>8.1} ;{:>6.1}{:>8.0} %{:>8.0} %   troupeaux à 10 km {} → {}, déplacement net médian {:.1} km",
             r.label,
             r.lat,
             r.day_hours.0,
@@ -241,7 +265,10 @@ fn print(rs: &[Report]) {
             km(0),
             km(1),
             100.0 * r.dark_sleep_h as f64 / r.sleep_h.max(1) as f64,
-            100.0 * r.dark_sleep_h as f64 / r.dark_h.max(1) as f64
+            100.0 * r.dark_sleep_h as f64 / r.dark_h.max(1) as f64,
+            r.herds_near.0,
+            r.herds_near.1,
+            r.herd_net_km
         );
     }
 }

@@ -395,6 +395,22 @@ impl Species {
         }
     }
 
+    /// Rayon du domaine vital (CHA-1), d'après son aire A (r = √(A/π)) :
+    /// biche de cerf 2-4 km² (Rùm, Clutton-Brock) ; bison d'Europe, proxy de
+    /// l'aurochs, ~30 km² sur l'année (8 l'hiver, 70 l'été ; Białowieża) ;
+    /// gazelle et renne, ordre de grandeur à sourcer (10 et 30 km² hors
+    /// migration).
+    pub fn home_range_radius(self) -> f64 {
+        let km2: f64 = match self {
+            Species::Deer => 3.0,
+            Species::Aurochs => 30.0,
+            Species::Gazelle => 10.0,
+            Species::Reindeer => 30.0,
+            _ => 3.0,
+        };
+        km_to_tiles((km2 / std::f64::consts::PI).sqrt())
+    }
+
     /// Énergie comestible d'une bête, en kcal : masse vivante × part
     /// consommable (~50 % chez les grands ongulés : viande, graisse, abats,
     /// moelle ; White 1953) × ~1 200 kcal/kg (gibier cru maigre, USDA — bas de
@@ -490,6 +506,10 @@ pub struct Herd {
     /// Foyer auquel le cheptel est **ancré** : tant qu'il est gardé, il reste à
     /// proximité (il ne migre plus, ne dérive plus). `None` = libre.
     pub anchor: Option<(f64, f64)>,
+    /// Centre du **domaine vital** du troupeau sauvage (CHA-1) : là où il est
+    /// né ou arrivé ; posé au premier tour. Il y revient après une fuite, et
+    /// n'en sort pas pour brouter — la fidélité au site des ongulés.
+    pub home: Option<(f64, f64)>,
 }
 
 impl Herd {
@@ -502,6 +522,7 @@ impl Herd {
             species,
             tameness: 0.0,
             anchor: None,
+            home: None,
         }
     }
 }
@@ -964,7 +985,9 @@ pub fn update_herds(
                 }
             } else if winter {
                 // Seul l'hiver — la pâture gelée sur toute la bande — met le
-                // troupeau en route vers le chaud. Lentement.
+                // troupeau en route vers le chaud. Lentement. Le domaine suit
+                // le troupeau qui migre (CHA-1 ne touche pas l'hiver : CHA-1b).
+                herd.home = Some((pos.x, pos.y));
                 herd.state = HerdState::Migrating;
                 let dir = migration_heading(world, climate, (pos.x, pos.y), time);
                 // Un peu de dispersion latérale : les troupeaux ne migrent
@@ -974,8 +997,19 @@ pub fn update_herds(
                 try_move(world, pos, (jitter / len, dir.1 / len), MIGRATE_STEP_TILES);
             } else {
                 herd.state = HerdState::Grazing;
-                let dx = target.0 as f64 + 0.5 - pos.x;
-                let dy = target.1 as f64 + 0.5 - pos.y;
+                // Fidélité au site (CHA-1) : hors de son domaine — chassé par
+                // une fuite, ou poussé par la pâture —, il y revient au pas
+                // ; dedans, il broute où l'herbe est la meilleure. Les cerfs
+                // reviennent à leur domaine en quelques heures après un
+                // dérangement, même un incendie (Cervus/Odocoileus).
+                let home = *herd.home.get_or_insert((pos.x, pos.y));
+                let (hx, hy) = (home.0 - pos.x, home.1 - pos.y);
+                let from_home = (hx * hx + hy * hy).sqrt();
+                let (dx, dy) = if from_home > herd.species.home_range_radius() {
+                    (hx, hy)
+                } else {
+                    (target.0 as f64 + 0.5 - pos.x, target.1 as f64 + 0.5 - pos.y)
+                };
                 let len = (dx * dx + dy * dy).sqrt();
                 if len > 1e-6 {
                     try_move(world, pos, (dx / len, dy / len), GRAZE_STEP_TILES.min(len));
