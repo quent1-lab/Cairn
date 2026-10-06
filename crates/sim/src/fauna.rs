@@ -831,6 +831,75 @@ fn migration_heading(world: &mut World, climate: &Climate, pos: (f64, f64), time
     if t_north > t_south { (0.0, -1.0) } else { (0.0, 1.0) }
 }
 
+/// Durée pendant laquelle une piste de troupeau se lit (CHA-2) : quelques
+/// heures à quelques jours selon le sol et la météo (Liebenberg, *The Art of
+/// Tracking* : l'âge d'une trace se lit à sa dégradation). Ordre de grandeur,
+/// choix : deux jours.
+pub const TRAIL_HOURS: u64 = 48;
+/// Largeur de la bande où un marcheur remarque la piste d'un troupeau en la
+/// croisant (une piste de dizaines de bêtes fait une dizaine de mètres de
+/// large ; on regarde le sol à quelques pas). Ordre de grandeur, choix.
+pub const TRAIL_READ_TILES: f64 = km_to_tiles(0.015);
+
+/// Les pistes des troupeaux sauvages : une position par heure, sur
+/// [`TRAIL_HOURS`]. Clé : `FaunaId` (ordre stable).
+pub type HerdTrails = std::collections::BTreeMap<u64, std::collections::VecDeque<((f64, f64), u64)>>;
+
+/// Une heure de pistes : chaque troupeau sauvage laisse sa trace ; les traces
+/// trop vieilles s'effacent ; les troupeaux disparus aussi.
+pub fn lay_trails(fauna: &hecs::World, trails: &mut HerdTrails, tick: u64) {
+    let mut alive = std::collections::BTreeSet::new();
+    for (_, (id, herd, pos)) in fauna.query::<(&FaunaId, &Herd, &Position)>().iter() {
+        if herd.anchor.is_some() {
+            continue; // le cheptel gardé n'est pas du gibier qu'on piste
+        }
+        alive.insert(id.0);
+        let t = trails.entry(id.0).or_default();
+        t.push_back(((pos.x, pos.y), tick));
+        while t.front().is_some_and(|(_, at)| tick.saturating_sub(*at) >= TRAIL_HOURS) {
+            t.pop_front();
+        }
+    }
+    trails.retain(|id, _| alive.contains(id));
+}
+
+/// La marche de `from` à `to` croise-t-elle une piste fraîche ? Renvoie le
+/// point le plus récent de cette piste (où elle mène) et son heure. Le
+/// pisteur suit la trace : il apprend où le troupeau est passé en dernier.
+pub fn crossed_trail(trails: &HerdTrails, from: (f64, f64), to: (f64, f64), reach: f64) -> Option<((f64, f64), u64)> {
+    let (mx, my) = ((from.0 + to.0) / 2.0, (from.1 + to.1) / 2.0);
+    let half = ((to.0 - from.0).hypot(to.1 - from.1)) / 2.0;
+    let mut best: Option<((f64, f64), u64)> = None;
+    for t in trails.values() {
+        let Some(&newest) = t.back() else { continue };
+        // Tri grossier : une piste de deux jours s'étend sur quelques km.
+        if (newest.0.0 - mx).hypot(newest.0.1 - my) > half + km_to_tiles(12.0) {
+            continue;
+        }
+        let crosses = t.iter().zip(t.iter().skip(1)).any(|(a, b)| segment_distance(from, to, a.0, b.0) <= reach);
+        if crosses && best.is_none_or(|(_, at)| newest.1 > at) {
+            best = Some(newest);
+        }
+    }
+    best
+}
+
+/// Distance entre deux segments du plan.
+fn segment_distance(p1: (f64, f64), p2: (f64, f64), q1: (f64, f64), q2: (f64, f64)) -> f64 {
+    let cross = |o: (f64, f64), a: (f64, f64), b: (f64, f64)| (a.0 - o.0) * (b.1 - o.1) - (a.1 - o.1) * (b.0 - o.0);
+    let (d1, d2, d3, d4) = (cross(q1, q2, p1), cross(q1, q2, p2), cross(p1, p2, q1), cross(p1, p2, q2));
+    if ((d1 > 0.0) != (d2 > 0.0)) && ((d3 > 0.0) != (d4 > 0.0)) {
+        return 0.0;
+    }
+    let point_seg = |p: (f64, f64), a: (f64, f64), b: (f64, f64)| {
+        let (abx, aby) = (b.0 - a.0, b.1 - a.1);
+        let len2 = abx * abx + aby * aby;
+        let t = if len2 > 0.0 { (((p.0 - a.0) * abx + (p.1 - a.1) * aby) / len2).clamp(0.0, 1.0) } else { 0.0 };
+        (p.0 - a.0 - t * abx).hypot(p.1 - a.1 - t * aby)
+    };
+    point_seg(p1, q1, q2).min(point_seg(p2, q1, q2)).min(point_seg(q1, p1, p2)).min(point_seg(q2, p1, p2))
+}
+
 /// Le système des troupeaux : fuite, pâture, migration, démographie.
 /// `threats` = positions des humains et des meutes (tout ce qui fait fuir).
 /// Renvoie les entités à retirer et les scissions à créer — les mutations
@@ -1912,6 +1981,27 @@ pub fn daily_predator_immigration(
 mod tests {
     use super::*;
     use crate::Sim;
+
+    /// CHA-2 : une marche qui coupe la piste fraîche d'un troupeau la remarque
+    /// et apprend où elle mène ; une marche parallèle à 100 m, non ; une piste
+    /// de plus de deux jours s'est effacée.
+    #[test]
+    fn on_remarque_la_piste_qu_on_croise() {
+        let mut trails: HerdTrails = std::collections::BTreeMap::new();
+        let trail: std::collections::VecDeque<_> = (0..10u64).map(|h| (((h * 40) as f64, 0.0), 100 + h)).collect();
+        trails.insert(1, trail);
+        let found = crossed_trail(&trails, (200.0, -500.0), (200.0, 500.0), TRAIL_READ_TILES);
+        assert_eq!(found, Some(((360.0, 0.0), 109)), "la piste mène à son point le plus récent");
+        assert_eq!(crossed_trail(&trails, (0.0, 50.0), (400.0, 50.0), TRAIL_READ_TILES), None);
+        let mut fauna = hecs::World::new();
+        lay_trails(&fauna, &mut trails, 109 + TRAIL_HOURS);
+        assert!(trails.is_empty(), "un troupeau disparu n'a plus de piste");
+        fauna.spawn((FaunaId(2), Position { x: 0.0, y: 0.0 }, Herd::new(30.0, Species::Deer)));
+        for h in 0..(TRAIL_HOURS + 5) {
+            lay_trails(&fauna, &mut trails, h);
+        }
+        assert_eq!(trails[&2].len() as u64, TRAIL_HOURS, "les traces de plus de deux jours s'effacent");
+    }
 
     #[test]
     fn un_troupeau_bien_nourri_croit_et_un_troupeau_affame_fond() {

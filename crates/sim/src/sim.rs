@@ -288,6 +288,9 @@ pub struct Sim {
     /// Allomaternage : le nourrisson orphelin → la femme qui l'allaite à la
     /// place de sa mère (voir `demography::adopt_orphans`).
     pub fosters: BTreeMap<u64, AgentId>,
+    /// Les pistes du gibier sauvage (CHA-2) : ce qu'un chasseur peut suivre au
+    /// matin quand le troupeau est hors de vue.
+    pub herd_trails: fauna::HerdTrails,
     /// Têtes de gibier prélevées par les humains depuis le début : le compteur
     /// de la pression de chasse.
     pub hunted_head: f32,
@@ -513,6 +516,7 @@ impl Sim {
             deaths: Vec::new(),
             births: Vec::new(),
             fosters: BTreeMap::new(),
+            herd_trails: BTreeMap::new(),
             hunted_head: 0.0,
             path_calls: 0,
             path_denied: 0,
@@ -1073,6 +1077,8 @@ impl Sim {
             // La capacité de travail porte l'âge (un enfant cueille mal) **et**
             // la plaie (un blessé peine à tout — §3.1) : c'est là que
             // « improductif » se paie. Le savoir-faire, lui, vit dans `Skills`.
+            let before = (pos.x, pos.y);
+            let sight = crate::climate::sight(self.climate.light(pos.tile().1, time));
             let work = demography::work_capacity(demo.age_years(time.tick))
                 * (1.0 - WOUND_WORK_PENALTY * wound.0);
             let outcome = execute(
@@ -1098,11 +1104,23 @@ impl Sim {
                 &mut clashes,
                 &mut shares,
                 time.tick,
-                crate::climate::sight(self.climate.light(pos.tile().1, time)),
+                sight,
             );
             // La viande portée se gâte comme une réserve sans technique.
             if carrying.0 > 0.0 {
                 carrying.0 *= (-1.0 / (FRESH_KEEP_DAYS * TICKS_PER_DAY as f64)).exp() as f32;
+            }
+            // Une piste croisée en marchant (CHA-2) : un adulte qui la remarque —
+            // il faut y voir — la suit jusqu'à où le troupeau est passé en
+            // dernier ; c'est ce qui fait retrouver le gibier au matin.
+            if behavior.activity == Activity::Walking
+                && demo.is_adult(time.tick)
+                && sight >= 0.5
+                && let Some((spot, at)) =
+                    fauna::crossed_trail(&self.herd_trails, before, (pos.x, pos.y), fauna::TRAIL_READ_TILES)
+                && mem.game.is_none_or(|(_, seen)| seen < at)
+            {
+                mem.game = Some(((spot.0.floor() as i64, spot.1.floor() as i64), at));
             }
             // Où que la tâche l'ait mené, l'agent note où il a mis les pieds.
             mem.note_visit(pos.tile());
@@ -1476,6 +1494,8 @@ impl Sim {
         for (x, y, population, species) in fissions {
             self.spawn_herd_species(x, y, population, species);
         }
+        // Les troupeaux laissent leur piste (CHA-2).
+        fauna::lay_trails(&self.fauna, &mut self.herd_trails, time.tick);
         // La fusion, pendant de la fission (chantier de dérive, E) : une fois
         // par jour, deux troupeaux sauvages de même espèce qui se voient se
         // rejoignent — voir `fauna::merge_plan`.
