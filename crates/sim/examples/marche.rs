@@ -14,7 +14,7 @@
 use std::collections::BTreeMap;
 
 use cairn_core::{TICKS_PER_DAY, WorldSeed, km_to_tiles};
-use cairn_sim::{Activity, Behavior, Demographics, Sex, Sim, fauna, scenario};
+use cairn_sim::{Activity, Behavior, Demographics, Sex, Sim, fauna, scenario, yields::Yields};
 use cairn_worldgen::Biome;
 
 const ACTIVITIES: [Activity; 10] = [
@@ -61,6 +61,17 @@ struct Report {
     herd_net_km: f64,
     /// Herbivores, toutes têtes, au départ et à la fin (règle 5 : la faune).
     herbivores: (f32, f32),
+    /// Rendements (MAR-6a0) : [sexe][activité] heures passées (trajets
+    /// compris) et kcal acquises par les adultes, cueillir puis chasser.
+    pursuit_h: [[f64; 2]; 2],
+    pursuit_kcal: [[f64; 2]; 2],
+    pursuit_cost: [[f64; 2]; 2],
+    /// Les foyers de clan : chemin parcouru (km, somme des pas d'un jour à
+    /// l'autre), jours-clan, et déplacement net de chaque clan entre le
+    /// premier et le dernier jour où il existe (km).
+    camp_path_km: f64,
+    camp_days: u64,
+    camp_net_km: Vec<f64>,
 }
 
 fn herds_at(sim: &Sim) -> BTreeMap<u64, (f64, f64)> {
@@ -147,9 +158,29 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
     let herds0 = herds_at(&sim);
     r.herbivores.0 = sim.fauna_census().0;
     let mut hunted_today: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
+    let mut ledgers: BTreeMap<u64, Yields> = BTreeMap::new();
+    // Foyer de chaque clan : (premier, dernier) connu.
+    let mut camps: BTreeMap<u64, ((f64, f64), (f64, f64))> = BTreeMap::new();
     for _ in 0..days * TICKS_PER_DAY {
         sim.step();
         if sim.time.tick % TICKS_PER_DAY == 0 {
+            for (_, (id, demo, y)) in sim.agents.query::<(&cairn_sim::AgentId, &Demographics, &Yields)>().iter() {
+                let before = ledgers.insert(id.0, *y).unwrap_or_default();
+                if demo.is_adult(sim.time.tick) {
+                    let s = usize::from(demo.sex == Sex::Male);
+                    for p in 0..2 {
+                        r.pursuit_h[s][p] += y.hours[p] - before.hours[p];
+                        r.pursuit_kcal[s][p] += y.kcal[p] - before.kcal[p];
+                        r.pursuit_cost[s][p] += y.cost[p] - before.cost[p];
+                    }
+                }
+            }
+            for c in &sim.clans {
+                let e = camps.entry(c.id.0).or_insert((c.home, c.home));
+                r.camp_path_km += cairn_core::tiles_to_km((e.1.0 - c.home.0).hypot(e.1.1 - c.home.1));
+                e.1 = c.home;
+                r.camp_days += 1;
+            }
             r.hunter_days += hunted_today.len() as u64;
             hunted_today.clear();
             r.adult_days += sim
@@ -204,6 +235,7 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
     r.herd_net_km = nets.get(nets.len() / 2).copied().unwrap_or(f64::NAN);
     r.herds_near = (near(&herds0), near(&herds1));
     r.herbivores.1 = sim.fauna_census().0;
+    r.camp_net_km = camps.values().map(|(a, b)| cairn_core::tiles_to_km((a.0 - b.0).hypot(a.1 - b.1))).collect();
     r
 }
 
@@ -254,6 +286,44 @@ fn print(rs: &[Report]) {
         100.0 * hd as f64 / ad.max(1) as f64,
         100.0 * f64::from(k) / hd.max(1) as f64
     );
+    println!("\n## rendements des adultes (tous runs ; trajets compris ; kcal acquises, partagées ou non)");
+    println!("  Ache : ~1 200-1 340 kcal/h de sortie ; Hadza : gros gibier ~67-91 kcal/h pour la famille");
+    for (s, sex) in ["femmes", "hommes"].iter().enumerate() {
+        let (mut h, mut k, mut c) = ([0.0; 2], [0.0; 2], [0.0; 2]);
+        let mut ah = 0u64;
+        for r in rs {
+            ah += r.adult_h[s];
+            for p in 0..2 {
+                h[p] += r.pursuit_h[s][p];
+                k[p] += r.pursuit_kcal[s][p];
+                c[p] += r.pursuit_cost[s][p];
+            }
+        }
+        let per_day = |x: f64| 24.0 * x / ah.max(1) as f64;
+        println!(
+            "  {sex:<7} cueillir {:>5.2} h/j, {:>6.0} kcal/h (coût {:>4.0}) ; chasser {:>5.2} h/j, {:>6.0} kcal/h (coût {:>4.0}) ; acquis {:>5.0} kcal/j",
+            per_day(h[0]),
+            k[0] / h[0].max(1.0),
+            c[0] / h[0].max(1.0),
+            per_day(h[1]),
+            k[1] / h[1].max(1.0),
+            c[1] / h[1].max(1.0),
+            per_day(k[0] + k[1])
+        );
+    }
+    println!("\n## foyers de clan, par run : chemin (km/an de clan), déplacement net médian (km), clans");
+    for r in rs {
+        let mut net = r.camp_net_km.clone();
+        net.sort_by(f64::total_cmp);
+        println!(
+            "  {:<14}{:>8.1} km/an{:>8.1} km{:>4}",
+            r.label,
+            365.0 * r.camp_path_km / r.camp_days.max(1) as f64,
+            net.get(net.len() / 2).copied().unwrap_or(f64::NAN),
+            net.len()
+        );
+    }
+    println!("  (chasseurs-cueilleurs : ~160-175 km/an de déplacements résidentiels ; Batek : un camp tous les 8 j)");
     println!("\n## par run : régime (latitude, heures de jour départ → fin) ; marche km/j femmes ; hommes ; sommeil dans le noir ; noir passé à dormir");
     for r in rs {
         let km = |s: usize| {

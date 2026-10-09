@@ -52,6 +52,7 @@ pub mod tech;
 pub mod weather;
 pub mod tile;
 pub mod world;
+pub mod yields;
 
 pub use agent::{Activity, AgentId, Behavior, DeathCause, Physiology, Position, Task, TaskKind, Wound};
 pub use brain::Motivation;

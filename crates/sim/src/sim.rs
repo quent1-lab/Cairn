@@ -590,6 +590,7 @@ impl Sim {
         let _ = self.agents.insert_one(entity, crate::faith::Faith::default());
         // Un adulte a un passé infectieux : son immunité acquise.
         let _ = self.agents.insert_one(entity, crate::disease::Illness::founder());
+        let _ = self.agents.insert_one(entity, crate::yields::Yields::default());
         id
     }
 
@@ -646,6 +647,7 @@ impl Sim {
         let _ = self.agents.insert_one(entity, crate::faith::Faith::default());
         // Un système immunitaire vierge : tout reste à rencontrer.
         let _ = self.agents.insert_one(entity, crate::disease::Illness::default());
+        let _ = self.agents.insert_one(entity, crate::yields::Yields::default());
         id
     }
 
@@ -1056,7 +1058,7 @@ impl Sim {
         let mut shares: Vec<Share> = Vec::new();
         for (
             _,
-            (id, pos, phys, traits, demo, behavior, mem, agent_skills, membership, carrying, prestige, wound),
+            (id, pos, phys, traits, demo, behavior, mem, agent_skills, membership, carrying, prestige, wound, ledger),
         ) in self.agents.query_mut::<(
             &AgentId,
             &mut Position,
@@ -1070,10 +1072,13 @@ impl Sim {
             &mut Carrying,
             &mut Prestige,
             &Wound,
+            &mut crate::yields::Yields,
         )>() {
             if demo.is_infant(time.tick) {
                 continue;
             }
+            // L'heure se compte à l'activité qu'on mène en l'entamant (MAR-6).
+            let pursuit = behavior.task.and_then(|t| crate::yields::Pursuit::of(t.kind));
             // La capacité de travail porte l'âge (un enfant cueille mal) **et**
             // la plaie (un blessé peine à tout — §3.1) : c'est là que
             // « improductif » se paie. Le savoir-faire, lui, vit dans `Skills`.
@@ -1103,9 +1108,18 @@ impl Sim {
                 &mut engagements,
                 &mut clashes,
                 &mut shares,
+                ledger,
                 time.tick,
                 sight,
             );
+            // Ce que l'heure a coûté de plus que le repos au camp : la marche,
+            // la cueillette ou l'approche, selon ce qu'on a fait.
+            if let Some(p) = pursuit {
+                let body = crate::energy::Body::of(demo.age_years(time.tick), demo.sex);
+                let extra = crate::energy::activity_factor(behavior.activity)
+                    - crate::energy::activity_factor(Activity::Idle);
+                ledger.spend_hour(p, f64::from(extra * body.bmr_day / 24.0));
+            }
             // La viande portée se gâte comme une réserve sans technique.
             if carrying.0 > 0.0 {
                 carrying.0 *= (-1.0 / (FRESH_KEEP_DAYS * TICKS_PER_DAY as f64)).exp() as f32;
@@ -1647,6 +1661,7 @@ fn execute(
     engagements: &mut Vec<Engagement>,
     clashes: &mut Vec<Clash>,
     shares: &mut Vec<Share>,
+    ledger: &mut crate::yields::Yields,
     tick: u64,
     sight: f32,
 ) -> Option<Kill> {
@@ -1697,6 +1712,7 @@ fn execute(
         // novice en gâche un quart — et chaque mise à mort forge le geste bien
         // plus qu'une heure d'affût.
         let nutrition = meat_hunger(prey.species) * (0.75 + 0.25 * agent_skills.hunting);
+        ledger.gain(crate::yields::Pursuit::Hunt, f64::from(nutrition) * KCAL_PER_HUNGER);
         skills::practice(
             &mut agent_skills.hunting,
             skills::hunt_cap(traits),
@@ -1887,6 +1903,7 @@ fn execute(
                 world.gather((pos.x, pos.y), tick, want_kcal)
             };
             let eaten = phys.eat_points((got_kcal / KCAL_PER_HUNGER) as f32);
+            ledger.gain(crate::yields::Pursuit::Gather, got_kcal);
             crate::food_stats::fed(crate::food_stats::Source::Forage, eaten);
             crate::food_stats::event(crate::food_stats::Event::BiomassTaken, u64::from(taken));
             crate::food_stats::event(crate::food_stats::Event::ForageHours, 1);
@@ -3632,7 +3649,9 @@ mod tests {
             &mut Vec::new(),
             &mut Vec::new(),
             &mut shares,
-            tick, 1.0,
+            &mut crate::yields::Yields::default(),
+            tick,
+            1.0,
         );
 
         assert!(kill.is_some(), "le troupeau est à portée : la chasse doit réussir");
@@ -3693,7 +3712,7 @@ mod tests {
                 AgentId(9_999), &mut pos, &mut phys, &mut behavior, &[herd], &[], &[], 1.0,
                 &traits, &mut Skills::default(), None, &mut BTreeMap::new(),
                 &mut Carrying::default(), &mut Prestige::default(), &mut Vec::new(),
-                &mut Vec::new(), &mut Vec::new(), &mut shares, tick, 1.0,
+                &mut Vec::new(), &mut Vec::new(), &mut shares, &mut crate::yields::Yields::default(), tick, 1.0,
             );
             resolve_shares(&mut sim, &shares);
             sim.agents
@@ -3889,7 +3908,7 @@ mod tests {
                 AgentId(0), pos, phys, &mut behavior, &[herd], &[], &[], 1.0, &traits,
                 &mut Skills::default(), None, &mut BTreeMap::new(), carrying,
                 &mut Prestige::default(), &mut Vec::new(), &mut Vec::new(), &mut Vec::new(),
-                &mut Vec::new(), tick, 1.0,
+                &mut Vec::new(), &mut crate::yields::Yields::default(), tick, 1.0,
             );
         };
         run(Some(Task { kind: TaskKind::Hunt, target: home }), &mut phys, &mut carrying, &mut pos);
@@ -4336,7 +4355,9 @@ mod tests {
             &mut Vec::new(),
             &mut Vec::new(),
             &mut Vec::new(),
-            0, 1.0,
+            &mut crate::yields::Yields::default(),
+            0,
+            1.0,
         );
 
         assert_eq!(carrying.0, 0.0, "le surplus rapporté doit être entièrement déposé, plus rien porté");
@@ -4395,7 +4416,9 @@ mod tests {
             &mut Vec::new(),
             &mut Vec::new(),
             &mut Vec::new(),
-            0, 1.0,
+            &mut crate::yields::Yields::default(),
+            0,
+            1.0,
         );
 
         let stock_apres = clan_stock[&clan_id];
@@ -4458,7 +4481,9 @@ mod tests {
             &mut Vec::new(),
             &mut Vec::new(),
             &mut Vec::new(),
-            0, 1.0,
+            &mut crate::yields::Yields::default(),
+            0,
+            1.0,
         );
 
         assert_eq!(structures.len(), 1, "une structure doit avoir été bâtie");
@@ -4498,7 +4523,9 @@ mod tests {
             &mut Vec::new(),
             &mut Vec::new(),
             &mut Vec::new(),
-            0, 1.0,
+            &mut crate::yields::Yields::default(),
+            0,
+            1.0,
         );
         assert_eq!(structures.len(), 1, "une hutte existe déjà : pas de doublon");
         assert_eq!(clan_stock[&clan_id], stock_intermediaire, "no-op : le stock ne bouge pas");
@@ -4537,7 +4564,7 @@ mod tests {
             &mut sim.world, &mut routes, &mut budget, AgentId(0), &mut pos, &mut phys,
             &mut behavior, &[], &[], &[], 1.0, &traits, &mut skills, None, &mut clan_stock,
             &mut carrying, &mut prestige, &mut structures, &mut Vec::new(), &mut Vec::new(),
-            &mut Vec::new(), 0, 1.0,
+            &mut Vec::new(), &mut crate::yields::Yields::default(), 0, 1.0,
         );
 
         let tile = sim.world.tile(field.0, field.1);
@@ -4682,7 +4709,7 @@ mod tests {
             &mut sim.world, &mut routes, &mut budget, AgentId(0), &mut pos, &mut phys,
             &mut behavior, &[cheptel], &[], &[], 1.0, &traits, &mut skills, Some(clan_id),
             &mut clan_stock, &mut carrying, &mut prestige, &mut structures, &mut Vec::new(),
-            &mut Vec::new(), &mut Vec::new(), 0, 1.0,
+            &mut Vec::new(), &mut Vec::new(), &mut crate::yields::Yields::default(), 0, 1.0,
         );
 
         assert!(
