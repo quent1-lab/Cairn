@@ -284,6 +284,13 @@ const FLEE_RADIUS_TILES: f64 = km_to_tiles(0.6);
 /// n'aboutissait jamais (mesuré : 0 prise, et le couple traqueur/troupeau
 /// dérivait sur des milliers de km).
 const FLEE_COOLDOWN: u16 = 3;
+/// Part du chemin entre le centre du domaine et le bout d'une fuite que ce
+/// centre parcourt à chaque fuite (CHA-2c). Les ongulés reviennent à leur
+/// domaine après un dérangement isolé, mais désertent un lieu chassé sans
+/// relâche pour un refuge (wapiti en saison de chasse). Ordre de grandeur,
+/// choix : une quinzaine de fuites du même côté déplacent un domaine de cerf
+/// de son rayon.
+const HOME_FEAR_SHIFT: f64 = 0.05;
 /// Migration : dérive **lente**, ~150 m/h soit ~3,5 km/jour. Le brout suffit
 /// à chercher l'herbe fraîche voisine (`best_pasture`) ; la migration n'est
 /// que le lent glissement saisonnier vers le chaud. La faire rapide était une
@@ -994,6 +1001,13 @@ pub fn update_herds(
                 herd.state = HerdState::Fleeing;
                 herd.flee_ticks = FLEE_COOLDOWN;
                 try_move(world, pos, away_from((pos.x, pos.y), t), FLEE_STEP_TILES);
+                // Le paysage de la peur (CHA-2c) : chaque fuite tire un peu le
+                // domaine vers où elle a mené. Une alerte isolée ne le déplace
+                // guère ; un dérangement répété du même côté l'emporte.
+                if let Some(home) = herd.home.as_mut() {
+                    home.0 += HOME_FEAR_SHIFT * (pos.x - home.0);
+                    home.1 += HOME_FEAR_SHIFT * (pos.y - home.1);
+                }
                 true
             }
             // Menacé mais à bout de souffle : il ne détale pas, et il ne

@@ -2605,6 +2605,52 @@ mod tests {
         );
     }
 
+    /// CHA-2c, le paysage de la peur : un troupeau dérangé une fois revient à
+    /// son domaine ; harcelé sans cesse du même côté, il l'abandonne. Une
+    /// menace qui le suit dix jours durant, puis deux jours de calme.
+    #[test]
+    fn un_troupeau_sans_cesse_derange_abandonne_son_domaine() {
+        let eloignement = |jours_de_menace: u64| -> f64 {
+            let (mut sim, home) = scenario_setup(11, 0, 0);
+            let center = (home.0 as f64 + 0.5, home.1 as f64 + 0.5);
+            sim.spawn_herd_species(center.0, center.1, 40.0, fauna::Species::Deer);
+            let seed = sim.world.seed();
+            for t in 0..13 * TICKS_PER_DAY {
+                // Un jour de calme d'abord : le domaine se pose au premier tour
+                // de pâture, pas au bout d'une fuite.
+                let menace = t == TICKS_PER_DAY || (TICKS_PER_DAY..(1 + jours_de_menace) * TICKS_PER_DAY).contains(&t);
+                // Harcelé : la menace le suit, toujours du même côté (des
+                // chasseurs qui reviennent depuis leur camp, à l'ouest).
+                let herd_pos = sim.fauna.query::<(&Herd, &Position)>().iter().map(|(_, (_, p))| (p.x, p.y)).next().unwrap();
+                let threats: Vec<(f64, f64)> = if menace { vec![(herd_pos.0 - 150.0, herd_pos.1)] } else { vec![] };
+                let time = sim.time;
+                fauna::update_herds(
+                    &mut sim.fauna,
+                    &mut sim.world,
+                    &sim.climate,
+                    time,
+                    seed,
+                    &threats,
+                    &mut sim.fauna_stats,
+                    &mut sim.rangeland,
+                    None,
+                );
+                sim.time.tick += 1;
+            }
+            let herd = sim.fauna.query::<&Herd>().iter().map(|(_, h)| *h).next().unwrap();
+            let domaine = herd.home.unwrap();
+            (domaine.0 - center.0).hypot(domaine.1 - center.1)
+        };
+        let rayon = fauna::Species::Deer.home_range_radius();
+        let une_fois = eloignement(0);
+        assert!(une_fois < 0.25 * rayon, "dérangé une fois, il garde son domaine : centre déplacé de {une_fois:.0} tuiles (rayon {rayon:.0})");
+        let sans_cesse = eloignement(10);
+        assert!(
+            sans_cesse > rayon,
+            "harcelé dix jours du même côté, il doit avoir quitté son domaine : centre déplacé de {sans_cesse:.0} tuiles (rayon {rayon:.0})"
+        );
+    }
+
     /// La ligne droite entre `a` et `b` traverse-t-elle de l'eau ? (échantillon
     /// tous les 8 tuiles sur le baseline.)
     fn straight_blocked(sim: &Sim, a: (i64, i64), b: (i64, i64)) -> bool {
