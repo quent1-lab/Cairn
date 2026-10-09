@@ -11,9 +11,10 @@
 //! - **débit** sous `STOP_TPS` sur les 30 derniers jours de jeu — à 1 tps, une
 //!   année prend 2,4 h : la dérive est alors acquise, rien de plus à apprendre ;
 //! - **mémoire** au-delà de `STOP_RSS_KB` (la machine a 2,9 Go, deux runs) ;
-//! - **extinction** de la population.
+//! - **extinction** de la population ;
+//! - **horizon** en années, s'il est donné (5ᵉ argument).
 //!
-//! Usage : `cargo run --release -p cairn-sim --example longue -- [seed] [tempere|froid] [jour_de_départ] [out.csv]`
+//! Usage : `cargo run --release -p cairn-sim --example longue -- [seed] [tempere|froid] [jour_de_départ] [out.csv] [années]`
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io::Write;
@@ -23,7 +24,7 @@ use cairn_sim::exposure::{Exposure, Exposures};
 use cairn_sim::fauna::Herd;
 use cairn_sim::social::BOND_THRESHOLD;
 use cairn_sim::tech::TechEventKind;
-use cairn_sim::{AgentId, ClanEventKind, ClanMembership, DeathCause, Demographics, Physiology, Position, Sim, fauna, scenario};
+use cairn_sim::{Activity, AgentId, Behavior, ClanEventKind, ClanMembership, DeathCause, Demographics, Physiology, Position, Sim, fauna, scenario};
 use cairn_worldgen::Biome;
 
 const STOP_TPS: f64 = 1.0;
@@ -50,6 +51,7 @@ fn main() {
     let start_day: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(135);
     let scene = if cold { "froid" } else { "tempere" };
     let out = args.next().unwrap_or_else(|| format!("out/longue_{scene}_{seed}.csv"));
+    let horizon_days: Option<u64> = args.next().and_then(|s| s.parse::<u64>().ok()).map(|y| y * 360);
 
     // Même scène que `acceptation`.
     let n_agents = if cold { 60 } else { 40 };
@@ -83,7 +85,7 @@ fn main() {
     let causes_head: Vec<String> = CAUSES.iter().map(|c| format!("morts_{c:?}")).collect();
     writeln!(
         csv,
-        "jour,an,pop,naissances,morts,{},clans,en_clan,taille_med,taille_max,clans_formes,clans_dissous,clans_absorbes,liens_med,tension_max,paires_tendues,faim_moy,faim_p90,expo_feu,expo_cuivre,techs_vivantes,decouvertes,oublis,troupeaux,tetes,meutes,predateurs,mailles_faune,chunks,tps_jour,tps_30j,rss_mo,morts_nourrissons,morts_enfants,age_med_deces_10a,age_med_vivants,disp_med_km,disp_max_km,tailles_clans",
+        "jour,an,pop,naissances,morts,{},clans,en_clan,taille_med,taille_max,clans_formes,clans_dissous,clans_absorbes,liens_med,tension_max,paires_tendues,faim_moy,faim_p90,expo_feu,expo_cuivre,techs_vivantes,decouvertes,oublis,troupeaux,tetes,meutes,predateurs,mailles_faune,chunks,tps_jour,tps_30j,rss_mo,morts_nourrissons,morts_enfants,age_med_deces_10a,age_med_vivants,disp_med_km,disp_max_km,tailles_clans,chasse_tetes,marche_h_adulte,noir_dormi,troupeaux_10km",
         causes_head.join(",")
     )
     .unwrap();
@@ -102,9 +104,27 @@ fn main() {
     let mut day = 0u64;
     let reason = loop {
         let t0 = std::time::Instant::now();
+        // La chasse, la marche et la nuit (CHA, MAR) : relevées heure par heure.
+        let hunted_before = sim.hunted_head;
+        let (mut adult_h, mut walk_h, mut dark_h, mut dark_sleep_h) = (0u64, 0u64, 0u64, 0u64);
         for _ in 0..TICKS_PER_DAY {
             sim.step();
+            let dark = sim.climate.light(home.1, sim.time) == 0.0;
+            for (_, (demo, behavior)) in sim.agents.query::<(&Demographics, &Behavior)>().iter() {
+                if !demo.is_adult(sim.time.tick) {
+                    continue;
+                }
+                adult_h += 1;
+                walk_h += u64::from(behavior.activity == Activity::Walking);
+                if dark {
+                    dark_h += 1;
+                    dark_sleep_h += u64::from(behavior.activity == Activity::Sleeping);
+                }
+            }
         }
+        let hunted_day = sim.hunted_head - hunted_before;
+        let walk_per_adult = walk_h as f64 / (adult_h as f64 / TICKS_PER_DAY as f64).max(1e-9);
+        let dark_slept = dark_sleep_h as f64 / dark_h.max(1) as f64;
         day += 1;
         let secs = t0.elapsed().as_secs_f64();
         window.push_back(secs);
@@ -205,6 +225,12 @@ fn main() {
             }
         }
         let (heads, predators, herds, packs) = sim.fauna_census();
+        let near_herds = sim
+            .fauna
+            .query::<(&Herd, &Position)>()
+            .iter()
+            .filter(|(_, (h, p))| h.anchor.is_none() && (p.x - home.0 as f64).hypot(p.y - home.1 as f64) < km_to_tiles(10.0))
+            .count();
         let side = km_to_tiles(ZONE_KM);
         let zones: BTreeSet<(i64, i64)> = sim
             .fauna
@@ -215,7 +241,7 @@ fn main() {
 
         writeln!(
             csv,
-            "{day},{:.3},{pop},{},{},{},{},{in_clan},{},{},{formed},{dissolved},{merged},{},{tension_max:.3},{tense},{hunger_mean:.3},{hunger_p90:.3},{fire},{copper},{},{disc},{forgot},{herds},{heads:.0},{packs},{predators:.0},{},{},{tps_day:.1},{tps_win:.1},{},{dead_infants},{dead_children},{:.1},{:.1},{:.2},{:.2},{}",
+            "{day},{:.3},{pop},{},{},{},{},{in_clan},{},{},{formed},{dissolved},{merged},{},{tension_max:.3},{tense},{hunger_mean:.3},{hunger_p90:.3},{fire},{copper},{},{disc},{forgot},{herds},{heads:.0},{packs},{predators:.0},{},{},{tps_day:.1},{tps_win:.1},{},{dead_infants},{dead_children},{:.1},{:.1},{:.2},{:.2},{},{hunted_day:.2},{walk_per_adult:.2},{dark_slept:.3},{near_herds}",
             day as f64 / 360.0,
             sim.births.len(),
             sim.deaths.len(),
@@ -260,6 +286,9 @@ fn main() {
         }
         if rss_kb > STOP_RSS_KB {
             break "mémoire au-delà du seuil";
+        }
+        if horizon_days.is_some_and(|h| day >= h) {
+            break "horizon atteint";
         }
     };
     println!(
