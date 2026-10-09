@@ -331,8 +331,10 @@ fn build_candidates(
     //   à chasser, d'autant moins que le souvenir est vieux — le gibier bouge.
     //   Le trajet se juge à l'échelle d'une journée : on part pister, on ne
     //   fait pas un détour.
+    //   Seulement s'il fait assez jour pour lire la piste (CHA-2b).
     if adult
         && nearest_herd.is_none()
+        && sight >= crate::fauna::TRAIL_SIGHT
         && let Some((spot, seen)) = mem.game
     {
         let age_days = time.tick.saturating_sub(seen) as f64 / cairn_core::TICKS_PER_DAY as f64;

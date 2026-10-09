@@ -1115,7 +1115,7 @@ impl Sim {
             // dernier ; c'est ce qui fait retrouver le gibier au matin.
             if behavior.activity == Activity::Walking
                 && demo.is_adult(time.tick)
-                && sight >= 0.5
+                && sight >= fauna::TRAIL_SIGHT
                 && let Some((spot, at)) =
                     fauna::crossed_trail(&self.herd_trails, before, (pos.x, pos.y), fauna::TRAIL_READ_TILES)
                 && mem.game.is_none_or(|(_, seen)| seen < at)
@@ -1830,6 +1830,14 @@ fn execute(
         behavior.activity = Activity::Fighting;
         clashes.push(Clash { attacker: id, target: tid });
         behavior.task = None; // une passe d'armes, puis on redélibère
+        return None;
+    }
+
+    // Une piste ne se lit pas dans le noir (CHA-2b) : la nuit tombée, le
+    // pisteur s'arrête ; le souvenir du troupeau reste pour le matin.
+    if task.kind == TaskKind::Track && sight < fauna::TRAIL_SIGHT {
+        behavior.activity = Activity::Idle;
+        behavior.task = None;
         return None;
     }
 
@@ -2839,15 +2847,22 @@ mod tests {
         // ~1,7 % l'heure, soit ~0,16 prise par jour — zéro prise en trente jours
         // a moins de 1 % de chances. Au foyer des bancs : sans source à portée,
         // la soif tuait les deux tiers des chasseurs avant la fin.
-        let (mut sim, _) = scenario_au_foyer(42, 20, 3);
-        for _ in 0..24 * 30 {
-            for (_, (phys, carrying)) in sim.agents.query_mut::<(&mut Physiology, &mut Carrying)>() {
-                phys.hunger = phys.hunger.max(0.9);
-                carrying.0 = 0.0;
+        // Jugé sur quatre seeds (règle 7, CHA-2b) : en hiver, depuis que le
+        // pisteur s'arrête à la nuit, mesuré 0, 3, 1 et 6 têtes en trente jours
+        // (1, 9, 3 et 7 avant) — la seed 42 seule ne disait qu'un tirage.
+        let mut avec_prise = 0;
+        for seed in [42u64, 7, 1337, 2024] {
+            let (mut sim, _) = scenario_au_foyer(seed, 20, 3);
+            for _ in 0..24 * 30 {
+                for (_, (phys, carrying)) in sim.agents.query_mut::<(&mut Physiology, &mut Carrying)>() {
+                    phys.hunger = phys.hunger.max(0.9);
+                    carrying.0 = 0.0;
+                }
+                sim.step();
             }
-            sim.step();
+            avec_prise += usize::from(sim.hunted_head > 0.0);
         }
-        assert!(sim.hunted_head > 0.0, "des affamés près du gibier doivent chasser et tuer");
+        assert!(avec_prise >= 3, "des affamés près du gibier doivent chasser et tuer ({avec_prise} seeds sur 4)");
     }
 
     #[test]
@@ -3729,6 +3744,7 @@ mod tests {
         let candidats = |souvenir: bool| -> bool {
             let (mut sim, home) = scenario_setup(5, 1, 0);
             let id = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).next().unwrap();
+            sim.time.tick = 12; // midi (CHA-2b) : de nuit, une piste ne se lit pas
             let tick = sim.time.tick;
             for (_, (phys, mem)) in sim.agents.query_mut::<(&mut Physiology, &mut Memory)>() {
                 phys.hunger = 0.8;
@@ -3740,6 +3756,35 @@ mod tests {
         };
         assert!(!candidats(false), "sans souvenir, rien ne dit où pister");
         assert!(candidats(true), "un affamé qui se souvient d'un troupeau doit envisager de le pister");
+    }
+
+    /// CHA-2b : une piste ne se lit pas dans le noir. De nuit, un affamé qui se
+    /// souvient d'un troupeau n'envisage pas de le pister, et le pisteur que la
+    /// nuit surprend s'arrête ; le souvenir, lui, reste pour le matin.
+    #[test]
+    fn le_pisteur_s_arrete_a_la_nuit() {
+        let (mut sim, home) = scenario_setup(5, 1, 0);
+        let id = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).next().unwrap();
+        // Minuit, et un tick où l'agent ne délibère pas : seule l'exécution joue.
+        let mut tick = 10 * TICKS_PER_DAY;
+        while (tick + 1).wrapping_add(id.0) % brain::DELIBERATION_PERIOD == 0 {
+            tick += TICKS_PER_DAY;
+        }
+        sim.time.tick = tick;
+        let spot = (home.0 + 2_000, home.1);
+        for (_, (phys, mem, behavior)) in sim.agents.query_mut::<(&mut Physiology, &mut Memory, &mut Behavior)>() {
+            phys.hunger = 0.8;
+            mem.game = Some((spot, tick));
+            behavior.task = Some(Task { kind: TaskKind::Track, target: spot });
+        }
+        assert!(
+            !sim.inspect_agent(id).unwrap().iter().any(|m| m.kind == TaskKind::Track),
+            "de nuit, pister ne doit pas être envisagé"
+        );
+        sim.step();
+        let (behavior, mem) = sim.agents.query_mut::<(&Behavior, &Memory)>().into_iter().next().map(|(_, b)| b).unwrap();
+        assert!(behavior.task.is_none_or(|t| t.kind != TaskKind::Track), "la nuit tombée, le pisteur s'arrête");
+        assert!(mem.game.is_some(), "le souvenir de la piste reste pour le matin");
     }
 
     /// D10, pister (suite) : le souvenir d'un troupeau survit à sa sortie du

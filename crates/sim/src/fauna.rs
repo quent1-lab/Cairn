@@ -840,6 +840,11 @@ pub const TRAIL_HOURS: u64 = 48;
 /// croisant (une piste de dizaines de bêtes fait une dizaine de mètres de
 /// large ; on regarde le sol à quelques pas). Ordre de grandeur, choix.
 pub const TRAIL_READ_TILES: f64 = km_to_tiles(0.015);
+/// Vue sous laquelle une piste ne se lit plus (CHA-2b) : le pisteur lit
+/// l'empreinte et sa dégradation de près, à la lumière du jour ; de nuit il
+/// s'arrête et reprend au matin. Le clair de lune n'est pas modélisé. Ordre de
+/// grandeur, choix : la moitié de la vue de jour.
+pub const TRAIL_SIGHT: f32 = 0.5;
 
 /// Les pistes des troupeaux sauvages : une position par heure, sur
 /// [`TRAIL_HOURS`]. Clé : `FaunaId` (ordre stable).
