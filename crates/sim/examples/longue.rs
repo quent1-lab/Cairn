@@ -19,7 +19,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io::Write;
 
-use cairn_core::{TICKS_PER_DAY, WorldSeed, km_to_tiles};
+use cairn_core::{TICKS_PER_DAY, WorldSeed, km_to_tiles, tiles_to_km};
 use cairn_sim::exposure::{Exposure, Exposures};
 use cairn_sim::fauna::Herd;
 use cairn_sim::social::BOND_THRESHOLD;
@@ -82,10 +82,11 @@ fn main() {
     }
 
     let mut csv = std::fs::File::create(&out).expect("fichier CSV");
+    let mut camp_prev: BTreeMap<u64, (f64, f64)> = BTreeMap::new();
     let causes_head: Vec<String> = CAUSES.iter().map(|c| format!("morts_{c:?}")).collect();
     writeln!(
         csv,
-        "jour,an,pop,naissances,morts,{},clans,en_clan,taille_med,taille_max,clans_formes,clans_dissous,clans_absorbes,liens_med,tension_max,paires_tendues,faim_moy,faim_p90,expo_feu,expo_cuivre,techs_vivantes,decouvertes,oublis,troupeaux,tetes,meutes,predateurs,mailles_faune,chunks,tps_jour,tps_30j,rss_mo,morts_nourrissons,morts_enfants,age_med_deces_10a,age_med_vivants,disp_med_km,disp_max_km,tailles_clans,chasse_tetes,marche_h_adulte,noir_dormi,troupeaux_10km",
+        "jour,an,pop,naissances,morts,{},clans,en_clan,taille_med,taille_max,clans_formes,clans_dissous,clans_absorbes,liens_med,tension_max,paires_tendues,faim_moy,faim_p90,expo_feu,expo_cuivre,techs_vivantes,decouvertes,oublis,troupeaux,tetes,meutes,predateurs,mailles_faune,chunks,tps_jour,tps_30j,rss_mo,morts_nourrissons,morts_enfants,age_med_deces_10a,age_med_vivants,disp_med_km,disp_max_km,tailles_clans,chasse_tetes,marche_h_adulte,noir_dormi,troupeaux_10km,foyers_km_jour,foyer_depart_km,inter_clans_km,huttes_chef",
         causes_head.join(",")
     )
     .unwrap();
@@ -239,9 +240,36 @@ fn main() {
             .map(|(_, (_, p))| ((p.x / side).floor() as i64, (p.y / side).floor() as i64))
             .collect();
 
+        // MAR-6b : le chemin des foyers de clan depuis hier (km, somme sur les
+        // clans), la distance médiane des foyers au point de départ, la plus
+        // petite distance entre deux foyers, et les huttes du chef debout.
+        let mut camp_step_km = 0.0;
+        for c in &sim.clans {
+            if let Some(p) = camp_prev.get(&c.id.0) {
+                camp_step_km += tiles_to_km((p.0 - c.home.0).hypot(p.1 - c.home.1));
+            }
+        }
+        camp_prev = sim.clans.iter().map(|c| (c.id.0, c.home)).collect();
+        let mut from_start: Vec<f64> = sim
+            .clans
+            .iter()
+            .map(|c| tiles_to_km((c.home.0 - home.0 as f64).hypot(c.home.1 - home.1 as f64)))
+            .collect();
+        from_start.sort_by(f64::total_cmp);
+        let mut inter = f64::NAN;
+        for i in 0..sim.clans.len() {
+            for j in (i + 1)..sim.clans.len() {
+                let (a, b) = (sim.clans[i].home, sim.clans[j].home);
+                let d = tiles_to_km((a.0 - b.0).hypot(a.1 - b.1));
+                if inter.is_nan() || d < inter {
+                    inter = d;
+                }
+            }
+        }
+        let chief_huts = sim.structures.iter().filter(|s| s.kind == cairn_sim::StructureKind::ChiefHut).count();
         writeln!(
             csv,
-            "{day},{:.3},{pop},{},{},{},{},{in_clan},{},{},{formed},{dissolved},{merged},{},{tension_max:.3},{tense},{hunger_mean:.3},{hunger_p90:.3},{fire},{copper},{},{disc},{forgot},{herds},{heads:.0},{packs},{predators:.0},{},{},{tps_day:.1},{tps_win:.1},{},{dead_infants},{dead_children},{:.1},{:.1},{:.2},{:.2},{},{hunted_day:.2},{walk_per_adult:.2},{dark_slept:.3},{near_herds}",
+            "{day},{:.3},{pop},{},{},{},{},{in_clan},{},{},{formed},{dissolved},{merged},{},{tension_max:.3},{tense},{hunger_mean:.3},{hunger_p90:.3},{fire},{copper},{},{disc},{forgot},{herds},{heads:.0},{packs},{predators:.0},{},{},{tps_day:.1},{tps_win:.1},{},{dead_infants},{dead_children},{:.1},{:.1},{:.2},{:.2},{},{hunted_day:.2},{walk_per_adult:.2},{dark_slept:.3},{near_herds},{camp_step_km:.3},{:.2},{inter:.2},{chief_huts}",
             day as f64 / 360.0,
             sim.births.len(),
             sim.deaths.len(),
@@ -259,6 +287,7 @@ fn main() {
             med(&dist),
             dist.last().copied().unwrap_or(0.0),
             sizes_str.join(";"),
+            from_start.get(from_start.len() / 2).copied().unwrap_or(f64::NAN),
         )
         .unwrap();
         csv.flush().unwrap();

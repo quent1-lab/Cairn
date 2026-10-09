@@ -72,6 +72,8 @@ struct Report {
     camp_path_km: f64,
     camp_days: u64,
     camp_net_km: Vec<f64>,
+    /// Huttes du chef debout à la fin : elles ancrent le foyer.
+    chief_huts: usize,
 }
 
 fn herds_at(sim: &Sim) -> BTreeMap<u64, (f64, f64)> {
@@ -235,6 +237,7 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
     r.herd_net_km = nets.get(nets.len() / 2).copied().unwrap_or(f64::NAN);
     r.herds_near = (near(&herds0), near(&herds1));
     r.herbivores.1 = sim.fauna_census().0;
+    r.chief_huts = sim.structures.iter().filter(|s| s.kind == cairn_sim::StructureKind::ChiefHut).count();
     r.camp_net_km = camps.values().map(|(a, b)| cairn_core::tiles_to_km((a.0 - b.0).hypot(a.1 - b.1))).collect();
     r
 }
@@ -311,16 +314,17 @@ fn print(rs: &[Report]) {
             per_day(k[0] + k[1])
         );
     }
-    println!("\n## foyers de clan, par run : chemin (km/an de clan), déplacement net médian (km), clans");
+    println!("\n## foyers de clan, par run : chemin (km/an de clan), déplacement net médian (km), clans, huttes du chef (ancres)");
     for r in rs {
         let mut net = r.camp_net_km.clone();
         net.sort_by(f64::total_cmp);
         println!(
-            "  {:<14}{:>8.1} km/an{:>8.1} km{:>4}",
+            "  {:<14}{:>8.1} km/an{:>8.1} km{:>4}{:>4}",
             r.label,
             365.0 * r.camp_path_km / r.camp_days.max(1) as f64,
             net.get(net.len() / 2).copied().unwrap_or(f64::NAN),
-            net.len()
+            net.len(),
+            r.chief_huts
         );
     }
     println!("  (chasseurs-cueilleurs : ~160-175 km/an de déplacements résidentiels ; Batek : un camp tous les 8 j)");
