@@ -849,7 +849,7 @@ impl Sim {
         // `brain::inspect`, qui veut `&mut self.world`.
         let agriculture = self.tech_tree.id_of("agriculture");
 
-        let (pos, phys, traits, demo, kin, clan, carrying, current, knows_agriculture, mem, fervor, wound) = self
+        let (pos, phys, traits, demo, kin, clan, carrying, current, knows_agriculture, mem, fervor, wound, returns) = self
             .agents
             .query::<(
                 &AgentId,
@@ -865,10 +865,11 @@ impl Sim {
                 &Memory,
                 &crate::faith::Faith,
                 &Wound,
+                &crate::yields::Yields,
             )>()
             .iter()
             .find(|(_, (aid, ..))| aid.0 == id.0)
-            .map(|(_, (_, pos, phys, traits, demo, kin, membership, carrying, behavior, knowledge, mem, faith, wound))| {
+            .map(|(_, (_, pos, phys, traits, demo, kin, membership, carrying, behavior, knowledge, mem, faith, wound, yields))| {
                 (
                     *pos,
                     *phys,
@@ -882,6 +883,7 @@ impl Sim {
                     mem.clone(),
                     faith.fervor,
                     wound.0,
+                    yields.weights(),
                 )
             })?;
         if demo.is_infant(time.tick) {
@@ -901,6 +903,7 @@ impl Sim {
             wound,
             light: self.climate.light(pos.tile().1, time),
             daylight_left_h: self.climate.daylight_left_hours(pos.tile().1, time),
+            returns,
         };
         Some(brain::inspect(
             &mut self.world, time, &ctx, &mem, current, &herds, &packs, &humans, &clan_views,
@@ -958,7 +961,7 @@ impl Sim {
         let _ph = phase(); // 1 deliberation
         // ticks (tick + i) % période == 0, ou dès qu'il n'a plus de tâche.
         // Les nourrissons ne délibèrent pas : ils sont portés.
-        for (_, (id, pos, phys, traits, demo, kin, membership, carrying, knowledge, faith, behavior, mem, wound)) in self
+        for (_, (id, pos, phys, traits, demo, kin, membership, carrying, knowledge, faith, behavior, mem, wound, yields)) in self
             .agents
             .query_mut::<(
                 &AgentId,
@@ -974,6 +977,7 @@ impl Sim {
                 &mut Behavior,
                 &mut Memory,
                 &Wound,
+                &crate::yields::Yields,
             )>()
         {
             if demo.is_infant(time.tick) {
@@ -1019,6 +1023,7 @@ impl Sim {
                         wound: wound.0,
                         light: self.climate.light(pos.tile().1, time),
                         daylight_left_h: self.climate.daylight_left_hours(pos.tile().1, time),
+                        returns: yields.weights(),
                     };
                     behavior.task = brain::decide(
                         &mut self.world,
@@ -1074,6 +1079,7 @@ impl Sim {
             &Wound,
             &mut crate::yields::Yields,
         )>() {
+            ledger.forget_hour();
             if demo.is_infant(time.tick) {
                 continue;
             }
@@ -3918,6 +3924,42 @@ mod tests {
         run(None, &mut phys, &mut carrying, &mut pos);
         assert!(phys.hunger < 0.1, "affamé, il mange ce qu'il porte (faim restante {:.2})", phys.hunger);
         assert!(carrying.0 < porte, "ce qu'il a mangé sort de ce qu'il porte");
+    }
+
+    /// MAR-6a, le choix suit le rendement appris : deux adultes sans clan,
+    /// aussi affamés, un troupeau à vue. Celui dont la chasse n'a presque rien
+    /// rapporté au regard de la cueillette envisage moins de chasser que celui
+    /// qui n'a encore rien jugé. Lu via `inspect_agent` (pur).
+    #[test]
+    fn qui_sait_que_la_chasse_rapporte_peu_chasse_moins() {
+        let score = |appris: bool| -> f32 {
+            let (mut sim, home) = scenario_setup(5, 1, 0);
+            sim.time.tick = 12;
+            sim.spawn_herd(home.0 as f64 + 300.0, home.1 as f64, 30.0);
+            let id = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).next().unwrap();
+            for (_, (phys, yields)) in sim.agents.query_mut::<(&mut Physiology, &mut crate::yields::Yields)>() {
+                phys.hunger = 0.5;
+                if appris {
+                    for _ in 0..100 {
+                        yields.spend_hour(crate::yields::Pursuit::Gather, 100.0);
+                        yields.gain(crate::yields::Pursuit::Gather, 1_100.0);
+                        yields.spend_hour(crate::yields::Pursuit::Hunt, 150.0);
+                        yields.gain(crate::yields::Pursuit::Hunt, 400.0);
+                    }
+                }
+            }
+            sim.inspect_agent(id)
+                .unwrap()
+                .iter()
+                .find(|m| m.kind == TaskKind::Hunt)
+                .map_or(0.0, |m| m.score)
+        };
+        let (naif, averti) = (score(false), score(true));
+        assert!(naif > 0.0, "un affamé, un troupeau à vue : il doit envisager la chasse");
+        assert!(
+            averti < 0.5 * naif,
+            "la chasse lui rapporte le quart de la cueillette, il la pèse pourtant {averti:.3} contre {naif:.3}"
+        );
     }
 
     /// D10, l'envie de chasser suit le besoin : deux adultes aussi affamés,

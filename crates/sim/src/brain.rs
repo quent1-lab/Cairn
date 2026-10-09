@@ -150,6 +150,10 @@ pub struct AgentCtx<'a> {
     pub light: f32,
     /// Heures de jour qui restent (`Climate::daylight_left_hours`).
     pub daylight_left_h: f32,
+    /// Poids appris de chaque façon de se nourrir, cueillir puis chasser
+    /// (`Yields::weights`, MAR-6a) : son rendement net attendu rapporté au
+    /// meilleur.
+    pub returns: [f32; crate::yields::PURSUITS],
 }
 
 /// Choisit la prochaine tâche de l'agent. Déterministe : le tirage dérive de
@@ -261,10 +265,17 @@ fn build_candidates(
     let (forage_target, forage_biomass) = best_forage(world, here);
     let urgency = Curve::Logistic { steepness: 6.0, midpoint: 0.4 }.eval(phys.hunger);
     let share_here = edible_share(world, (pos.x, pos.y), time.tick, humans);
+    // MAR-6a : pondérée par ce que la cueillette rapporte, à son expérience,
+    // au regard de la chasse.
+    let gather_return = agent.returns[crate::yields::Pursuit::Gather as usize];
+    let hunt_return = agent.returns[crate::yields::Pursuit::Hunt as usize];
     if forage_biomass >= FORAGE_MIN_BIOMASS {
         let abundance = (f32::from(forage_biomass) / 255.0).sqrt() * share_here;
-        let score =
-            urgency * abundance * sight * travel_discount(pos.distance_tiles(forage_target));
+        let score = urgency
+            * gather_return
+            * abundance
+            * sight
+            * travel_discount(pos.distance_tiles(forage_target));
         candidates.push((TaskKind::Forage, forage_target, score));
     }
     // — Changer de pays quand le sien s'épuise : un cueilleur connaît les
@@ -307,15 +318,20 @@ fn build_candidates(
     //   faim — une bête vaut un mois de nourriture. Le sien : la faim, moins
     //   ce qu'on porte déjà. Celui des siens : ce qui manque à la réserve du
     //   clan. On chasse pour le plus pressant des deux.
-    let meat_need = {
+    //   MAR-6a : pour sa propre faim, la chasse et la cueillette se valent
+    //   comme substituts — on pèse la chasse par ce qu'elle rapporte, à son
+    //   expérience, au regard de la cueillette. Pour les siens, rien ne
+    //   remplace la chasse : la cueillette ne se rapporte pas au camp.
+    let (own_need, clan_gap) = {
         let own = (phys.hunger - carrying).max(0.0);
         let clan_gap = clan.and_then(|c| clan_views.get(&c)).map_or(0.0, |v| {
             let scale = crate::sim::STOCK_SCALE_PER_MEMBER * v.members.max(1) as f32;
             (1.0 - (v.stock + carrying) / scale).clamp(0.0, 1.0)
         });
-        own.max(clan_gap)
+        (own, clan_gap)
     };
-    let hunt_urgency = Curve::Logistic { steepness: 6.0, midpoint: 0.4 }.eval(meat_need);
+    let need_curve = Curve::Logistic { steepness: 6.0, midpoint: 0.4 };
+    let hunt_urgency = (need_curve.eval(own_need) * hunt_return).max(need_curve.eval(clan_gap));
     let nearest_herd = if adult { nearest_herd(pos, herds, sight) } else { None };
     if let Some(herd) = nearest_herd {
         let target = (herd.pos.0.floor() as i64, herd.pos.1.floor() as i64);

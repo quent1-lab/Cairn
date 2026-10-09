@@ -164,27 +164,41 @@ impl Memory {
 /// pour ne jamais emprunter deux mémoires à la fois, et pour que le résultat
 /// ne dépende pas de l'ordre de traitement des paires.
 pub(crate) fn exchange_knowledge(sim: &mut Sim) {
+    use crate::yields::{PURSUITS, Yields};
+    type Shown = ([f32; PURSUITS], [f32; PURSUITS]);
     struct View {
         entity: hecs::Entity,
         id: AgentId,
         pos: (f64, f64),
         springs: Vec<(i64, i64)>,
+        shown: Shown,
     }
     let mut views: Vec<View> = sim
         .agents
-        .query::<(&crate::agent::AgentId, &crate::agent::Position, &Memory)>()
+        .query::<(&crate::agent::AgentId, &crate::agent::Position, &Memory, &Yields)>()
         .iter()
-        .map(|(entity, (id, pos, mem))| View {
+        .map(|(entity, (id, pos, mem, yields))| View {
             entity,
             id: *id,
             pos: (pos.x, pos.y),
             springs: mem.springs.clone(),
+            shown: yields.shown(),
         })
         .collect();
     views.sort_unstable_by_key(|v| v.id.0);
 
-    // Ce que chacun apprend (l'union des sources de ses interlocuteurs).
+    // Ce que chacun apprend (l'union des sources de ses interlocuteurs), et ce
+    // qu'il voit faire (MAR-6a : la somme de leur expérience récente, et leur
+    // nombre).
     let mut heard: Vec<Vec<(i64, i64)>> = vec![Vec::new(); views.len()];
+    let mut seen: Vec<(Shown, u32)> = vec![(([0.0; PURSUITS], [0.0; PURSUITS]), 0); views.len()];
+    let add = |acc: &mut (Shown, u32), other: &Shown| {
+        for p in 0..PURSUITS {
+            acc.0.0[p] += other.0[p];
+            acc.0.1[p] += other.1[p];
+        }
+        acc.1 += 1;
+    };
     for i in 0..views.len() {
         for j in (i + 1)..views.len() {
             let (a, b) = (&views[i], &views[j]);
@@ -194,6 +208,17 @@ pub(crate) fn exchange_knowledge(sim: &mut Sim) {
             }
             heard[i].extend(&b.springs);
             heard[j].extend(&a.springs);
+            add(&mut seen[i], &b.shown);
+            add(&mut seen[j], &a.shown);
+        }
+    }
+    for (view, ((sum_h, sum_net), n)) in views.iter().zip(&seen) {
+        if *n == 0 {
+            continue;
+        }
+        if let Ok(yields) = sim.agents.query_one_mut::<&mut Yields>(view.entity) {
+            let k = *n as f32;
+            yields.observe(sum_h.map(|x| x / k), sum_net.map(|x| x / k));
         }
     }
     for (view, learned) in views.iter().zip(heard) {
