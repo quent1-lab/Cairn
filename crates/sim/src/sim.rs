@@ -186,6 +186,9 @@ const FRESH_KEEP_DAYS: f64 = 3.0;
 /// Faim au-delà de laquelle on mange ce qu'on porte : une demi-journée sans
 /// repas.
 const EAT_CARRIED_HUNGER: f32 = 0.25;
+/// Charge de cueillette qu'on rapporte au camp (kg) : ordre de grandeur d'un
+/// panier ou d'une bandoulière de tubercules et de baies. Choix non sourcé.
+const PLANT_LOAD_KG: f32 = 15.0;
 /// Durée de vie de la réserve d'un clan dont **tous** les membres savent
 /// conserver (technique `preservation`) : viande séchée, gelée ou cachée au
 /// frais, des mois. Entre les deux, la durée suit la part des membres qui
@@ -1899,7 +1902,17 @@ fn execute(
             // averse met aussi la biomasse au-dessus de la capacité).
             let tile = world.tile_mut(task.target.0, task.target.1);
             let cultivated = false;
-            let wanted = (phys.appetite_points().min(bite) / NUTRITION_PER_BIOMASS).ceil() as u8;
+            // Un membre de clan ne cueille pas que pour sa faim : ce qui dépasse
+            // son appétit, il le garde pour les siens, jusqu'à une charge
+            // portable (`PLANT_LOAD_KG`), et le rapporte au stock comme la
+            // viande (`Carrying`, `BringSurplusHome`). Les femmes hadza
+            // rapportent au camp les trois quarts de ce qu'elles déterrent.
+            let room = if clan.is_some() {
+                (PLANT_LOAD_KG / energy::KG_PER_MEAT_POINT - carrying.0).max(0.0)
+            } else {
+                0.0
+            };
+            let wanted = ((phys.appetite_points() + room).min(bite) / NUTRITION_PER_BIOMASS).ceil() as u8;
             let taken = wanted.min(tile.biomass);
             tile.biomass -= taken;
             let want_kcal = f64::from(f32::from(taken) * NUTRITION_PER_BIOMASS) * KCAL_PER_HUNGER;
@@ -1908,7 +1921,11 @@ fn execute(
             } else {
                 world.gather((pos.x, pos.y), tick, want_kcal)
             };
-            let eaten = phys.eat_points((got_kcal / KCAL_PER_HUNGER) as f32);
+            let got = (got_kcal / KCAL_PER_HUNGER) as f32;
+            let eaten = phys.eat_points(got);
+            if clan.is_some() && got > eaten {
+                carrying.0 += got - eaten;
+            }
             ledger.gain(crate::yields::Pursuit::Gather, got_kcal);
             crate::food_stats::fed(crate::food_stats::Source::Forage, eaten);
             crate::food_stats::event(crate::food_stats::Event::BiomassTaken, u64::from(taken));
@@ -1918,8 +1935,9 @@ fn execute(
                 u64::from(taken < wanted || got_kcal < want_kcal),
             );
             let bare = world.tile(task.target.0, task.target.1).biomass == 0;
-            if phys.hunger <= 0.05 || bare || got_kcal < want_kcal {
-                behavior.task = None; // rassasié, ou tuile épuisée
+            let loaded = clan.is_none() || carrying.0 * energy::KG_PER_MEAT_POINT >= PLANT_LOAD_KG;
+            if (phys.hunger <= 0.05 && loaded) || bare || got_kcal < want_kcal {
+                behavior.task = None; // rassasié et chargé, ou tuile épuisée
             }
         }
         TaskKind::Cultivate => {
@@ -2406,6 +2424,45 @@ mod tests {
                 KCAL_PER_DAY / (gathered / 360.0)
             );
         }
+    }
+
+    /// MAR-6c : un membre de clan qui cueille garde ce qui dépasse son
+    /// appétit pour les siens ; un humain sans clan ne cueille que pour lui.
+    #[test]
+    fn un_membre_de_clan_rapporte_sa_cueillette() {
+        let porte = |avec_clan: bool| -> f32 {
+            let (mut sim, home) = scenario_setup(5, 1, 0);
+            let tick = 135 * cairn_core::TICKS_PER_DAY + 10;
+            let mut target = None;
+            'search: for dy in -40..40i64 {
+                for dx in -40..40i64 {
+                    let t = sim.world.tile(home.0 + dx * 3, home.1 + dy * 3);
+                    if t.is_walkable() && t.biomass > 100 {
+                        target = Some((home.0 + dx * 3, home.1 + dy * 3));
+                        break 'search;
+                    }
+                }
+            }
+            let target = target.expect("une tuile riche près du foyer");
+            let mut pos = Position { x: target.0 as f64 + 0.5, y: target.1 as f64 + 0.5 };
+            let mut phys = Physiology { hunger: 0.3, ..Physiology::default() };
+            let mut carrying = Carrying::default();
+            let traits = Traits::default();
+            let clan = avec_clan.then_some(social::ClanId(1));
+            for h in 0..4 {
+                let mut behavior = Behavior { task: Some(Task { kind: TaskKind::Forage, target }), ..Behavior::default() };
+                execute(
+                    &mut sim.world, &mut BTreeMap::new(), &mut PathBudget { left: PATH_REQUESTS_PER_TICK, denied: 0 },
+                    AgentId(0), &mut pos, &mut phys, &mut behavior, &[], &[], &[], 1.0, &traits,
+                    &mut Skills::default(), clan, &mut BTreeMap::new(), &mut carrying,
+                    &mut Prestige::default(), &mut Vec::new(), &mut Vec::new(), &mut Vec::new(),
+                    &mut Vec::new(), &mut crate::yields::Yields::default(), tick + h, 1.0,
+                );
+            }
+            carrying.0
+        };
+        assert_eq!(porte(false), 0.0, "sans clan, on ne cueille que pour soi");
+        assert!(porte(true) > 0.1, "un membre de clan doit rapporter de sa cueillette ({:.3} point porté)", porte(true));
     }
 
     /// Le premier tick où l'approche d'`hunter` tue : les tests qui vérifient
