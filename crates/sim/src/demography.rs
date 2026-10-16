@@ -61,6 +61,34 @@ pub const CONCEPTION_DAILY_P: f64 = 0.012;
 /// Ce que l'allaitement retire par tick aux besoins du nourrisson, en part de
 /// sa faim (couvre faim et soif : le lait est les deux).
 pub const NURSE_RELIEF: f32 = 0.1;
+
+/// Part de l'énergie de l'enfant que couvre le lait, selon l'âge (MOR-4,
+/// sevrage). Allaitement exclusif jusqu'à 6 mois ; puis ~70 % à 6-8 mois,
+/// ~55 % à 9-11 mois, ~40 % à 12-23 mois (OMS, Dewey ;
+/// https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5065977/) ; sevrage complet
+/// vers 3 ans chez les chasseurs-cueilleurs (Aché 3 ans, Hadza 3-3,5 ;
+/// Konner 2016). Le reste vient de la nourriture que donne la mère, et l'eau,
+/// l'enfant la boit avec elle.
+pub fn milk_share(age_years: f64) -> f32 {
+    if age_years < 0.5 {
+        1.0
+    } else if age_years < 0.75 {
+        0.70
+    } else if age_years < 1.0 {
+        0.55
+    } else if age_years < 2.0 {
+        0.40
+    } else {
+        MILK_SHARE_THIRD_YEAR
+    }
+}
+
+/// Part du lait dans la troisième année (24-35 mois). Dérivée d'un volume,
+/// faute de part mesurée : 312 g/j bus à 24-36 mois contre 548 g/j à 12-23
+/// (Bangladesh rural, Persson et al. 1998,
+/// https://archive.unu.edu/unupress/food/V194e/ch08.htm), soit ~215 kcal
+/// (~0,69 kcal/g) pour un besoin de ~1 050 kcal/j : ~20 %.
+pub const MILK_SHARE_THIRD_YEAR: f32 = 0.20;
 /// Débit de lait (voir [`milk_flow`]) en deçà duquel une femme qui allaite
 /// n'en a plus **à partager** : elle ne prend pas d'orphelin (allomaternage).
 /// 0,85 : réserves à moitié entamées.
@@ -279,17 +307,30 @@ pub(crate) fn nurse_infants(sim: &mut Sim) {
             let pos = sim.agents.get::<&Position>(entity).ok()?;
             let phys = sim.agents.get::<&Physiology>(entity).ok()?;
             let behavior = sim.agents.get::<&Behavior>(entity).ok()?;
-            Some(((pos.x, pos.y), behavior.activity, milk_flow(&phys)))
+            let carrying = sim.agents.get::<&crate::agent::Carrying>(entity).map(|c| c.0).unwrap_or(0.0);
+            Some(((pos.x, pos.y), behavior.activity, milk_flow(&phys), carrying))
         });
 
-        let Some(((mx, my), mother_activity, milk)) = mother_state else {
+        let Some(((mx, my), mother_activity, milk, mother_carrying)) = mother_state else {
             continue; // orphelin : cloué sur place, les besoins montent
         };
+        // La part du lait, et ce qu'il apporte par heure passé l'allaitement
+        // exclusif : cette part du besoin de l'enfant (`Body::reference_day`).
+        let (share, hourly_need_points) = sim
+            .agents
+            .get::<&Demographics>(infant)
+            .map(|d| {
+                let age = d.age_years(tick);
+                let need = crate::energy::Body::of(age, d.sex).reference_day() / 24.0;
+                (milk_share(age), need / crate::energy::KCAL_PER_POINT as f32)
+            })
+            .unwrap_or((1.0, 0.0));
         // Le lait suit les **réserves** de la mère (`milk_flow`), pas sa faim
         // de l'heure ni sa santé : la lactation résiste à une sous-alimentation
         // modérée et ne tarit que dans une famine qui dure (défaut G : une
         // porte à 0,95 de faim coupait le lait quelques heures chaque jour).
         let mut milk_kcal = 0.0f64;
+        let mut given_points = 0.0f32;
         let has_milk = milk > 0.0;
         if let Ok((pos, phys, behavior, illness)) = sim
             .agents
@@ -299,28 +340,56 @@ pub(crate) fn nurse_infants(sim: &mut Sim) {
             illness.milk = has_milk;
             pos.x = mx;
             pos.y = my;
-            // Porté, le nourrisson partage le sommeil et l'abri de sa mère.
+            // Porté, le nourrisson partage le sommeil et l'abri de sa mère, et
+            // passé six mois il boit quand elle boit (MOR-4) — à la même eau,
+            // donc à la même souillure : c'est la diarrhée du sevrage.
             behavior.activity = match mother_activity {
                 Activity::Sleeping => Activity::Sleeping,
                 Activity::Sheltering => Activity::Sheltering,
+                Activity::Drinking if share < 1.0 => Activity::Drinking,
                 _ => Activity::Idle,
             };
+            if behavior.activity == Activity::Drinking {
+                phys.thirst = 0.0;
+            }
             if has_milk {
-                let relief = NURSE_RELIEF * milk;
-                let drunk = phys.eat_points(relief * phys.scale);
+                // Allaitement exclusif : le lait couvre faim et soif, à la
+                // demande. Passé six mois : sa part du besoin et de l'eau.
+                let (offered, quench) = if share >= 1.0 {
+                    (NURSE_RELIEF * milk * phys.scale, NURSE_RELIEF * milk)
+                } else {
+                    (share * milk * hourly_need_points, share * milk * crate::agent::THIRST_PER_TICK)
+                };
+                let drunk = phys.eat_points(offered);
                 crate::food_stats::fed(crate::food_stats::Source::Milk, drunk);
                 milk_kcal = f64::from(drunk) * crate::energy::KCAL_PER_POINT;
-                phys.thirst = (phys.thirst - relief).max(0.0);
+                phys.thirst = (phys.thirst - quench).max(0.0);
+            }
+            // Le reste, la mère le donne : quand elle mange, ou de ce qu'elle
+            // porte. Ce qu'elle donne, elle ne l'a pas mangé.
+            if share < 1.0 && (mother_activity == Activity::Eating || mother_carrying > 0.0) {
+                let want = NURSE_RELIEF * (1.0 - share) * phys.scale;
+                given_points = phys.eat_points(want);
+                crate::food_stats::fed(crate::food_stats::Source::Shared, given_points);
             }
         }
         // La mère paie l'énergie du lait que l'enfant a bu (FAO/OMS/UNU 2004 :
-        // ~+505 kcal/j en allaitement exclusif), et son eau.
-        if has_milk
-            && let Some(entity) = mother_entity
-            && let Ok(phys) = sim.agents.query_one_mut::<&mut Physiology>(entity)
+        // ~+505 kcal/j en allaitement exclusif), et son eau ; et la nourriture
+        // donnée — prise sur ce qu'elle porte d'abord, sur sa faim sinon.
+        if let Some(entity) = mother_entity
+            && let Ok((phys, carrying)) =
+                sim.agents.query_one_mut::<(&mut Physiology, &mut crate::agent::Carrying)>(entity)
         {
-            phys.hunger = (phys.hunger + phys.hunger_of_kcal(milk_kcal as f32)).min(1.0);
-            phys.thirst = (phys.thirst + NURSING_THIRST_PER_TICK * milk).min(1.0);
+            if has_milk {
+                phys.hunger = (phys.hunger + phys.hunger_of_kcal(milk_kcal as f32)).min(1.0);
+                phys.thirst = (phys.thirst + NURSING_THIRST_PER_TICK * milk * share.min(1.0)).min(1.0);
+            }
+            if given_points > 0.0 {
+                let from_load = given_points.min(carrying.0);
+                carrying.0 -= from_load;
+                let rest_kcal = f64::from(given_points - from_load) * crate::energy::KCAL_PER_POINT;
+                phys.hunger = (phys.hunger + phys.hunger_of_kcal(rest_kcal as f32)).min(1.0);
+            }
         }
     }
 }

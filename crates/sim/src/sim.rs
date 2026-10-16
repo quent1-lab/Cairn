@@ -3089,6 +3089,51 @@ mod tests {
     /// (depuis le bilan énergétique, les réserves de graisse ; avant, la santé
     /// en tenait lieu). Les deux bouts : quelques heures de faim ne coupent
     /// rien ; une famine longue tarit le lait.
+    /// MOR-4, le sevrage : un enfant d'un an n'est plus nourri du seul lait.
+    /// Une heure de tétée ne couvre que sa part (40 %) d'une heure de besoin ;
+    /// quand sa mère boit, il boit ; quand elle mange, elle lui donne à manger.
+    #[test]
+    fn un_enfant_d_un_an_boit_avec_sa_mere_et_mange_ce_qu_elle_donne() {
+        let apres = |mere: Activity| -> (f32, f32) {
+            let (mut sim, home) = scenario_setup(42, 0, 0);
+            let mother = sim.spawn_agent(home.0 as f64 + 0.5, home.1 as f64 + 0.5);
+            let child = sim.spawn_child(
+                home.0 as f64 + 0.5,
+                home.1 as f64 + 0.5,
+                Sex::Male,
+                Traits::default(),
+                Kinship { mother: Some(mother), father: None },
+            );
+            let tick = sim.time.tick as i64;
+            for (_, (id, demo, phys, behavior)) in
+                sim.agents.query_mut::<(&AgentId, &mut Demographics, &mut Physiology, &mut Behavior)>()
+            {
+                if *id == child {
+                    demo.born_tick = tick - 360 * 24;
+                    phys.hunger = 0.5;
+                    phys.thirst = 0.8;
+                }
+                if *id == mother {
+                    behavior.activity = mere;
+                }
+            }
+            demography::nurse_infants(&mut sim);
+            sim.agents
+                .query::<(&AgentId, &Physiology)>()
+                .iter()
+                .find(|(_, (id, _))| **id == child)
+                .map(|(_, (_, p))| (p.hunger, p.thirst))
+                .unwrap()
+        };
+        let (faim, soif) = apres(Activity::Idle);
+        assert!(faim > 0.45, "une heure de tétée ne couvre plus qu'une part d'une heure de besoin (faim {faim:.3})");
+        assert!(soif > 0.75, "le lait seul n'étanche plus la soif d'un enfant d'un an (soif {soif:.3})");
+        let (_, soif) = apres(Activity::Drinking);
+        assert_eq!(soif, 0.0, "quand sa mère boit, il boit");
+        let (faim, _) = apres(Activity::Eating);
+        assert!(faim < 0.45, "quand sa mère mange, elle lui donne à manger (faim {faim:.3})");
+    }
+
     #[test]
     fn le_lait_ne_tarit_que_dans_une_famine_qui_dure() {
         let infant_thirst_after = |exhausted: bool| -> f32 {
