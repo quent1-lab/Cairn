@@ -73,6 +73,8 @@ struct Report {
     camp_days: u64,
     /// Levées de camp : jours où un foyer a bougé de plus d'un kilomètre.
     camp_moves: u64,
+    /// Huttes bâties pendant le run (toutes, laissées derrière comprises).
+    huts_built: usize,
     camp_net_km: Vec<f64>,
     /// Huttes du chef debout à la fin : elles ancrent le foyer.
     chief_huts: usize,
@@ -165,6 +167,7 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
     let mut ledgers: BTreeMap<u64, Yields> = BTreeMap::new();
     // Foyer de chaque clan : (premier, dernier) connu.
     let mut camps: BTreeMap<u64, ((f64, f64), (f64, f64))> = BTreeMap::new();
+    let mut huts: std::collections::BTreeSet<(u64, i64, i64)> = std::collections::BTreeSet::new();
     for _ in 0..days * TICKS_PER_DAY {
         sim.step();
         if sim.time.tick % TICKS_PER_DAY == 0 {
@@ -178,6 +181,9 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
                         r.pursuit_cost[s][p] += y.cost[p] - before.cost[p];
                     }
                 }
+            }
+            for st in sim.structures.iter().filter(|st| st.kind == cairn_sim::StructureKind::Hut) {
+                huts.insert((st.built_tick, st.pos.0 as i64, st.pos.1 as i64));
             }
             for c in &sim.clans {
                 let e = camps.entry(c.id.0).or_insert((c.home, c.home));
@@ -241,6 +247,7 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
     r.herd_net_km = nets.get(nets.len() / 2).copied().unwrap_or(f64::NAN);
     r.herds_near = (near(&herds0), near(&herds1));
     r.herbivores.1 = sim.fauna_census().0;
+    r.huts_built = huts.len();
     r.chief_huts = sim.structures.iter().filter(|s| s.kind == cairn_sim::StructureKind::ChiefHut).count();
     r.camp_net_km = camps.values().map(|(a, b)| cairn_core::tiles_to_km((a.0 - b.0).hypot(a.1 - b.1))).collect();
     r
@@ -318,18 +325,19 @@ fn print(rs: &[Report]) {
             per_day(k[0] + k[1])
         );
     }
-    println!("\n## foyers de clan, par run : chemin (km/an de clan), déplacement net médian (km), clans, huttes du chef, levées de camp (> 1 km en un jour)");
+    println!("\n## foyers de clan, par run : chemin (km/an de clan), déplacement net médian (km), clans, huttes du chef, levées de camp (> 1 km en un jour), huttes bâties");
     for r in rs {
         let mut net = r.camp_net_km.clone();
         net.sort_by(f64::total_cmp);
         println!(
-            "  {:<14}{:>8.1} km/an{:>8.1} km{:>4}{:>4}{:>5}",
+            "  {:<14}{:>8.1} km/an{:>8.1} km{:>4}{:>4}{:>5}{:>4}",
             r.label,
             365.0 * r.camp_path_km / r.camp_days.max(1) as f64,
             net.get(net.len() / 2).copied().unwrap_or(f64::NAN),
             net.len(),
             r.chief_huts,
-            r.camp_moves
+            r.camp_moves,
+            r.huts_built
         );
     }
     println!("  (chasseurs-cueilleurs : ~160-175 km/an de déplacements résidentiels ; Batek : un camp tous les 8 j)");
