@@ -368,8 +368,9 @@ pub(crate) fn nurse_infants(sim: &mut Sim) {
             // Le reste, la mère le donne : quand elle mange, ou de ce qu'elle
             // porte. Ce qu'elle donne, elle ne l'a pas mangé.
             if share < 1.0 && (mother_activity == Activity::Eating || mother_carrying > 0.0) {
-                let want = NURSE_RELIEF * (1.0 - share) * phys.scale;
-                given_points = phys.eat_points(want);
+                // Un repas : l'enfant mange à sa faim (`eat_points` plafonne à
+                // son appétit) — ce n'est pas un débit horaire comme le lait.
+                given_points = phys.eat_points(phys.appetite_points());
                 crate::food_stats::fed(crate::food_stats::Source::Shared, given_points);
             }
         }

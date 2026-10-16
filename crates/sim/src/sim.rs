@@ -3131,7 +3131,7 @@ mod tests {
         let (_, soif) = apres(Activity::Drinking);
         assert_eq!(soif, 0.0, "quand sa mère boit, il boit");
         let (faim, _) = apres(Activity::Eating);
-        assert!(faim < 0.45, "quand sa mère mange, elle lui donne à manger (faim {faim:.3})");
+        assert!(faim < 0.1, "quand sa mère mange, elle lui donne un repas à sa faim (faim {faim:.3})");
     }
 
     #[test]
