@@ -46,6 +46,8 @@ const WEEK_KCAL: f64 = 7.0 * 2_500.0;
 struct BandDay {
     adults: u32,
     day_net: f32,
+    /// Adultes qui ont passé la nuit au camp (à moins du rayon de résidence).
+    at_camp: u32,
     /// Jours d'adulte et kcal nettes de l'habitude (le mois).
     habit_h: f32,
     habit_net: f32,
@@ -59,6 +61,7 @@ pub(crate) fn daily(sim: &mut Sim) {
     let tick = sim.time.tick;
     let mut bands: BTreeMap<u64, BandDay> = BTreeMap::new();
     let mut people_per_zone: BTreeMap<(i64, i64), u32> = BTreeMap::new();
+    let homes: BTreeMap<u64, (f64, f64)> = sim.clans.iter().map(|c| (c.id.0, c.home)).collect();
     for (_, (membership, demo, yields, mem, pos)) in sim
         .agents
         .query_mut::<(&ClanMembership, &Demographics, &mut Yields, &Memory, &crate::agent::Position)>()
@@ -72,7 +75,13 @@ pub(crate) fn daily(sim: &mut Sim) {
         let band = bands.entry(clan.0).or_default();
         let (hh, hn) = yields.habit_per_day();
         band.adults += 1;
-        band.day_net += dn;
+        // Le jour ne compte pour le camp que si l'on y est : le jour de marche
+        // vers un nouveau camp pèse dans l'habitude (trajets compris), pas
+        // dans ce que rend le lieu où l'on arrive.
+        if homes.get(&clan.0).is_some_and(|h| (pos.x - h.0).hypot(pos.y - h.1) <= RESIDENCE_RADIUS_TILES) {
+            band.at_camp += 1;
+            band.day_net += dn;
+        }
         band.habit_h += hh;
         band.habit_net += hn;
         band.springs.extend(mem.springs.iter().copied());
@@ -89,8 +98,9 @@ pub(crate) fn daily(sim: &mut Sim) {
         let Some(band) = bands.get(&clan.id.0) else { continue };
         // Par jour d'adulte, et non par heure de travail : la valeur marginale
         // juge contre la moyenne **trajets compris** (Charnov) — un jour de
-        // marche vers un nouveau camp ne rapporte rien, et il compte.
-        clan.camp.h = clan.camp.h * keep + band.adults as f32;
+        // marche vers un nouveau camp ne rapporte rien, et il compte dans
+        // l'habitude ; le camp, lui, ne compte que les jours qu'on y a passés.
+        clan.camp.h = clan.camp.h * keep + band.at_camp as f32;
         clan.camp.net = clan.camp.net * keep + band.day_net;
         let evidence = band.adults as f32 * RECENT_EVIDENCE_HOURS / 24.0;
         if clan.camp.h < evidence || band.habit_h < 2.0 * evidence || band.habit_net <= 0.0 {

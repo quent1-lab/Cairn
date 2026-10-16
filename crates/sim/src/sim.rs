@@ -2503,6 +2503,45 @@ mod tests {
         assert_eq!(sim.clans[0].home, camp, "autant par jour que d'habitude : on ne lève pas le camp");
     }
 
+    /// MAR-6b : le jour du trajet ne juge pas le camp où l'on arrive. Une
+    /// bande dont les membres sont encore en chemin (loin du nouveau camp) ne
+    /// le lève pas aussitôt, faute d'y avoir rien tiré.
+    #[test]
+    fn une_bande_en_chemin_ne_juge_pas_son_nouveau_camp() {
+        let (mut sim, home) = scenario_au_foyer(5, 4, 0);
+        sim.time.tick = 135 * cairn_core::TICKS_PER_DAY;
+        let source = land_near(&mut sim, home, -cairn_core::km_to_tiles(6.0));
+        let ids: Vec<AgentId> = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).collect();
+        for (_, (yields, mem, membership)) in
+            sim.agents.query_mut::<(&mut crate::yields::Yields, &mut Memory, &mut ClanMembership)>()
+        {
+            membership.0 = Some(social::ClanId(1));
+            for _ in 0..30 {
+                yields.spend_hour(crate::yields::Pursuit::Gather, 0.0);
+                yields.gain(crate::yields::Pursuit::Gather, 3_000.0);
+                yields.take_day();
+            }
+            mem.springs.push((source.0 as i64, source.1 as i64));
+        }
+        // Le camp vient d'être posé à 10 km : tous sont encore au point de départ.
+        let new_camp = (home.0 as f64 + cairn_core::km_to_tiles(10.0), home.1 as f64);
+        sim.clans.push(Clan {
+            id: social::ClanId(1),
+            founded_tick: 0,
+            members: ids.iter().copied().collect(),
+            home: new_camp,
+            stock: 0.0,
+            chief: ids[0],
+            desired: None,
+            rivalry: 0.0,
+            camp: Default::default(),
+        });
+        for _ in 0..2 {
+            crate::camp::daily(&mut sim);
+        }
+        assert_eq!(sim.clans[0].home, new_camp, "deux jours de marche ne jugent pas le camp où l'on va");
+    }
+
     /// MAR-6b : le foyer d'un clan est son camp ; il ne suit pas le centroïde
     /// des membres d'un jour à l'autre (seule la décision de lever le camp le
     /// déplace).
