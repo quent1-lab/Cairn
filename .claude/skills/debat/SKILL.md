@@ -14,7 +14,10 @@ Pas pour un jalon d'observation seule, ni pour une correction de typographie.
 
 ## Comment
 1. Le fichier du chantier doit être à jour (prédictions, tableau mesuré, lecture).
-2. Lancer l'agent `contradicteur` (modèle Opus, en tâche de fond), avec seulement :
+2. Lancer l'agent `contradicteur` (modèle Opus, en tâche de fond) — s'il n'est pas
+   proposé (les agents de `.claude/agents/` ne se chargent qu'au démarrage d'une session),
+   un agent `general-purpose` en `model: opus` avec le corps de
+   `.claude/agents/contradicteur.md` en tête de consigne — avec seulement :
    le chemin du fichier du chantier, le chemin du dossier de domaine, et la question
    (« conteste les conclusions de la section X »). Ne rien lui résumer : il lit.
 3. À son retour, écrire dans le fichier du chantier une section
