@@ -71,6 +71,8 @@ struct Report {
     /// premier et le dernier jour où il existe (km).
     camp_path_km: f64,
     camp_days: u64,
+    /// Levées de camp : jours où un foyer a bougé de plus d'un kilomètre.
+    camp_moves: u64,
     camp_net_km: Vec<f64>,
     /// Huttes du chef debout à la fin : elles ancrent le foyer.
     chief_huts: usize,
@@ -179,7 +181,9 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
             }
             for c in &sim.clans {
                 let e = camps.entry(c.id.0).or_insert((c.home, c.home));
-                r.camp_path_km += cairn_core::tiles_to_km((e.1.0 - c.home.0).hypot(e.1.1 - c.home.1));
+                let step = cairn_core::tiles_to_km((e.1.0 - c.home.0).hypot(e.1.1 - c.home.1));
+                r.camp_path_km += step;
+                r.camp_moves += u64::from(step > 1.0);
                 e.1 = c.home;
                 r.camp_days += 1;
             }
@@ -314,17 +318,18 @@ fn print(rs: &[Report]) {
             per_day(k[0] + k[1])
         );
     }
-    println!("\n## foyers de clan, par run : chemin (km/an de clan), déplacement net médian (km), clans, huttes du chef (ancres)");
+    println!("\n## foyers de clan, par run : chemin (km/an de clan), déplacement net médian (km), clans, huttes du chef, levées de camp (> 1 km en un jour)");
     for r in rs {
         let mut net = r.camp_net_km.clone();
         net.sort_by(f64::total_cmp);
         println!(
-            "  {:<14}{:>8.1} km/an{:>8.1} km{:>4}{:>4}",
+            "  {:<14}{:>8.1} km/an{:>8.1} km{:>4}{:>4}{:>5}",
             r.label,
             365.0 * r.camp_path_km / r.camp_days.max(1) as f64,
             net.get(net.len() / 2).copied().unwrap_or(f64::NAN),
             net.len(),
-            r.chief_huts
+            r.chief_huts,
+            r.camp_moves
         );
     }
     println!("  (chasseurs-cueilleurs : ~160-175 km/an de déplacements résidentiels ; Batek : un camp tous les 8 j)");

@@ -37,6 +37,9 @@ Run longue : `out/bin/$v/longue $seed $scene 135 $L.csv 10 > $L.log 2>&1`
 ## Attendre
 - Jamais de `sleep` bloquant. Une commande en tâche de fond (`run_in_background`) :
   `until [ -f <done> ]; do sleep 60; done; <extraction>` — la notification réveille.
+- Attendre un **fichier**, jamais un processus par `pgrep -f <motif>` : la boucle contient
+  le motif et se trouve elle-même (attente sans fin). Pour une commande lancée en tâche de
+  fond (tests), sa propre notification suffit.
 - À chaque lancement, annoncer une fourchette de durée et l'heure de Paris
   (`TZ=Europe/Paris date +%H:%M`).
 
