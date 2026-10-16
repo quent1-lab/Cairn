@@ -12,7 +12,11 @@ Simulateur d'évolution culturelle et technologique **émergente** : monde infin
 - **Économie de tokens, suite** (2026-10-05) :
   - **Lecture ciblée** : explorer librement (la règle 9 l'exige), mais par `grep` et plages de lignes ; jamais `docs/JOURNAL.md` en entier (218 k caractères) ni un gros fichier de sortie de banc — on en extrait les colonnes utiles.
   - **Un résultat, trois traces** : le fichier de prédictions du chantier (`out/<chantier>/predictions.md`), une entrée au journal, une ligne dans `docs/CODE.md`. Ici, seulement la ligne « Où reprendre ».
-  - **Sous-agents** : seulement pour une recherche « où est X » qui balaierait beaucoup de fichiers ; jamais pour lire du code à diagnostiquer (les bugs de ce projet sont dans les détails). Les agents intégrés ne reçoivent pas ce fichier : leur répéter les règles utiles.
+  - **Sous-agents** (règle validée par l'utilisateur, 2026-10-16), un à la fois, pour trois usages seulement :
+    1. **Sourcer** un chiffre réel : il rapporte le chiffre, son unité, la population et le lien, sans l'interpréter ni l'adapter au modèle.
+    2. **Contre-lire** l'étape « ce que j'ai pu manquer » (règle 9.6) sur un résultat déjà mesuré : un agent sans contexte lit les prédictions et les chiffres, et liste d'autres explications et des voisins non regardés.
+    3. **Chercher « où est X »** quand cela balaierait beaucoup de fichiers.
+    Jamais pour lire du code à diagnostiquer (les bugs de ce projet sont dans les détails), écrire du code de simulation, lancer un banc (2 vCPU, risque de manque de mémoire) ni décider. Les agents ne reçoivent pas ce fichier : leur répéter les règles utiles (français, sources citées, aucun chiffre inventé). Ce qu'ils rendent va dans le fichier du chantier ; seule la conclusion entre dans la réponse.
   - **Fin de chantier** : tout l'état étant écrit dans les fichiers, proposer `/clear`.
 
 ## Règles non négociables (BRIEF §0 et §11)
