@@ -2001,7 +2001,7 @@ fn execute(
             // l'agent re-délibérera au prochain tick.
             if let Some(clan_id) = clan {
                 let already =
-                    structures.iter().any(|s| s.clan == clan_id && s.kind == kind);
+                    structures.iter().any(|s| s.clan == clan_id && s.kind == kind && s.in_use());
                 let stock = clan_stock.get(&clan_id).copied().unwrap_or(0.0);
                 if !already && stock >= kind.cost() {
                     *clan_stock.entry(clan_id).or_insert(0.0) -= kind.cost();
