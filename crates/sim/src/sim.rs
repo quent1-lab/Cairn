@@ -3115,6 +3115,9 @@ mod tests {
                 }
                 if *id == mother {
                     behavior.activity = mere;
+                    if mere == Activity::Drinking {
+                        phys.thirst = 0.0; // elle a bu à l'eau douce
+                    }
                 }
             }
             demography::nurse_infants(&mut sim);
@@ -3132,6 +3135,41 @@ mod tests {
         assert_eq!(soif, 0.0, "quand sa mère boit, il boit");
         let (faim, _) = apres(Activity::Eating);
         assert!(faim < 0.1, "quand sa mère mange, elle lui donne un repas à sa faim (faim {faim:.3})");
+    }
+
+    /// MOR-4, débat du 2026-10-17 : l'enfant ne boit que si sa mère a vraiment
+    /// bu. Une mère « qui boit » à une eau qui n'est pas douce n'est pas
+    /// désaltérée (`execute`, `TaskKind::Drink`) ; son enfant non plus.
+    #[test]
+    fn l_enfant_ne_boit_pas_quand_sa_mere_ne_s_est_pas_desalteree() {
+        let soif_enfant = |soif_mere: f32| -> f32 {
+            let (mut sim, home) = scenario_setup(42, 0, 0);
+            let mother = sim.spawn_agent(home.0 as f64 + 0.5, home.1 as f64 + 0.5);
+            let child = sim.spawn_child(
+                home.0 as f64 + 0.5,
+                home.1 as f64 + 0.5,
+                Sex::Male,
+                Traits::default(),
+                Kinship { mother: Some(mother), father: None },
+            );
+            let tick = sim.time.tick as i64;
+            for (_, (id, demo, phys, behavior)) in
+                sim.agents.query_mut::<(&AgentId, &mut Demographics, &mut Physiology, &mut Behavior)>()
+            {
+                if *id == child {
+                    demo.born_tick = tick - 360 * 24;
+                    phys.thirst = 0.8;
+                }
+                if *id == mother {
+                    behavior.activity = Activity::Drinking;
+                    phys.thirst = soif_mere;
+                }
+            }
+            demography::nurse_infants(&mut sim);
+            sim.agents.query::<(&AgentId, &Physiology)>().iter().find(|(_, (id, _))| **id == child).map(|(_, (_, p))| p.thirst).unwrap()
+        };
+        assert_eq!(soif_enfant(0.0), 0.0, "la mère a bu à l'eau douce : l'enfant boit");
+        assert!(soif_enfant(0.6) > 0.7, "la mère n'est pas désaltérée : l'enfant non plus");
     }
 
     #[test]

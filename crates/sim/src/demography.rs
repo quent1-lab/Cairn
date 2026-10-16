@@ -308,10 +308,13 @@ pub(crate) fn nurse_infants(sim: &mut Sim) {
             let phys = sim.agents.get::<&Physiology>(entity).ok()?;
             let behavior = sim.agents.get::<&Behavior>(entity).ok()?;
             let carrying = sim.agents.get::<&crate::agent::Carrying>(entity).map(|c| c.0).unwrap_or(0.0);
-            Some(((pos.x, pos.y), behavior.activity, milk_flow(&phys), carrying))
+            // A-t-elle vraiment bu ? À une eau qui n'est pas douce, elle « boit »
+            // sans être désaltérée (`sim::execute`) : son enfant non plus.
+            let quenched = behavior.activity == Activity::Drinking && phys.thirst == 0.0;
+            Some(((pos.x, pos.y), behavior.activity, milk_flow(&phys), carrying, quenched))
         });
 
-        let Some(((mx, my), mother_activity, milk, mother_carrying)) = mother_state else {
+        let Some(((mx, my), mother_activity, milk, mother_carrying, mother_quenched)) = mother_state else {
             continue; // orphelin : cloué sur place, les besoins montent
         };
         // La part du lait, et ce qu'il apporte par heure passé l'allaitement
@@ -346,7 +349,7 @@ pub(crate) fn nurse_infants(sim: &mut Sim) {
             behavior.activity = match mother_activity {
                 Activity::Sleeping => Activity::Sleeping,
                 Activity::Sheltering => Activity::Sheltering,
-                Activity::Drinking if share < 1.0 => Activity::Drinking,
+                Activity::Drinking if share < 1.0 && mother_quenched => Activity::Drinking,
                 _ => Activity::Idle,
             };
             if behavior.activity == Activity::Drinking {
