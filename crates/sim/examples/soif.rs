@@ -38,6 +38,12 @@ struct Report {
     /// Morts de soif des 1-4 ans : la dernière heure relevée.
     deaths: Vec<String>,
     child_h: u64,
+    /// Relevé de minuit des mères d'un enfant de moins de 3 ans : jours-mère,
+    /// dont réserves vides ; charge portée (somme, points) ; faim (somme).
+    mother_days: u64,
+    mother_empty: u64,
+    mother_load: f64,
+    mother_hunger: f64,
 }
 
 fn bucket(km: Option<f64>) -> String {
@@ -175,6 +181,23 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
                 ),
             );
         }
+        if tick % TICKS_PER_DAY == 0 {
+            let mothers: std::collections::BTreeSet<u64> = sim
+                .agents
+                .query::<(&Demographics, &Kinship)>()
+                .iter()
+                .filter(|(_, (d, _))| d.age_years(tick) < 3.0)
+                .filter_map(|(_, (_, k))| k.mother.map(|m| m.0))
+                .collect();
+            for (_, (id, phys, carrying)) in sim.agents.query::<(&AgentId, &Physiology, &cairn_sim::agent::Carrying)>().iter() {
+                if mothers.contains(&id.0) {
+                    r.mother_days += 1;
+                    r.mother_empty += u64::from(phys.reserves_kcal <= 0.0);
+                    r.mother_load += f64::from(carrying.0);
+                    r.mother_hunger += f64::from(phys.hunger);
+                }
+            }
+        }
         for d in &sim.deaths[seen_deaths..] {
             if d.cause == DeathCause::Dehydration
                 && let Some(s) = last.remove(&d.agent.0)
@@ -217,6 +240,22 @@ fn print(rs: &[Report]) {
         for (k, n) in map {
             println!("  {k:<10}{:>6.1} %", 100.0 * *n as f64 / total.max(1) as f64);
         }
+    }
+    let (md, me, ml, mh) = rs.iter().fold((0u64, 0u64, 0.0, 0.0), |a, r| (a.0 + r.mother_days, a.1 + r.mother_empty, a.2 + r.mother_load, a.3 + r.mother_hunger));
+    println!(
+        "\n## mères d'un enfant de moins de 3 ans, à minuit : {md} jours-mère ; réserves vides {:.2} % ; charge moyenne {:.2} point ; faim moyenne {:.3}",
+        100.0 * me as f64 / md.max(1) as f64,
+        ml / md.max(1) as f64,
+        mh / md.max(1) as f64
+    );
+    for r in rs {
+        println!(
+            "  {:<14} réserves vides {:>5.2} % ; charge {:.2} ; faim {:.3}",
+            r.label,
+            100.0 * r.mother_empty as f64 / r.mother_days.max(1) as f64,
+            r.mother_load / r.mother_days.max(1) as f64,
+            r.mother_hunger / r.mother_days.max(1) as f64
+        );
     }
     println!("\n## morts de soif des 1-4 ans, dernière heure relevée");
     for r in rs {
