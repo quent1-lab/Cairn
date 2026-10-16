@@ -50,6 +50,11 @@ Run longue : `out/bin/$v/longue $seed $scene 135 $L.csv 10 > $L.log 2>&1`
   huttes, têtes/an, marche) ; pour les naissances et causes, lire la dernière ligne du CSV.
 - Toujours afficher le **régime** (scène, saison de départ, seeds, horizon) avec les
   chiffres, et comparer au témoin **mesuré dans le même régime**.
+- Les sorties brutes restent dans `out/` (non suivi) ; le tableau qui en est tiré va dans
+  le fichier du chantier (`docs/domaines/…/chantiers/<CODE>.md`).
+- Un banc qui ne couvre pas le phénomène se dit : l'acceptation d'un an ne voit pas le
+  sevrage (aucun enfant n'atteint 6 mois la première année) — choisir l'horizon d'après le
+  phénomène.
 
 ## Régimes de référence
 - `marche 90 315 42,7,1337,2024 2` (hiver) et `marche 90 135 42,7,1337,2024 1` (été).

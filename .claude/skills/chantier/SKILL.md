@@ -5,14 +5,15 @@ description: La boucle de travail de Cairn pour tout chantier ou jalon (MAR-6b, 
 
 # Chantier — la boucle (CLAUDE.md, règles 1-10)
 
-Suivre les étapes **dans l'ordre**. Cocher en écrivant dans
-`out/<chantier>/predictions.md` : ce fichier est la trace, pas la réponse.
+Suivre les étapes **dans l'ordre**. Cocher en écrivant dans le fichier du chantier,
+`docs/domaines/<domaine>/chantiers/<CODE>.md` (skill `dossiers`) : ce fichier est la trace,
+pas la réponse. Les sorties brutes des bancs restent dans `out/`.
 
 ## 0. Avant tout
 - Relire « Où reprendre » (CLAUDE.md) et l'ordre (`docs/CODE.md` §5.1-5.2).
-- Relire la fin de `out/<chantier>/predictions.md` (`tail`, ou `grep -n "^## "`) : les
-  décisions de l'utilisateur y sont consignées. Ne jamais lire `docs/JOURNAL.md` en
-  entier : `grep`.
+- Relire la fin du fichier du chantier (`grep -n "^## "`, puis la plage utile) et le
+  `CONTEXTE.md` du domaine (décisions de l'utilisateur), son `RESULTATS.md` (acquis
+  négatifs à ne pas retenter). Archives (`docs/JOURNAL.md`, `docs/ETAT.md`) : `grep`.
 - Décision de modèle ou de vision non tranchée ? **Demander** (règle 10) avant de coder.
   Une décision reçue s'écrit tout de suite dans `predictions.md`, avec sa date.
 
@@ -20,8 +21,9 @@ Suivre les étapes **dans l'ordre**. Cocher en écrivant dans
 - Lire le code concerné par `grep -n` et plages de lignes (pas de sous-agent pour lire du
   code à diagnostiquer).
 - Nommer le défaut comme un **écart entre le code et une référence** : le BRIEF (citer la
-  ligne) ou la réalité (citer la source). Sources : chercher un chiffre réel (WebSearch) ;
-  il sert à **juger**, jamais à régler une constante.
+  ligne) ou la réalité (citer la source). Sources : d'abord `SOURCES.md` du domaine, puis
+  l'agent `sourceur` (Sonnet) pour un chiffre manquant ; il sert à **juger**, jamais à
+  régler une constante. Le chiffre trouvé va dans `SOURCES.md`.
 - Chercher les **portes tout ou rien** et les **correctifs de résultat** passés (`grep`
   JOURNAL) : ils cachent souvent le vrai défaut (ex. `anchor_homes`).
 
@@ -74,11 +76,13 @@ Suivre les étapes **dans l'ordre**. Cocher en écrivant dans
 
 ## 9. Ce que j'ai pu manquer (obligatoire, jamais « non »)
 Nommer au moins une chose : régime non couvert, constante non balayée, autre explication
-que les chiffres n'excluent pas, voisin non regardé, cause mêlée.
+que les chiffres n'excluent pas, voisin non regardé, cause mêlée. À la fin d'un jalon
+mesuré, ou après deux réfutations de suite : **débat** avec l'agent `contradicteur`
+(skill `debat`).
 
 ## 10. Reboucher (skill `cloture`)
-Trois traces : `predictions.md`, une entrée au JOURNAL, une ligne dans `docs/CODE.md`
-(dans le même mouvement que le commit du module). Une expérience non reportée reste sur
+Les traces du domaine (fichier du chantier, `RESULTATS.md`, `HISTORIQUE.md`,
+`CHANTIERS.md`) et la ligne de `docs/CODE.md`, dans le même mouvement que le commit. Une expérience non reportée reste sur
 sa branche `exp/<nom>` avec la mention « à valider ».
 
 ## À l'utilisateur
