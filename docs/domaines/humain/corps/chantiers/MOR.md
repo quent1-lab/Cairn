@@ -303,3 +303,25 @@ Lecture : l'enfant ne recevait au repas qu'un débit horaire (0,1 × part manqua
 soit ~0,06 de faim par heure de repas : il lui en fallait cinq par jour. Le test le laissait
 passer (seuil 0,45). Correction : au repas, l'enfant mange **à sa faim** ; test durci (< 0,1),
 vu rouge (0,425). À remesurer.
+
+### MOR-4 corrigé (repas à la faim) — acceptation 5 ans (8 runs, départ j135), contre `main`
+
+| | main | MOR-4 v1 | **MOR-4 corrigé** |
+|---|---|---|---|
+| mortalité < 1 an ; 1-4 ans (‰/an) | 292 ; 150 | 589 ; 573 | **289 ; 144** |
+| morts de soif < 1 an ; 1-4 ans | 15 ; 14 | 18 ; 5 | **14 ; 13** |
+| morts de faim < 1 an ; 1-4 ans | 0 ; 2 | 32 ; 50 | 0 ; 0 |
+| morts de maladie < 1 an ; 1-4 ans | 45 ; 37 | 101 ; 50 | 44 ; 40 |
+| kcal/j < 3 ans | 633-719 | 525-571 | 635-717 |
+| mourir avant 15 ans | 59 % | 94 % | 58 % |
+| population finale (8 runs) | 46-80 | — | 36-83 (sans direction commune) |
+1. Soif ≤ 6 : **réfuté** (14 et 13). Boire avec la mère ne retire pas les morts de soif : il
+   reste les orphelins et les mères en famine (banc `soif` : 35-68 % sans mère, 64 % des
+   autres heures avec une mère à réserves vides).
+2. Maladie des moins de 1 an +0 à +60 % : tenu bas (44 contre 45) — l'eau bue dès 6 mois
+   n'ajoute presque rien de visible.
+3. Mortalité 1-4 ans en baisse : 150 → 144, dans le bruit ; < 1 an : inchangée.
+4. Kcal des femmes : inchangées (2 569-2 682 contre 2 578-2 678).
+Lecture : le sevrage est en place, sans coût ni gain visible à 5 ans sur ces scènes. Les
+morts de soif des petits viennent d'**orphelins** et de **mères affamées**, pas du sevrage.
+Repère réel (à sourcer) : mortalité infantile hadza ~20 % la première année.
