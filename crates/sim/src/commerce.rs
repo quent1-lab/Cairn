@@ -369,6 +369,7 @@ mod tests {
             chief: m,
             desired: None,
             rivalry: 0.0,
+            camp: Default::default(),
         };
         clan.home = (0.0, 0.0);
         sim.clans.push(clan);
@@ -398,6 +399,7 @@ mod tests {
             chief: m,
             desired: None,
             rivalry: 0.0,
+            camp: Default::default(),
         });
         dispatch(&mut sim);
         assert!(sim.expeditions.is_empty(), "pas de cuivre, pas de quête d'étain");

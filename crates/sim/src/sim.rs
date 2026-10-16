@@ -1389,14 +1389,15 @@ impl Sim {
             self.end("d commerce", _pa);
             // Après que les clans du jour sont connus : réattribuer les
             // structures à qui contrôle leur tuile (et ruiner les abandonnées),
-            // mesurer ce que chaque clan désire bâtir, puis ancrer le foyer des
-            // clans sédentarisés à leur hutte du chef (en dernier : c'est cette
-            // valeur ancrée que la délibération du lendemain doit lire).
+            // mesurer ce que chaque clan désire bâtir.
             structures::maintain(self, time.tick / TICKS_PER_DAY);
             let _pa = phase();
             structures::plan(self);
             self.end("d structures", _pa);
-            structures::anchor_homes(self);
+            // Puis lever le camp des bandes dont le pays rend moins que
+            // l'habitude (MAR-6b) : c'est ce foyer que la délibération du
+            // lendemain lira.
+            crate::camp::daily(self);
             // Domestication (Phase 5) : les foyers étant fixés, apprivoiser (ou
             // refaroucher) les troupeaux domesticables selon la proximité d'un
             // clan et la protection contre les prédateurs — le cheptel émerge de
@@ -2408,6 +2409,68 @@ mod tests {
         }
     }
 
+    /// MAR-6b, lever le camp : une bande dont le camp rend le dixième de son
+    /// habitude part vers une source connue hors du pays battu ; la même bande,
+    /// quand le camp rend comme d'habitude, reste.
+    #[test]
+    fn une_bande_leve_le_camp_quand_le_pays_s_epuise() {
+        let foyer_apres = |epuise: bool| -> ((f64, f64), (f64, f64)) {
+            let (mut sim, home) = scenario_au_foyer(5, 4, 0);
+            sim.time.tick = 135 * cairn_core::TICKS_PER_DAY;
+            let source = land_near(&mut sim, home, cairn_core::km_to_tiles(6.0));
+            let ids: Vec<AgentId> = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).collect();
+            for (_, (yields, mem, membership)) in
+                sim.agents.query_mut::<(&mut crate::yields::Yields, &mut Memory, &mut ClanMembership)>()
+            {
+                membership.0 = Some(social::ClanId(1));
+                for _ in 0..200 {
+                    yields.spend_hour(crate::yields::Pursuit::Gather, 0.0);
+                    yields.gain(crate::yields::Pursuit::Gather, 500.0);
+                }
+                yields.take_day();
+                mem.springs.push((source.0 as i64, source.1 as i64));
+            }
+            let camp = (home.0 as f64 + 0.5, home.1 as f64 + 0.5);
+            let rate = if epuise { 50.0 } else { 600.0 };
+            sim.clans.push(Clan {
+                id: social::ClanId(1),
+                founded_tick: 0,
+                members: ids.iter().copied().collect(),
+                home: camp,
+                stock: 0.0,
+                chief: ids[0],
+                desired: None,
+                rivalry: 0.0,
+                camp: social::CampLedger { h: 400.0, net: 400.0 * rate },
+            });
+            crate::camp::daily(&mut sim);
+            (camp, sim.clans[0].home)
+        };
+        let (avant, apres) = foyer_apres(true);
+        let parti = cairn_core::tiles_to_km((apres.0 - avant.0).hypot(apres.1 - avant.1));
+        assert!(parti > 4.5, "le pays rend le dixième de l'habitude, et le camp n'a bougé que de {parti:.1} km");
+        let (avant, apres) = foyer_apres(false);
+        assert_eq!(avant, apres, "un camp qui rend comme d'habitude ne se lève pas");
+    }
+
+    /// MAR-6b : le foyer d'un clan est son camp ; il ne suit pas le centroïde
+    /// des membres d'un jour à l'autre (seule la décision de lever le camp le
+    /// déplace).
+    #[test]
+    fn le_camp_reste_ou_la_bande_l_a_pose() {
+        let mut sim = scenario(42, 30, 24 * 40);
+        let Some(before) = sim.clans.first().map(|c| (c.id, c.home)) else {
+            panic!("un clan doit s'être formé en 40 jours");
+        };
+        // On déplace tous les membres de 2 km : le centroïde bouge, le camp non.
+        for (_, pos) in sim.agents.query_mut::<&mut Position>() {
+            pos.x += 1000.0;
+        }
+        crate::social::daily(&mut sim);
+        let after = sim.clans.iter().find(|c| c.id == before.0).map(|c| c.home);
+        assert_eq!(after, Some(before.1), "le camp a suivi le centroïde du jour");
+    }
+
     /// Le premier tick où l'approche d'`hunter` tue : les tests qui vérifient
     /// ce qu'une prise **rapporte** (et non combien on en fait) chassent à
     /// ce tick-là.
@@ -2817,6 +2880,7 @@ mod tests {
             chief: AgentId(0),
             desired: None,
             rivalry: 0.0,
+            camp: Default::default(),
         });
         for _ in 0..24 {
             sim.step();
@@ -3756,6 +3820,7 @@ mod tests {
             chief: members[0],
             desired: None,
             rivalry: 0.0,
+            camp: Default::default(),
         });
         sim.time.tick = 1; // entre deux minuits : la détection des clans ne passe pas
         for _ in 0..20 {
@@ -3793,6 +3858,7 @@ mod tests {
             chief: members[0],
             desired: None,
             rivalry: 0.0,
+            camp: Default::default(),
         });
         sim.time.tick = 1;
         for _ in 0..20 {
@@ -4016,6 +4082,7 @@ mod tests {
                     chief: id,
                     desired: None,
                     rivalry: 0.0,
+                    camp: Default::default(),
                 });
             }
             // Plusieurs délibérations, donc plusieurs directions tirées : une
@@ -4066,6 +4133,7 @@ mod tests {
                 chief: id,
                 desired: None,
                 rivalry: 0.0,
+                camp: Default::default(),
             });
             let mut far: f64 = 0.0;
             for t in 0..16 {
@@ -4103,6 +4171,7 @@ mod tests {
             chief: id,
             desired: None,
             rivalry: 0.0,
+            camp: Default::default(),
         });
         assert!(
             sim.inspect_agent(id).unwrap().iter().any(|m| m.kind == TaskKind::ReturnToClan && m.score > 0.0),
@@ -4314,6 +4383,7 @@ mod tests {
             chief: id,
             desired: None,
             rivalry: 0.0,
+            camp: Default::default(),
         });
         sim.time.tick = 23; // la nuit
         let motifs = sim.inspect_agent(id).unwrap();
@@ -4650,6 +4720,7 @@ mod tests {
             chief: farmer,
             desired: None,
             rivalry: 0.0,
+            camp: Default::default(),
         });
 
         let m_farmer = sim.inspect_agent(farmer).unwrap();
@@ -4703,6 +4774,7 @@ mod tests {
             chief: brave,
             desired: None,
             rivalry: 0.0,
+            camp: Default::default(),
         });
 
         let hunt_score = |m: &[crate::brain::Motivation]| {
@@ -4792,6 +4864,7 @@ mod tests {
             chief: herder,
             desired: None,
             rivalry: 0.0,
+            camp: Default::default(),
         });
 
         let m = sim.inspect_agent(herder).unwrap();
@@ -4834,6 +4907,7 @@ mod tests {
             chief: raider,
             desired: None,
             rivalry: 0.0,
+            camp: Default::default(),
         });
         sim.clans.push(Clan {
             id: social::ClanId(2),
@@ -4844,6 +4918,7 @@ mod tests {
             chief: rival,
             desired: None,
             rivalry: 0.0,
+            camp: Default::default(),
         });
 
         let raid_score = |sim: &mut Sim| {
