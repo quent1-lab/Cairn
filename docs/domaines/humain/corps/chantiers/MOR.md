@@ -325,3 +325,33 @@ vu rouge (0,425). À remesurer.
 Lecture : le sevrage est en place, sans coût ni gain visible à 5 ans sur ces scènes. Les
 morts de soif des petits viennent d'**orphelins** et de **mères affamées**, pas du sevrage.
 Repère réel (à sourcer) : mortalité infantile hadza ~20 % la première année.
+
+## Débat (2026-10-17, contradicteur Opus, un tour)
+
+1. *L'attribution « orphelins et mères affamées » vient du banc `soif` lancé avant MOR-4 ;
+   depuis, l'enfant boit quand sa mère boit, la voie « mère affamée » devrait avoir presque
+   disparu.* — **Retenu.** C'est un chiffre de l'ancien binaire mis en conclusion du nouveau.
+   Action : banc `soif` sur MOR-4 (main) et sur cueillette + MOR-4, avec l'âge au décès et le
+   temps écoulé depuis la dernière gorgée de la mère.
+2. *L'orphelin sevré n'a personne : `continue` ; seule une femme qui allaite peut le
+   prendre. Passé 6 mois, une grand-mère pourrait le nourrir et le faire boire (Hawkes) :
+   porte tout ou rien sans impossibilité physique.* — **Retenu**, défaut de mécanisme :
+   jalon proposé **MOR-4b** (soin d'une proche hors lait passé 6 mois). Décision à demander.
+3. *14 contre 15 morts : bruit de Poisson ±4, le banc ne voit qu'un effet de ±50 %.* —
+   **Retenu.** Lire en heures (soif saturée, faim > 0,8), seed par seed, en signes appariés.
+4. *Prédiction 4 (kcal des mères en hausse) : inchangé par construction ; la différence vraie
+   est que le lait est tamponné par les réserves, la nourriture donnée non.* — **Retenu** :
+   prédiction mal posée. À mesurer : faim des mères d'un 6-36 mois les jours à réserves
+   vides, `food_stats` Milk contre Shared.
+5. *Le plancher immunitaire (0,8) tient tant que `milk` est vrai, à 100 % comme à 20 % : la
+   diarrhée du sevrage ne peut pas apparaître ; et l'enfant étanche sa soif même si la mère
+   boit à une eau qui n'est pas douce.* — **Retenu, deux points.** Le second est un **bug**
+   (la mère « boit » sans s'étancher à une eau non douce, l'enfant si) : correctif à part,
+   avec test rouge. Le premier : proportionner les anticorps à la part du lait — jalon à
+   part (MOR-4c), un changement à la fois.
+6. *L'aménorrhée vaut 3 ans tout ou rien, même à 20 % de lait ; l'intervalle entre naissances
+   n'est pas mesuré.* — **Retenu** comme voisin : à mesurer, à relier à ENE-5.
+Report de la cueillette : **pas encore** (accord) — l'hypothèse « le sevrage résorbe la
+hausse » n'est pas vérifiée. Ordre : bug de l'eau, banc `soif` (MOR-4, cueillette + MOR-4),
+acceptation 5 ans appariée lue seed par seed (froid 7 à part) ; une mortalité 1-4 ans en
+hausse sur ≥ 6/8 runs bloque le report.
