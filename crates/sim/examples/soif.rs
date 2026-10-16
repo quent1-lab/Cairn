@@ -30,6 +30,11 @@ struct Report {
     to_mother: BTreeMap<String, u64>,
     to_spring: BTreeMap<String, u64>,
     to_home: BTreeMap<String, u64>,
+    /// Heures-enfant en soif saturée, par âge (moins de 3 ans : porté, ne boit
+    /// que le lait ; 3-4 ans : délibère) et par état de la mère (réserves,
+    /// santé).
+    by_age: BTreeMap<String, u64>,
+    mother_state: BTreeMap<String, u64>,
     /// Morts de soif des 1-4 ans : la dernière heure relevée.
     deaths: Vec<String>,
     child_h: u64,
@@ -117,6 +122,12 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
             .iter()
             .map(|(_, (id, p, b))| (id.0, ((p.x, p.y), task_name(b))))
             .collect();
+        let bodies: BTreeMap<u64, (f32, f32, f32)> = sim
+            .agents
+            .query::<(&AgentId, &Physiology)>()
+            .iter()
+            .map(|(_, (id, p))| (id.0, (p.reserves_kcal, p.health, cairn_sim::demography::milk_flow(p))))
+            .collect();
         let homes: BTreeMap<u64, (f64, f64)> = sim.clans.iter().map(|c| (c.id.0, c.home)).collect();
         for (_, (id, demo, kin, phys, pos, b, mem, cm)) in sim
             .agents
@@ -139,6 +150,17 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
                 .map(|s| tiles_to_km((s.0 as f64 - pos.x).hypot(s.1 as f64 - pos.y)));
             let d_home = cm.0.and_then(|c| homes.get(&c.0)).map(|h| tiles_to_km((h.0 - pos.x).hypot(h.1 - pos.y)));
             let task = task_name(b);
+            let age_key = if age < 3.0 { "1-3 ans (porté)" } else { "3-4 ans" };
+            *r.by_age.entry(age_key.into()).or_default() += 1;
+            let ms = kin.mother.and_then(|m| bodies.get(&m.0)).map_or("(sans mère)".to_string(), |&(res, health, milk)| {
+                format!(
+                    "réserves {} ; santé {} ; lait {}",
+                    if res <= 0.0 { "vides" } else { "non vides" },
+                    if health < 0.5 { "< 0,5" } else { "≥ 0,5" },
+                    if milk < 0.6 { "< 0,6" } else { "≥ 0,6" }
+                )
+            });
+            *r.mother_state.entry(ms).or_default() += 1;
             *r.by_task.entry((task.clone(), mother_task.clone())).or_default() += 1;
             *r.to_mother.entry(bucket(d_mother)).or_default() += 1;
             *r.to_spring.entry(bucket(d_spring)).or_default() += 1;
@@ -168,6 +190,7 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
 fn print(rs: &[Report]) {
     let mut by_task: BTreeMap<(String, String), u64> = BTreeMap::new();
     let (mut m, mut s, mut h): (BTreeMap<String, u64>, BTreeMap<String, u64>, BTreeMap<String, u64>) = Default::default();
+    let (mut ages, mut ms): (BTreeMap<String, u64>, BTreeMap<String, u64>) = Default::default();
     let mut total = 0u64;
     let mut child_h = 0u64;
     for r in rs {
@@ -176,7 +199,7 @@ fn print(rs: &[Report]) {
             *by_task.entry(k.clone()).or_default() += v;
             total += v;
         }
-        for (src, dst) in [(&r.to_mother, &mut m), (&r.to_spring, &mut s), (&r.to_home, &mut h)] {
+        for (src, dst) in [(&r.to_mother, &mut m), (&r.to_spring, &mut s), (&r.to_home, &mut h), (&r.by_age, &mut ages), (&r.mother_state, &mut ms)] {
             for (k, v) in src {
                 *dst.entry(k.clone()).or_default() += v;
             }
@@ -189,7 +212,7 @@ fn print(rs: &[Report]) {
     for ((c, mo), n) in v.iter().take(15) {
         println!("  {c:<16} {mo:<18}{:>6.1} %", 100.0 * **n as f64 / total.max(1) as f64);
     }
-    for (title, map) in [("distance à la mère", &m), ("distance à la source connue la plus proche", &s), ("distance au foyer", &h)] {
+    for (title, map) in [("âge de l'enfant", &ages), ("état de la mère", &ms), ("distance à la mère", &m), ("distance à la source connue la plus proche", &s), ("distance au foyer", &h)] {
         println!("\n## {title} (km)");
         for (k, n) in map {
             println!("  {k:<10}{:>6.1} %", 100.0 * *n as f64 / total.max(1) as f64);
