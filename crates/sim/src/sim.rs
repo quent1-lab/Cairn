@@ -2423,15 +2423,18 @@ mod tests {
                 sim.agents.query_mut::<(&mut crate::yields::Yields, &mut Memory, &mut ClanMembership)>()
             {
                 membership.0 = Some(social::ClanId(1));
-                for _ in 0..200 {
-                    yields.spend_hour(crate::yields::Pursuit::Gather, 0.0);
-                    yields.gain(crate::yields::Pursuit::Gather, 500.0);
+                // Un mois d'habitude : 3 000 kcal nettes par jour.
+                for _ in 0..30 {
+                    for _ in 0..6 {
+                        yields.spend_hour(crate::yields::Pursuit::Gather, 0.0);
+                    }
+                    yields.gain(crate::yields::Pursuit::Gather, 3_000.0);
+                    yields.take_day();
                 }
-                yields.take_day();
                 mem.springs.push((source.0 as i64, source.1 as i64));
             }
             let camp = (home.0 as f64 + 0.5, home.1 as f64 + 0.5);
-            let rate = if epuise { 50.0 } else { 600.0 };
+            let rate = if epuise { 300.0 } else { 6_000.0 }; // kcal nettes par jour d'adulte (la passe ajoute un jour vide)
             sim.clans.push(Clan {
                 id: social::ClanId(1),
                 founded_tick: 0,
@@ -2441,7 +2444,7 @@ mod tests {
                 chief: ids[0],
                 desired: None,
                 rivalry: 0.0,
-                camp: social::CampLedger { h: 400.0, net: 400.0 * rate },
+                camp: social::CampLedger { h: 8.0, net: 8.0 * rate },
             });
             crate::camp::daily(&mut sim);
             (camp, sim.clans[0].home)
@@ -2451,6 +2454,53 @@ mod tests {
         assert!(parti > 4.5, "le pays rend le dixième de l'habitude, et le camp n'a bougé que de {parti:.1} km");
         let (avant, apres) = foyer_apres(false);
         assert_eq!(avant, apres, "un camp qui rend comme d'habitude ne se lève pas");
+    }
+
+    /// MAR-6b : la valeur marginale juge par jour, trajets compris. Une bande
+    /// dont le camp rend autant par jour que d'habitude, mais au prix de plus
+    /// d'heures de travail, ne part pas — par heure, elle partirait.
+    #[test]
+    fn une_bande_qui_tire_autant_par_jour_ne_leve_pas_le_camp() {
+        let (mut sim, home) = scenario_au_foyer(5, 4, 0);
+        sim.time.tick = 135 * cairn_core::TICKS_PER_DAY;
+        let source = land_near(&mut sim, home, cairn_core::km_to_tiles(6.0));
+        let ids: Vec<AgentId> = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).collect();
+        for (_, (yields, mem, membership)) in
+            sim.agents.query_mut::<(&mut crate::yields::Yields, &mut Memory, &mut ClanMembership)>()
+        {
+            membership.0 = Some(social::ClanId(1));
+            for _ in 0..30 {
+                for _ in 0..6 {
+                    yields.spend_hour(crate::yields::Pursuit::Gather, 0.0);
+                }
+                yields.gain(crate::yields::Pursuit::Gather, 3_000.0);
+                yields.take_day();
+            }
+            mem.springs.push((source.0 as i64, source.1 as i64));
+        }
+        let camp = (home.0 as f64 + 0.5, home.1 as f64 + 0.5);
+        sim.clans.push(Clan {
+            id: social::ClanId(1),
+            founded_tick: 0,
+            members: ids.iter().copied().collect(),
+            home: camp,
+            stock: 0.0,
+            chief: ids[0],
+            desired: None,
+            rivalry: 0.0,
+            camp: Default::default(),
+        });
+        // Cinq jours au camp : 10 h de travail par jour pour 3 000 kcal.
+        for _ in 0..5 {
+            for (_, yields) in sim.agents.query_mut::<&mut crate::yields::Yields>() {
+                for _ in 0..10 {
+                    yields.spend_hour(crate::yields::Pursuit::Gather, 0.0);
+                }
+                yields.gain(crate::yields::Pursuit::Gather, 3_000.0);
+            }
+            crate::camp::daily(&mut sim);
+        }
+        assert_eq!(sim.clans[0].home, camp, "autant par jour que d'habitude : on ne lève pas le camp");
     }
 
     /// MAR-6b : le foyer d'un clan est son camp ; il ne suit pas le centroïde

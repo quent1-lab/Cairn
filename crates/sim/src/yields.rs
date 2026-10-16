@@ -79,6 +79,10 @@ pub struct Yields {
     /// par le camp (`take_day`).
     day_h: f32,
     day_net: f32,
+    /// Jours vécus, effacés comme l'expérience (demi-vie d'un mois) : le
+    /// dénominateur de l'habitude **par jour**, trajets et jours sans
+    /// subsistance compris.
+    own_days: f32,
 }
 
 impl Yields {
@@ -104,7 +108,15 @@ impl Yields {
     pub fn take_day(&mut self) -> (f32, f32) {
         let day = (self.day_h, self.day_net);
         (self.day_h, self.day_net) = (0.0, 0.0);
+        self.own_days += 1.0;
         day
+    }
+
+    /// L'habitude par jour vécu : jours du mois et kcal nettes de sa propre
+    /// subsistance, toutes activités — ce que rapporte une journée, jours de
+    /// marche d'un camp à l'autre compris.
+    pub fn habit_per_day(&self) -> (f32, f32) {
+        (self.own_days, self.own_net.iter().sum())
     }
 
     /// L'habitude : heures et kcal nettes du mois, la sienne et celle des
@@ -123,6 +135,9 @@ impl Yields {
             self.own_h[p] *= keep;
             self.own_net[p] *= keep;
             self.seen_h[p] *= keep;
+            if p == 0 {
+                self.own_days *= keep;
+            }
             self.seen_net[p] *= keep;
         }
     }

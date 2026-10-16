@@ -45,8 +45,8 @@ const WEEK_KCAL: f64 = 7.0 * 2_500.0;
 #[derive(Default)]
 struct BandDay {
     adults: u32,
-    day_h: f32,
     day_net: f32,
+    /// Jours d'adulte et kcal nettes de l'habitude (le mois).
     habit_h: f32,
     habit_net: f32,
     springs: BTreeSet<(i64, i64)>,
@@ -64,15 +64,14 @@ pub(crate) fn daily(sim: &mut Sim) {
         .query_mut::<(&ClanMembership, &Demographics, &mut Yields, &Memory, &crate::agent::Position)>()
     {
         *people_per_zone.entry(crate::fauna::range_zone((pos.x, pos.y))).or_default() += 1;
-        let (dh, dn) = yields.take_day();
+        let (_, dn) = yields.take_day();
         let Some(clan) = membership.0 else { continue };
         if !demo.is_adult(tick) {
             continue;
         }
         let band = bands.entry(clan.0).or_default();
-        let (hh, hn) = yields.habit();
+        let (hh, hn) = yields.habit_per_day();
         band.adults += 1;
-        band.day_h += dh;
         band.day_net += dn;
         band.habit_h += hh;
         band.habit_net += hn;
@@ -88,10 +87,13 @@ pub(crate) fn daily(sim: &mut Sim) {
     let mut clans = std::mem::take(&mut sim.clans);
     for clan in &mut clans {
         let Some(band) = bands.get(&clan.id.0) else { continue };
-        clan.camp.h = clan.camp.h * keep + band.day_h;
+        // Par jour d'adulte, et non par heure de travail : la valeur marginale
+        // juge contre la moyenne **trajets compris** (Charnov) — un jour de
+        // marche vers un nouveau camp ne rapporte rien, et il compte.
+        clan.camp.h = clan.camp.h * keep + band.adults as f32;
         clan.camp.net = clan.camp.net * keep + band.day_net;
-        let evidence = RECENT_EVIDENCE_HOURS * band.adults as f32;
-        if clan.camp.h < evidence || band.habit_h < evidence || band.habit_net <= 0.0 {
+        let evidence = band.adults as f32 * RECENT_EVIDENCE_HOURS / 24.0;
+        if clan.camp.h < evidence || band.habit_h < 2.0 * evidence || band.habit_net <= 0.0 {
             continue;
         }
         let now = clan.camp.net / clan.camp.h;
