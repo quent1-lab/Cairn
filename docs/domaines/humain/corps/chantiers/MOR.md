@@ -355,3 +355,15 @@ Report de la cueillette : **pas encore** (accord) — l'hypothèse « le sevrage
 hausse » n'est pas vérifiée. Ordre : bug de l'eau, banc `soif` (MOR-4, cueillette + MOR-4),
 acceptation 5 ans appariée lue seed par seed (froid 7 à part) ; une mortalité 1-4 ans en
 hausse sur ≥ 6/8 runs bloque le report.
+
+### Correctif de l'eau (débat, point 5b) et mesures du débat — prédictions (2026-10-17, avant)
+
+Correctif : l'enfant ne boit (et ne s'expose à l'eau) que si sa mère s'est vraiment
+désaltérée. Test `l_enfant_ne_boit_pas_quand_sa_mere_ne_s_est_pas_desalteree`, vu rouge.
+Mesures (`out/mortalite/queue14.sh`) : banc `soif` 3 ans puis acceptation 5 ans, 8 runs,
+départ j135, `main` (MOR-4 + correctif) contre cueillette (idem).
+1. Banc `soif`, `main` : heures-enfant en soif saturée ≤ 300 (441 avant MOR-4) ; la part
+   « sans mère » monte à ≥ 60 % (la voie « mère affamée » se ferme par l'eau bue avec elle).
+2. Cueillette contre `main`, apparié seed par seed (froid 7 lu à part) : mortalité 1-4 ans
+   plus haute sur ≤ 4/8 runs si le sevrage a résorbé l'effet ; heures de soif saturée à ±30 %.
+Réfuterait 2 (et bloquerait le report) : mortalité 1-4 ans plus haute sur ≥ 6/8 runs.
