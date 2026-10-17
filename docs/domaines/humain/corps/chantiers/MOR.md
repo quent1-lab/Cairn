@@ -456,3 +456,34 @@ avant 15 ans 68 % contre 56 %. Sur les 15 runs comparables : en hausse 8, en bai
 sur 15/15 (−2 à −6 km/j). Seuil de blocage écrit (≥ 6/8 en hausse) non atteint dans aucune
 série : **cueillette rapportée reportée sur `main`** (décision de l'utilisateur du
 2026-10-16, protocole tenu : 5 ans, 16 runs).
+
+### MOR-4c (anticorps) — mesuré (acceptation 5 ans, 8 runs, `exp/anticorps`, contre `main` MOR-4 + correctif)
+
+| | `main` | anticorps |
+|---|---|---|
+| mortalité < 1 an ; 1-4 ans (‰/an) | 290 ; 144 | **394 ; 220** |
+| 1-4 ans par run | 45, 188, 128, 161, 240, 202, 64, 154 | 188, 246, 163, 216, 310, 315, 213, 157 (**8/8 en hausse**) |
+| morts de maladie < 1 an ; 1-4 ans | 44 ; 37 | 74 ; 47 |
+| mourir avant 15 ans | 58 % | **72 %** |
+1. Maladie des 1-4 ans 37 → 47 (prédit 42-60) : **tenu**. 2. Mortalité 1-4 ans en hausse sur
+≥ 5/8 : **tenu (8/8)**.
+Lecture : le mécanisme fait ce qu'on attendait — sans le plancher tout ou rien, les enfants
+sevrés se défendent moins. Mais le modèle s'éloigne du réel : mourir avant 15 ans passe de
+58 à 72 % (Hadza ~46 %, à sourcer précisément). Le plancher masquait une **maladie trop
+létale** pour les enfants : c'est **MOR-5** (« relire la maladie des adultes, 14-24 ‰
+contre ~5-7 réels »), en amont. Branche gardée, non reportée : à reprendre après MOR-5.
+
+### MOR-4b' (on boit pour l'enfant porté) — mesuré : **réfuté**
+
+| | `main` | MOR-4b | MOR-4b' |
+|---|---|---|---|
+| heures-enfant en soif saturée (3 ans) | 348 | 618 | **505** |
+| morts de soif < 1 an ; 1-4 ans | 14 ; 16 | 20 ; 16 | **19 ; 24** |
+| mortalité < 1 an ; 1-4 ans | 290 ; 144 | 346 ; 142 | 354 ; 178 |
+| part « mère présente, en bonne santé » des heures de soif | ~0 % | 8,3 % | **19,6 %** |
+Prédiction 1 (≤ 200 heures) : **réfutée**. Fait nouveau, non expliqué : depuis MOR-4b, des
+enfants **dont la mère vit et se porte bien** atteignent une soif saturée (8 puis 20 % des
+heures), ce qui n'arrivait pas sur `main`. Hypothèses à instrumenter avant toute correction :
+une mère qui porte aussi un orphelin ; un porteur désigné alors que la mère vit (relevé du
+porteur réel dans le banc `soif`) ; une mère qui part boire loin et s'arrête faute
+d'atteindre la source. Branche gardée, non reportée.
