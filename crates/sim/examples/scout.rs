@@ -57,10 +57,7 @@ fn nearest_flint(wg: &WorldGen, from: (i64, i64), max: i64, stride: i64) -> Opti
 }
 
 fn main() {
-    let seed: u64 = std::env::args()
-        .nth(1)
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(42);
+    let seed: u64 = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(42);
     let mut sim = Sim::new(WorldSeed(seed), 512);
     // Le **vrai** foyer du banc `etincelle` — recalculé par la même sélection
     // par climat (froid mais sans cuivre proche : c'est le plafond néolithique
@@ -137,10 +134,7 @@ fn main() {
         .collect();
     rows.sort_by(|a, b| a.temp.total_cmp(&b.temp)); // du plus froid au plus chaud
 
-    println!(
-        "\n{} districts de cuivre distincts. Du plus froid au plus chaud :",
-        rows.len()
-    );
+    println!("\n{} districts de cuivre distincts. Du plus froid au plus chaud :", rows.len());
     println!(
         "{:>7} {:>6} {:>16} {:>10} {:>10}  position",
         "temp°C", "elev", "biome", "d_taïga", "d_étain"
@@ -192,9 +186,6 @@ fn main() {
     println!("\nSilex (voie friction du feu) — distance au plus proche (maille 200 m) :");
     probe("foyer taïga d'origine (réf.)".to_string(), taiga);
     for r in rows.iter().filter(|r| r.temp >= 0.0 && r.temp <= 9.0) {
-        probe(
-            format!("cuivre {:>4.1}°C ({}, {})", r.temp, r.pos.0, r.pos.1),
-            r.pos,
-        );
+        probe(format!("cuivre {:>4.1}°C ({}, {})", r.temp, r.pos.0, r.pos.1), r.pos);
     }
 }

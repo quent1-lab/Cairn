@@ -197,11 +197,7 @@ impl World {
     #[cfg(feature = "chunk-stats")]
     fn note_access(&mut self, coord: ChunkCoord, lx: usize, ly: usize, write: bool) {
         let bit = ly * crate::chunk::CHUNK_SIZE as usize + lx;
-        let mask = self
-            .stats
-            .masks
-            .entry(coord)
-            .or_insert_with(|| Box::new([0u64; 64]));
+        let mask = self.stats.masks.entry(coord).or_insert_with(|| Box::new([0u64; 64]));
         mask[bit / 64] |= 1 << (bit % 64);
         if write {
             self.stats.written.insert(coord);
@@ -216,9 +212,7 @@ impl World {
     /// répartition (mesure M1).
     #[cfg(feature = "chunk-stats")]
     fn close_life(&mut self, coord: ChunkCoord) {
-        let Some(mask) = self.stats.masks.remove(&coord) else {
-            return;
-        };
+        let Some(mask) = self.stats.masks.remove(&coord) else { return };
         let touched: u32 = mask.iter().map(|w| w.count_ones()).sum();
         if self.stats.written.remove(&coord) {
             self.stats.dirty_lives += 1;
@@ -243,12 +237,7 @@ impl World {
         } else {
             self.stats.touched_total as f64 / self.stats.lives as f64
         };
-        (
-            self.stats.lives,
-            mean,
-            self.stats.hist,
-            self.stats.dirty_lives,
-        )
+        (self.stats.lives, mean, self.stats.hist, self.stats.dirty_lives)
     }
 
     /// Nombre de chunks actuellement en mémoire.
@@ -283,28 +272,20 @@ impl World {
     /// Nourriture végétale offerte aujourd'hui par la maille de `pos`, en kcal.
     pub fn edible_kcal(&mut self, pos: (f64, f64), tick: u64) -> f64 {
         let climate = crate::climate::Climate::new(self.worldgen.temperature.latitude());
-        self.gathering
-            .available(&self.worldgen, &climate, pos, cairn_core::SimTime { tick })
+        self.gathering.available(&self.worldgen, &climate, pos, cairn_core::SimTime { tick })
     }
 
     /// Comme [`Self::edible_kcal`], sans rien écrire (instruments de mesure).
     pub fn edible_kcal_peek(&mut self, pos: (f64, f64), tick: u64) -> f64 {
         let climate = crate::climate::Climate::new(self.worldgen.temperature.latitude());
-        self.gathering
-            .peek(&self.worldgen, &climate, pos, cairn_core::SimTime { tick })
+        self.gathering.peek(&self.worldgen, &climate, pos, cairn_core::SimTime { tick })
     }
 
     /// Cueille jusqu'à `want` kcal dans la maille de `pos` ; renvoie ce qui a
     /// été trouvé.
     pub fn gather(&mut self, pos: (f64, f64), tick: u64, want: f64) -> f64 {
         let climate = crate::climate::Climate::new(self.worldgen.temperature.latitude());
-        self.gathering.take(
-            &self.worldgen,
-            &climate,
-            pos,
-            cairn_core::SimTime { tick },
-            want,
-        )
+        self.gathering.take(&self.worldgen, &climate, pos, cairn_core::SimTime { tick }, want)
     }
 
     /// Mailles dont on suit la nourriture végétale.
@@ -348,10 +329,8 @@ impl World {
         let t0 = std::time::Instant::now();
         let h = self.worldgen.humidity(x, y);
         #[cfg(feature = "profile")]
-        crate::chunk::CHUNK_PROF[0].fetch_add(
-            t0.elapsed().as_nanos() as u64,
-            std::sync::atomic::Ordering::Relaxed,
-        );
+        crate::chunk::CHUNK_PROF[0]
+            .fetch_add(t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
         self.humidity_cache.insert((x, y), h);
         h
     }
@@ -410,13 +389,8 @@ impl World {
         // tuile) pendant que le worldgen est lu. Passer par `self` entier
         // heurterait le borrow checker ; déstructurer nomme les deux champs
         // séparément et lui montre qu'ils ne se recouvrent pas.
-        let Self {
-            chunks, worldgen, ..
-        } = self;
-        let t = *chunks
-            .get_mut(&coord)
-            .expect("résident")
-            .tile(lx, ly, worldgen);
+        let Self { chunks, worldgen, .. } = self;
+        let t = *chunks.get_mut(&coord).expect("résident").tile(lx, ly, worldgen);
         self.note_access(coord, lx, ly, false);
         t
     }
@@ -433,9 +407,7 @@ impl World {
         // …puis le remprunte en mutable. `get_mut` ne peut pas échouer :
         // le chunk vient d'être chargé et `keep` interdit son éviction.
         self.note_access(coord, lx, ly, true);
-        let Self {
-            chunks, worldgen, ..
-        } = self;
+        let Self { chunks, worldgen, .. } = self;
         let chunk = chunks.get_mut(&coord).expect("résident");
         chunk.mark_touched(lx, ly);
         chunk.tile_mut(lx, ly, worldgen)
@@ -464,9 +436,7 @@ impl World {
         &mut self,
         coord: ChunkCoord,
     ) -> Option<(&mut Chunk, &WorldGen)> {
-        let Self {
-            chunks, worldgen, ..
-        } = self;
+        let Self { chunks, worldgen, .. } = self;
         chunks.get_mut(&coord).map(|c| (c, &*worldgen))
     }
 
@@ -476,13 +446,10 @@ impl World {
     /// rescanner les 4096 tuiles du chunk chaque jour pour ne trouver que la
     /// poignée qui a vraiment bougé.
     pub(crate) fn clear_dirty_if_pristine(&mut self, coord: ChunkCoord) {
-        let Some(chunk) = self.chunks.get(&coord) else {
-            return;
-        };
+        let Some(chunk) = self.chunks.get(&coord) else { return };
         let pristine = chunk.touched().iter().all(|&(lx, ly)| {
             let t = chunk.tile_ready(lx as usize, ly as usize);
-            t.biomass == baseline_biomass(t.biome)
-                && t.soil_fertility == baseline_fertility(t.biome)
+            t.biomass == baseline_biomass(t.biome) && t.soil_fertility == baseline_fertility(t.biome)
         });
         if pristine {
             self.dirty.remove(&coord);
@@ -521,9 +488,7 @@ impl World {
     pub fn touched_census(&self) -> TouchedCensus {
         let mut c = TouchedCensus::default();
         for coord in &self.dirty {
-            let Some(chunk) = self.chunks.get(coord) else {
-                continue;
-            };
+            let Some(chunk) = self.chunks.get(coord) else { continue };
             for &(lx, ly) in chunk.touched() {
                 c.marked += 1;
                 let t = chunk.tile_ready(lx as usize, ly as usize);
@@ -604,10 +569,8 @@ impl World {
                     let t0 = std::time::Instant::now();
                     let list = crate::chunk::springs_for(&self.worldgen, coord);
                     #[cfg(feature = "profile")]
-                    crate::chunk::CHUNK_PROF[1].fetch_add(
-                        t0.elapsed().as_nanos() as u64,
-                        std::sync::atomic::Ordering::Relaxed,
-                    );
+                    crate::chunk::CHUNK_PROF[1]
+                        .fetch_add(t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
                     list
                 }
             };
@@ -620,7 +583,11 @@ impl World {
     /// de `radius_chunks` chunks autour — quelques listes courtes en cache,
     /// ni tuiles matérialisées ni pression sur le LRU. Départage
     /// déterministe : distance, puis (x, y).
-    pub fn nearest_spring(&mut self, from: (i64, i64), radius_chunks: i64) -> Option<(i64, i64)> {
+    pub fn nearest_spring(
+        &mut self,
+        from: (i64, i64),
+        radius_chunks: i64,
+    ) -> Option<(i64, i64)> {
         let (center, _, _) = split(from.0, from.1);
         let mut best: Option<(i64, (i64, i64))> = None;
         for cy in (center.y - radius_chunks)..=(center.y + radius_chunks) {
@@ -693,11 +660,7 @@ mod tests {
         for cy in 0..12 {
             for cx in 0..12 {
                 world.chunk(ChunkCoord { x: cx, y: cy });
-                assert!(
-                    world.loaded() <= 16,
-                    "capacité dépassée : {}",
-                    world.loaded()
-                );
+                assert!(world.loaded() <= 16, "capacité dépassée : {}", world.loaded());
             }
         }
         assert_eq!(world.generated, 144);
@@ -734,8 +697,7 @@ mod tests {
         let b = world.tile(100, 200);
         assert_eq!(a, b, "régénéré, le chunk doit être identique");
         assert_eq!(
-            world.humidity_computed,
-            avant,
+            world.humidity_computed, avant,
             "régénérer un chunk déjà vu a recalculé {} coins d'humidité",
             world.humidity_computed - avant
         );
@@ -772,21 +734,14 @@ mod tests {
         for cx in 50..70 {
             world.chunk(ChunkCoord { x: cx, y: cx });
         }
-        assert!(
-            world.evicted > 0,
-            "le chunk sale aurait dû être évincé (LRU pur)"
-        );
+        assert!(world.evicted > 0, "le chunk sale aurait dû être évincé (LRU pur)");
         assert_eq!(
             world.tile(100, 200).biomass,
             7,
             "l'instantané aurait dû restaurer la modification à la réaccession"
         );
         assert_eq!(world.dirty_count(), 1);
-        assert!(
-            world.loaded() <= 8,
-            "mémoire non bornée : {}",
-            world.loaded()
-        );
+        assert!(world.loaded() <= 8, "mémoire non bornée : {}", world.loaded());
     }
 
     #[test]
@@ -804,10 +759,7 @@ mod tests {
         let mut world = World::new(WorldSeed(42), 8);
         world.tile_mut(100, 200).biomass = 7;
         let baseline = baseline_biomass(world.tile(100, 200).biome);
-        assert_ne!(
-            baseline, 7,
-            "le test ne prouverait rien si 7 était le baseline"
-        );
+        assert_ne!(baseline, 7, "le test ne prouverait rien si 7 était le baseline");
 
         let eloigne = |world: &mut World| {
             for cx in 50..70 {
@@ -836,11 +788,7 @@ mod tests {
             // Chaque tile_mut salit un chunk distinct.
             world.tile_mut(cx * 64, 0).biomass = 1;
         }
-        assert!(
-            world.loaded() <= 4,
-            "capacité dépassée : {}",
-            world.loaded()
-        );
+        assert!(world.loaded() <= 4, "capacité dépassée : {}", world.loaded());
         assert!(world.evicted >= 16, "des sales auraient dû être évincés");
     }
 

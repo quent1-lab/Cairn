@@ -158,20 +158,13 @@ const HERD_SPACING_TILES: i64 = 200;
 fn main() {
     let mut args = std::env::args().skip(1);
     let seed: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(42);
-    let days: u64 = args
-        .next()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(240)
-        .max(40);
+    let days: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(240).max(40);
     let n_herds: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(150);
     let n_packs: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(12);
     let n_agents: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(20);
     let capacity: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(4096);
-    let spacing: i64 = args
-        .next()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(HERD_SPACING_TILES)
-        .max(1);
+    let spacing: i64 =
+        args.next().and_then(|s| s.parse().ok()).unwrap_or(HERD_SPACING_TILES).max(1);
     // Pas de la grille humaine, en tuiles. 0 = les humains restent groupés
     // comme les pose `scenario::populate`.
     let human_spread: i64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(0).max(0);
@@ -208,12 +201,7 @@ fn main() {
         // Grille carrée : les humains occupent le territoire au lieu de se
         // tenir en tas, sans qu'aucun ne parte à l'infini.
         let side = (placed as f64).sqrt().ceil() as i64;
-        for (i, (_, pos)) in sim
-            .agents
-            .query_mut::<&mut Position>()
-            .into_iter()
-            .enumerate()
-        {
+        for (i, (_, pos)) in sim.agents.query_mut::<&mut Position>().into_iter().enumerate() {
             let i = i as i64;
             let (gx, gy) = (i % side - side / 2, i / side - side / 2);
             pos.x = home.0 as f64 + (gx * human_spread) as f64;
@@ -263,10 +251,7 @@ fn main() {
 
     let (h0, p0, nh0, np0) = census(&sim);
     println!("╔══ BANC DE DÉRIVE ═══════════════════════════════════════════════════╗");
-    println!(
-        "  seed {seed} · foyer ({}, {}) · {days} jours de jeu",
-        home.0, home.1
-    );
+    println!("  seed {seed} · foyer ({}, {}) · {days} jours de jeu", home.0, home.1);
     println!(
         "  départ : {placed} humains · {nh0} troupeaux ({h0:.0} têtes) · {np0} meutes ({p0:.0} prédateurs)"
     );
@@ -289,24 +274,7 @@ fn main() {
     println!("╚═════════════════════════════════════════════════════════════════════╝\n");
     println!(
         "{:>5} {:>7} {:>8} {:>7} {:>8} {:>8} {:>8} {:>7} {:>8} {:>6} {:>9} {:>9} {:>8} {:>7} {:>6} {:>7} {:>8} {:>6}",
-        "jour",
-        "troup.",
-        "têtes",
-        "meutes",
-        "préd.",
-        "trp/km²",
-        "prises",
-        "loin%",
-        "disp.km",
-        "pop",
-        "regen/j",
-        "marquées",
-        "sur-cap",
-        "tps",
-        "zones",
-        "méd.km",
-        "plafond%",
-        "base%"
+        "jour", "troup.", "têtes", "meutes", "préd.", "trp/km²", "prises", "loin%", "disp.km", "pop", "regen/j", "marquées", "sur-cap", "tps", "zones", "méd.km", "plafond%", "base%"
     );
     let _ = std::io::stdout().flush();
 
@@ -346,14 +314,7 @@ fn main() {
         }
         {
             let (head, predators, herds, packs) = census(&sim);
-            daily.push((
-                day,
-                kills_day,
-                f64::from(predators),
-                packs,
-                f64::from(head),
-                herds,
-            ));
+            daily.push((day, kills_day, f64::from(predators), packs, f64::from(head), herds));
             kills_day = 0.0;
             #[cfg(feature = "profile")]
             prof_daily.record(&sim, day, herds, packs, predators, head);
@@ -365,7 +326,8 @@ fn main() {
         t_window = Instant::now();
         ticks_window = 0;
 
-        let regen_per_day = (sim.world.generated - regen_prev) as f64 / SAMPLE_DAYS as f64;
+        let regen_per_day =
+            (sim.world.generated - regen_prev) as f64 / SAMPLE_DAYS as f64;
         regen_prev = sim.world.generated;
 
         let (head, predators, herds, packs) = census(&sim);
@@ -500,13 +462,8 @@ struct ProfDaily {
 impl ProfDaily {
     /// Les phases relevées, dans l'ordre des colonnes du CSV.
     const PHASES: [&'static str; 7] = [
-        "1 deliberation",
-        "4a meutes",
-        "4b prises",
-        "4c menaces",
-        "4d troupeaux",
-        "4b immigration",
-        "5 ecologie",
+        "1 deliberation", "4a meutes", "4b prises", "4c menaces", "4d troupeaux",
+        "4b immigration", "5 ecologie",
     ];
 
     fn new(sim: &Sim) -> Self {
@@ -521,9 +478,7 @@ impl ProfDaily {
     }
 
     fn herd_ns() -> [u64; 4] {
-        fauna::HERD_PROF
-            .each_ref()
-            .map(|a| a.load(std::sync::atomic::Ordering::Relaxed))
+        fauna::HERD_PROF.each_ref().map(|a| a.load(std::sync::atomic::Ordering::Relaxed))
     }
 
     fn record(&mut self, sim: &Sim, day: u64, herds: usize, packs: usize, pred: f32, head: f32) {
@@ -584,10 +539,8 @@ fn fauna_stats_report(sim: &Sim) {
     let st = &sim.fauna_stats;
     println!("\n╔══ RÉPONSE FONCTIONNELLE ════════════════════════════════════════════╗");
     println!("  Prises par prédateur et par jour, contre la densité locale de proies");
-    println!(
-        "  (têtes dans {:.1} km). **Le test** : une courbe plate ou linéaire en",
-        tiles_to_km(cairn_sim::fauna::PACK_SENSE_RADIUS_TILES)
-    );
+    println!("  (têtes dans {:.1} km). **Le test** : une courbe plate ou linéaire en", 
+        tiles_to_km(cairn_sim::fauna::PACK_SENSE_RADIUS_TILES));
     println!("  densité est du Holling type I — déstabilisant par construction, car");
     println!("  rien ne freine le prédateur quand la proie se raréfie.\n");
     println!(
@@ -632,39 +585,28 @@ fn fauna_stats_report(sim: &Sim) {
     );
     println!("  perd des têtes. « rempli » = biomasse trouvée / capacité de la tuile :");
     println!("  1,00 veut dire pâture pleine *pour ce biome*, donc broutage hors de cause.\n");
-    println!("  Les trois dernières colonnes sont LE discriminateur : `rempli` porte sur la");
-    println!("  tuile RETENUE, donc sur un maximum. Si la moyenne et le minimum des neuf");
-    println!("  sondes collent à 1 eux aussi, le pâturage n'est pas entamé du tout et la");
+    println!(
+        "  Les trois dernières colonnes sont LE discriminateur : `rempli` porte sur la"
+    );
+    println!(
+        "  tuile RETENUE, donc sur un maximum. Si la moyenne et le minimum des neuf"
+    );
+    println!(
+        "  sondes collent à 1 eux aussi, le pâturage n'est pas entamé du tout et la"
+    );
     println!("  régulation par le fourrage est hors d'atteinte à cette densité.\n");
     println!(
         "{:>16} {:>10} {:>7} {:>7} {:>8} {:>10} {:>10} {:>8} {:>8}",
-        "biome",
-        "herd-ticks",
-        "satiété",
-        "rempli",
-        "déclin",
-        "dont PLEINE",
-        "dont à ras",
-        "sondes",
-        "sondes"
+        "biome", "herd-ticks", "satiété", "rempli", "déclin", "dont PLEINE", "dont à ras",
+        "sondes", "sondes"
     );
     println!(
         "{:>16} {:>10} {:>7} {:>7} {:>8} {:>10} {:>10} {:>8} {:>8}",
         "", "", "moy.", "max", "%", "%", "%", "moy.", "min"
     );
     let biomes = [
-        "Ocean",
-        "Coast",
-        "Glacier",
-        "Tundra",
-        "Taiga",
-        "ColdDesert",
-        "Steppe",
-        "Grassland",
-        "TemperateForest",
-        "HotDesert",
-        "Savanna",
-        "TropicalForest",
+        "Ocean", "Coast", "Glacier", "Tundra", "Taiga", "ColdDesert", "Steppe",
+        "Grassland", "TemperateForest", "HotDesert", "Savanna", "TropicalForest",
     ];
     let (mut tot, mut tot_full, mut tot_grazed, mut tot_decl) = (0u64, 0u64, 0u64, 0u64);
     let mut tot_sterile = 0u64;
@@ -731,10 +673,7 @@ fn fauna_stats_report(sim: &Sim) {
         nets.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let path = st.windows.iter().map(|w| w.0).sum::<f64>() / n;
         let net = st.windows.iter().map(|w| w.1).sum::<f64>() / n;
-        println!(
-            "\n  ── DOMAINE VITAL ({} j) ──",
-            cairn_sim::fauna::RANGE_WINDOW_DAYS
-        );
+        println!("\n  ── DOMAINE VITAL ({} j) ──", cairn_sim::fauna::RANGE_WINDOW_DAYS);
         println!("  {} fenêtres de troupeau achevées", st.windows.len());
         println!(
             "  chemin parcouru  {:.2} km   déplacement net  {:.2} km   tortuosité {:.1}×",
@@ -766,15 +705,8 @@ fn fauna_stats_report(sim: &Sim) {
     println!("  comprises. « pondéré » = taux de l'ensemble de la classe.\n");
     println!(
         "{:>12} {:>10} {:>9} {:>7} {:>7} {:>10} {:>10} {:>10} {:>8}",
-        "têtes/2 km",
-        "troup.-j",
-        "têtes moy",
-        "satiété",
-        "sat≥1",
-        "potentiel",
-        "réalisé",
-        "pondéré",
-        "disparus"
+        "têtes/2 km", "troup.-j", "têtes moy", "satiété", "sat≥1", "potentiel", "réalisé",
+        "pondéré", "disparus"
     );
     let mut bas = 0.0f32;
     let (mut w, mut wp) = (0.0f64, 0.0f64);
@@ -820,11 +752,7 @@ fn fauna_stats_report(sim: &Sim) {
     for (i, c) in st.crowd.iter().enumerate() {
         let haut = cairn_sim::fauna::CROWD_EDGES[i];
         if c.herd_days > 0 {
-            let label = if haut.is_infinite() {
-                format!("{bas:.0}+")
-            } else {
-                format!("{bas:.0}-{haut:.0}")
-            };
+            let label = if haut.is_infinite() { format!("{bas:.0}+") } else { format!("{bas:.0}-{haut:.0}") };
             let calm = c.herd_days - c.fleeing;
             println!(
                 "{label:>12} {:>8.1}% {:>9.1}% {:>12.3} {:>12.3}",
@@ -841,10 +769,7 @@ fn fauna_stats_report(sim: &Sim) {
     if tot > 0.0 {
         println!(
             "  têtes en fuite, par durée de fuite ininterrompue : 1 j {:.1} % · 2-6 j {:.1} % · 7-29 j {:.1} % · ≥ 30 j {:.1} %",
-            sp[0] / tot * 100.0,
-            sp[1] / tot * 100.0,
-            sp[2] / tot * 100.0,
-            sp[3] / tot * 100.0
+            sp[0] / tot * 100.0, sp[1] / tot * 100.0, sp[2] / tot * 100.0, sp[3] / tot * 100.0
         );
     }
     println!("  À confronter au taux de la série `tetes` (qui compte en plus les");
@@ -856,7 +781,9 @@ fn fauna_stats_report(sim: &Sim) {
     println!("  {chasses} troupeaux sur {vus} sont entrés au moins une fois dans le rayon");
     if vus > 0 {
         let refuge = (vus - chasses) as f64 / vus as f64 * 100.0;
-        println!("  de chasse d'une meute  ⇒  refuge = {refuge:.1} %  (part jamais approchée)");
+        println!(
+            "  de chasse d'une meute  ⇒  refuge = {refuge:.1} %  (part jamais approchée)"
+        );
         println!("  Un refuge nul signifie qu'aucune proie n'est structurellement hors");
         println!("  d'atteinte : rien n'empêche alors la prédation d'aller à zéro proie.");
     }
@@ -883,30 +810,13 @@ fn profile_report(_sim: &Sim) {}
 #[cfg(feature = "profile")]
 fn chunk_report() {
     use std::sync::atomic::Ordering::Relaxed;
-    let v: Vec<u64> = cairn_sim::chunk::CHUNK_PROF
-        .iter()
-        .map(|a| a.load(Relaxed))
-        .collect();
+    let v: Vec<u64> = cairn_sim::chunk::CHUNK_PROF.iter().map(|a| a.load(Relaxed)).collect();
     let n = v[5].max(1) as f64;
     println!("\n╔══ M4 — CE QUE COÛTE UN CHUNK GÉNÉRÉ ═══════════════════════════════╗");
-    println!(
-        "  {} chunks générés · {} tuiles calculées à la demande ({:.1} par chunk)",
-        v[5],
-        v[4],
-        v[4] as f64 / n
-    );
-    println!(
-        "  humidité des 4 coins : {:>8.1} µs par chunk",
-        v[0] as f64 / n / 1e3
-    );
-    println!(
-        "  sources              : {:>8.1} µs par chunk",
-        v[1] as f64 / n / 1e3
-    );
-    println!(
-        "  allocation           : {:>8.1} µs par chunk",
-        v[2] as f64 / n / 1e3
-    );
+    println!("  {} chunks générés · {} tuiles calculées à la demande ({:.1} par chunk)", v[5], v[4], v[4] as f64 / n);
+    println!("  humidité des 4 coins : {:>8.1} µs par chunk", v[0] as f64 / n / 1e3);
+    println!("  sources              : {:>8.1} µs par chunk", v[1] as f64 / n / 1e3);
+    println!("  allocation           : {:>8.1} µs par chunk", v[2] as f64 / n / 1e3);
     println!(
         "  tuiles à la demande  : {:>8.1} µs par chunk ({:.2} µs par tuile)",
         v[3] as f64 / n / 1e3,
@@ -949,24 +859,19 @@ fn utilization_report(sim: &Sim) {
         "  vies SANS aucune écriture : {clean} sur {lives}  ⇒  {:.1} %  ← portée de C1",
         clean as f64 / lives as f64 * 100.0
     );
-    println!("  vies avec écriture : {dirty_lives}  (balayées en entier par l'écologie)\n");
+    println!(
+        "  vies avec écriture : {dirty_lives}  (balayées en entier par l'écologie)\n"
+    );
     println!("  répartition (nombre de tuiles touchées sur une vie de chunk) :");
     for (k, &n) in hist.iter().enumerate() {
         if n == 0 {
             continue;
         }
-        let (lo, hi) = if k == 0 {
-            (0, 0)
-        } else {
-            (1 << (k - 1), (1 << k) - 1)
-        };
+        let (lo, hi) = if k == 0 { (0, 0) } else { (1 << (k - 1), (1 << k) - 1) };
         let pct = n as f64 / lives as f64 * 100.0;
         let bar = "█".repeat(((pct / 2.0) as usize).min(40));
-        let label = if k == 0 {
-            "       0".to_string()
-        } else {
-            format!("{lo:>4}-{hi:<4}")
-        };
+        let label =
+            if k == 0 { "       0".to_string() } else { format!("{lo:>4}-{hi:<4}") };
         println!("    {label} {bar} {pct:>5.1} %  ({n})");
     }
     println!("╚═════════════════════════════════════════════════════════════════════╝");
@@ -1032,12 +937,8 @@ const ZONE_KM: f64 = 2.0;
 /// (mailles occupées, distance médiane au centroïde en km).
 fn herd_extent(sim: &Sim) -> (usize, f64) {
     let side = km_to_tiles(ZONE_KM);
-    let pos: Vec<(f64, f64)> = sim
-        .fauna
-        .query::<(&Herd, &Position)>()
-        .iter()
-        .map(|(_, (_, p))| (p.x, p.y))
-        .collect();
+    let pos: Vec<(f64, f64)> =
+        sim.fauna.query::<(&Herd, &Position)>().iter().map(|(_, (_, p))| (p.x, p.y)).collect();
     if pos.is_empty() {
         return (0, 0.0);
     }
@@ -1046,10 +947,7 @@ fn herd_extent(sim: &Sim) -> (usize, f64) {
         .map(|p| ((p.0 / side).floor() as i64, (p.1 / side).floor() as i64))
         .collect();
     let n = pos.len() as f64;
-    let c = (
-        pos.iter().map(|p| p.0).sum::<f64>() / n,
-        pos.iter().map(|p| p.1).sum::<f64>() / n,
-    );
+    let c = (pos.iter().map(|p| p.0).sum::<f64>() / n, pos.iter().map(|p| p.1).sum::<f64>() / n);
     let mut d: Vec<f64> = pos.iter().map(|p| (p.0 - c.0).hypot(p.1 - c.1)).collect();
     d.sort_by(|a, b| a.total_cmp(b));
     (zones.len(), tiles_to_km(d[d.len() / 2]))
@@ -1067,12 +965,8 @@ fn herd_extent(sim: &Sim) -> (usize, f64) {
 ///
 /// Renvoie les effectifs par tranche : ≤2 km, 2-5, 5-10, 10-30, >30.
 fn herds_by_distance(sim: &Sim) -> [usize; 5] {
-    let humans: Vec<(f64, f64)> = sim
-        .agents
-        .query::<&Position>()
-        .iter()
-        .map(|(_, p)| (p.x, p.y))
-        .collect();
+    let humans: Vec<(f64, f64)> =
+        sim.agents.query::<&Position>().iter().map(|(_, p)| (p.x, p.y)).collect();
     let mut buckets = [0usize; 5];
     for (_, (_, pos)) in sim.fauna.query::<(&Herd, &Position)>().iter() {
         let d2 = humans
@@ -1208,11 +1102,7 @@ fn verdict(samples: &[Sample], elapsed_s: f64, days: u64) {
     // lecture écologique.
     const FAUNE: [&str; 4] = ["troupeaux", "têtes de gibier", "meutes", "prédateurs"];
     for (nom, f, croissance_est_mauvaise) in [
-        (
-            "troupeaux",
-            &(|s: &Sample| s.herds as f64) as &dyn Fn(&Sample) -> f64,
-            true,
-        ),
+        ("troupeaux", &(|s: &Sample| s.herds as f64) as &dyn Fn(&Sample) -> f64, true),
         ("têtes de gibier", &|s: &Sample| s.head as f64, true),
         ("meutes", &|s: &Sample| s.packs as f64, false),
         ("prédateurs", &|s: &Sample| s.predators as f64, false),
@@ -1231,8 +1121,9 @@ fn verdict(samples: &[Sample], elapsed_s: f64, days: u64) {
 
         // CLIQUET : le niveau **et** le plancher montent — l'effectif ne
         // redescend plus. C'est le seul « sans borne » que ce banc affirme.
-        let cliquet =
-            croissance_est_mauvaise && d_med > DIVERGENCE_THRESHOLD && d_min > DIVERGENCE_THRESHOLD;
+        let cliquet = croissance_est_mauvaise
+            && d_med > DIVERGENCE_THRESHOLD
+            && d_min > DIVERGENCE_THRESHOLD;
         // OSCILLE : le niveau monte, le plancher non. Descriptif, pas une
         // alarme — c'est ici que tombe un réservoir qui se remplit et se vide.
         let oscille = !cliquet && d_med > DIVERGENCE_THRESHOLD;
@@ -1290,11 +1181,7 @@ fn verdict(samples: &[Sample], elapsed_s: f64, days: u64) {
         ecart(tmin3, tmin4) * 100.0,
         fmt_ampl(tmin3, tmax3),
         fmt_ampl(tmin4, tmax4),
-        if rel < -DIVERGENCE_THRESHOLD {
-            "S'EFFONDRE"
-        } else {
-            ""
-        }
+        if rel < -DIVERGENCE_THRESHOLD { "S'EFFONDRE" } else { "" }
     );
 
     println!("\n  ─────────────────────────────────────────────────────────────────");
@@ -1304,10 +1191,8 @@ fn verdict(samples: &[Sample], elapsed_s: f64, days: u64) {
         println!("  SANS BORNE : {}", cliquets.join(", "));
         println!("  Niveau *et* plancher montent : cet effectif ne redescend plus.");
     }
-    let (faune, autres): (Vec<&str>, Vec<&str>) = non_amorties
-        .iter()
-        .copied()
-        .partition(|n| FAUNE.contains(n));
+    let (faune, autres): (Vec<&str>, Vec<&str>) =
+        non_amorties.iter().copied().partition(|n| FAUNE.contains(n));
     if faune.is_empty() {
         println!("  Faune : aucune amplitude en expansion — les oscillations s'amortissent.");
     } else {
@@ -1321,10 +1206,7 @@ fn verdict(samples: &[Sample], elapsed_s: f64, days: u64) {
         // Sans lecture écologique : ces amplitudes-là parlent du store et de la
         // géographie, et une seule cause peut les bouger toutes (un monde qui
         // s'éteint arrête de salir des chunks).
-        println!(
-            "  Amplitude en expansion, hors faune : {}",
-            autres.join(", ")
-        );
+        println!("  Amplitude en expansion, hors faune : {}", autres.join(", "));
     }
     println!("╚═════════════════════════════════════════════════════════════════════╝");
 

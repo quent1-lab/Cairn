@@ -20,11 +20,7 @@ const CHUNK_CAPACITY: usize = 8192;
 /// années entières, la vitesse prime sur le détail des frontières humides.
 fn fast_config() -> WorldGenConfig {
     WorldGenConfig {
-        humidity: HumidityConfig {
-            steps: 32,
-            lateral_samples: 0,
-            ..HumidityConfig::default()
-        },
+        humidity: HumidityConfig { steps: 32, lateral_samples: 0, ..HumidityConfig::default() },
         ..WorldGenConfig::default()
     }
 }
@@ -85,10 +81,7 @@ fn main() {
                 c.biomes,
             );
             let Some(home) = home else {
-                println!(
-                    "{seed:>6} {:>9}   (aucun foyer de ce climat trouvé)",
-                    c.label
-                );
+                println!("{seed:>6} {:>9}   (aucun foyer de ce climat trouvé)", c.label);
                 continue;
             };
             let t_moy = {

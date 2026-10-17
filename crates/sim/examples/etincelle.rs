@@ -29,11 +29,7 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let seed: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(42);
     let years: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(30);
-    let report_days: u64 = args
-        .next()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(360)
-        .max(1);
+    let report_days: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(360).max(1);
     let capacity: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(16384);
     let n_agents: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(60);
     // Foyer explicite optionnel (fx fy) : cibler un lieu précis — p. ex. un
@@ -93,20 +89,8 @@ fn main() {
     );
     println!(
         "{:>4} {:>4} {:>4}  {:>8}  {:>3}  {:>5} {:>5}  {:>4} {:>4} {:>4} {:>4} {:>4} {:>4}  {:>3}  savoirs",
-        "an",
-        "pop",
-        "clan",
-        "P/N/B",
-        "sav",
-        "froid",
-        "faim",
-        "bois",
-        "silx",
-        "argl",
-        "cuiv",
-        "étn",
-        "feu",
-        "exp"
+        "an", "pop", "clan", "P/N/B", "sav", "froid", "faim",
+        "bois", "silx", "argl", "cuiv", "étn", "feu", "exp"
     );
 
     let total_ticks = years * TICKS_PER_YEAR;
@@ -199,22 +183,11 @@ fn report(sim: &Sim, day: u64) {
         }
     }
     let pct = |x: u32| (100 * x).checked_div(adults).unwrap_or(0);
-    let cold_max = sim
-        .clan_pressure
-        .values()
-        .map(|p| p.cold)
-        .fold(0.0_f32, f32::max);
-    let famine_max = sim
-        .clan_pressure
-        .values()
-        .map(|p| p.famine)
-        .fold(0.0_f32, f32::max);
+    let cold_max = sim.clan_pressure.values().map(|p| p.cold).fold(0.0_f32, f32::max);
+    let famine_max = sim.clan_pressure.values().map(|p| p.famine).fold(0.0_f32, f32::max);
 
-    let known: Vec<&str> = sim
-        .known_techs
-        .iter()
-        .map(|&t| sim.tech_tree.get(t).label.as_str())
-        .collect();
+    let known: Vec<&str> =
+        sim.known_techs.iter().map(|&t| sim.tech_tree.get(t).label.as_str()).collect();
     println!(
         "{:>4} {:>4} {:>4}  {:>8}  {:>3}  {:>5.2} {:>5.2}  {:>3}% {:>3}% {:>3}% {:>3}% {:>3}% {:>3}%  {:>3}  {}",
         day / 360,
@@ -231,11 +204,7 @@ fn report(sim: &Sim, day: u64) {
         pct(tin),
         pct(fire_e),
         sim.expeditions.len(),
-        if known.is_empty() {
-            "—".to_string()
-        } else {
-            known.join(", ")
-        },
+        if known.is_empty() { "—".to_string() } else { known.join(", ") },
     );
     // Flush explicite : stdout est bufferisé par blocs quand il est redirigé
     // (un run en tâche de fond) — sans ça, on ne verrait rien avant la fin.
@@ -257,15 +226,8 @@ fn verdict(sim: &Sim, elapsed: std::time::Duration) {
         }
     }
 
-    println!(
-        "\n═══ VERDICT après {:.0} min de calcul ═══",
-        elapsed.as_secs_f64() / 60.0
-    );
-    println!(
-        "Population finale : {} en {} clans.",
-        sim.population(),
-        sim.clans.len()
-    );
+    println!("\n═══ VERDICT après {:.0} min de calcul ═══", elapsed.as_secs_f64() / 60.0);
+    println!("Population finale : {} en {} clans.", sim.population(), sim.clans.len());
 
     println!("\nHistoire technologique (par ordre de l'arbre) :");
     for tech in sim.tech_tree.iter() {
@@ -279,11 +241,7 @@ fn verdict(sim: &Sim, elapsed: std::time::Duration) {
                 "  {} {:<24} découvert ×{d}{}{}",
                 if alive { "✓" } else { "✗" },
                 tech.label,
-                if f > 0 {
-                    format!(", oublié ×{f}")
-                } else {
-                    String::new()
-                },
+                if f > 0 { format!(", oublié ×{f}") } else { String::new() },
                 if alive { "" } else { " (perdu)" },
             );
         }
@@ -299,24 +257,10 @@ fn verdict(sim: &Sim, elapsed: std::time::Duration) {
 
     // Critères du BRIEF (indicatifs sur un run court ; la vraie mesure est à
     // 500 ans, hors ligne).
-    let fire = sim
-        .tech_tree
-        .id_of("fire_mastery")
-        .map(|id| sim.known_techs.contains(&id))
-        .unwrap_or(false);
-    let bronze_ever = sim
-        .tech_tree
-        .id_of("bronze")
-        .map(|id| discovered.contains_key(&id.0))
-        .unwrap_or(false);
+    let fire = sim.tech_tree.id_of("fire_mastery").map(|id| sim.known_techs.contains(&id)).unwrap_or(false);
+    let bronze_ever = sim.tech_tree.id_of("bronze").map(|id| discovered.contains_key(&id.0)).unwrap_or(false);
     println!("\nRepères (indicatifs) :");
-    println!(
-        "  feu maîtrisé quelque part : {}",
-        if fire { "oui" } else { "pas encore" }
-    );
+    println!("  feu maîtrisé quelque part : {}", if fire { "oui" } else { "pas encore" });
     println!("  expéditions en cours      : {}", sim.expeditions.len());
-    println!(
-        "  bronze déjà apparu        : {}",
-        if bronze_ever { "OUI" } else { "non" }
-    );
+    println!("  bronze déjà apparu        : {}", if bronze_ever { "OUI" } else { "non" });
 }

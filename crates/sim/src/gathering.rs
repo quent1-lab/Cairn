@@ -111,20 +111,12 @@ impl Gathering {
             }
             let n = (SAMPLES * SAMPLES) as f64;
             let y = ((zone.1 as f64 + 0.5) * RANGE_ZONE_TILES) as i64;
-            let mean_temp = if land > 0 {
-                temp / f64::from(land)
-            } else {
-                0.0
-            };
+            let mean_temp = if land > 0 { temp / f64::from(land) } else { 0.0 };
             let growing = (0..cairn_core::DAYS_PER_YEAR)
                 .filter(|&d| grows(climate, mean_temp, y, d))
                 .count()
                 .max(1) as f64;
-            Yield {
-                per_growing_day: kcal_m2_yr / n * ZONE_M2 / growing,
-                mean_temp,
-                y,
-            }
+            Yield { per_growing_day: kcal_m2_yr / n * ZONE_M2 / growing, mean_temp, y }
         })
     }
 
@@ -137,17 +129,11 @@ impl Gathering {
         today: u64,
     ) -> &mut Stock {
         let y = self.yield_of(worldgen, climate, zone);
-        let stock = self.stocks.entry(zone).or_insert(Stock {
-            kcal: 0.0,
-            day: today.saturating_sub(361),
-        });
+        let stock = self.stocks.entry(zone).or_insert(Stock { kcal: 0.0, day: today.saturating_sub(361) });
         // Au-delà d'un an sans visite, le stock a oublié son passé (τ = 60 j) :
         // on ne rejoue que la dernière année, depuis zéro.
         if today.saturating_sub(stock.day) > 360 {
-            *stock = Stock {
-                kcal: 0.0,
-                day: today - 360,
-            };
+            *stock = Stock { kcal: 0.0, day: today - 360 };
         }
         let keep = (-1.0 / PERSISTENCE_DAYS).exp();
         while stock.day < today {
@@ -172,9 +158,7 @@ impl Gathering {
     ) -> f64 {
         let zone = range_zone(pos);
         let saved = self.stocks.get(&zone).copied();
-        let kcal = self
-            .advance(worldgen, climate, zone, time.tick / TICKS_PER_DAY)
-            .kcal;
+        let kcal = self.advance(worldgen, climate, zone, time.tick / TICKS_PER_DAY).kcal;
         match saved {
             Some(stock) => {
                 self.stocks.insert(zone, stock);
@@ -194,13 +178,7 @@ impl Gathering {
         pos: (f64, f64),
         time: SimTime,
     ) -> f64 {
-        self.advance(
-            worldgen,
-            climate,
-            range_zone(pos),
-            time.tick / TICKS_PER_DAY,
-        )
-        .kcal
+        self.advance(worldgen, climate, range_zone(pos), time.tick / TICKS_PER_DAY).kcal
     }
 
     /// Cueille jusqu'à `want` kcal dans la maille de `pos` ; renvoie ce qui a
@@ -213,12 +191,7 @@ impl Gathering {
         time: SimTime,
         want: f64,
     ) -> f64 {
-        let stock = self.advance(
-            worldgen,
-            climate,
-            range_zone(pos),
-            time.tick / TICKS_PER_DAY,
-        );
+        let stock = self.advance(worldgen, climate, range_zone(pos), time.tick / TICKS_PER_DAY);
         let got = want.clamp(0.0, stock.kcal);
         stock.kcal -= got;
         got
@@ -237,8 +210,6 @@ impl Gathering {
 /// La végétation pousse-t-elle ce jour-là, pour une maille de température
 /// moyenne `mean_temp` ? Même règle que l'écologie (`Climate::grows`).
 fn grows(climate: &Climate, mean_temp: f64, y: i64, day: u64) -> bool {
-    let time = SimTime {
-        tick: day * TICKS_PER_DAY + TICKS_PER_DAY / 2,
-    };
+    let time = SimTime { tick: day * TICKS_PER_DAY + TICKS_PER_DAY / 2 };
     mean_temp + climate.seasonal_offset(y, time) > GROWTH_THRESHOLD_C
 }

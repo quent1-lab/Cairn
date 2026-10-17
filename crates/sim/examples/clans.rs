@@ -73,29 +73,18 @@ fn main() {
             jobs.push((seed, cold));
         }
     }
-    println!(
-        "# clans — {years} an(s), départ au jour {start_day}, seeds {seeds:?}, {} runs",
-        jobs.len()
-    );
+    println!("# clans — {years} an(s), départ au jour {start_day}, seeds {seeds:?}, {} runs", jobs.len());
     let started = std::time::Instant::now();
     let queue = std::sync::Mutex::new(jobs.into_iter().enumerate().collect::<Vec<_>>());
     let results = std::sync::Mutex::new(Vec::new());
     std::thread::scope(|scope| {
         for _ in 0..threads {
-            scope.spawn(|| {
-                loop {
-                    let job = queue.lock().unwrap().pop();
-                    let Some((idx, (seed, cold))) = job else {
-                        break;
-                    };
-                    let r = run(seed, cold, years, start_day);
-                    eprintln!(
-                        "  fini : {} ({:.0} s)",
-                        r.label,
-                        started.elapsed().as_secs_f64()
-                    );
-                    results.lock().unwrap().push((idx, r));
-                }
+            scope.spawn(|| loop {
+                let job = queue.lock().unwrap().pop();
+                let Some((idx, (seed, cold))) = job else { break };
+                let r = run(seed, cold, years, start_day);
+                eprintln!("  fini : {} ({:.0} s)", r.label, started.elapsed().as_secs_f64());
+                results.lock().unwrap().push((idx, r));
             });
         }
     });
@@ -134,10 +123,7 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
             sim.spawn_pack(x as f64, y as f64, fauna::PACK_START);
         }
     }
-    let mut r = Report {
-        label: format!("{} {seed}", if cold { "froid" } else { "tempéré" }),
-        ..Report::default()
-    };
+    let mut r = Report { label: format!("{} {seed}", if cold { "froid" } else { "tempéré" }), ..Report::default() };
     // Clans de l'heure d'avant : (id, membres, fondé au tick).
     let mut prev: Vec<(u64, Vec<u64>, u64)> = Vec::new();
     let mut seen = 0usize;
@@ -153,32 +139,20 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
             let humans = sim.human_views();
             let alive: BTreeSet<u64> = humans.iter().map(|h| h.id.0).collect();
             let pos: BTreeMap<u64, (f64, f64)> = humans.iter().map(|h| (h.id.0, h.pos)).collect();
-            let edges: Vec<(u64, u64)> = sim
-                .social
-                .bonds
-                .iter()
-                .filter(|&(_, &w)| w >= BOND_THRESHOLD)
-                .map(|(&k, _)| k)
-                .collect();
+            let edges: Vec<(u64, u64)> =
+                sim.social.bonds.iter().filter(|&(_, &w)| w >= BOND_THRESHOLD).map(|(&k, _)| k).collect();
             for e in &sim.clan_events[seen..] {
                 match e.kind {
                     ClanEventKind::Formed => r.formed += 1,
                     ClanEventKind::Merged { .. } => r.merged += 1,
                     ClanEventKind::Dissolved => {
                         r.dissolved += 1;
-                        let Some((_, members, founded)) =
-                            prev.iter().find(|(id, ..)| *id == e.clan.0)
-                        else {
+                        let Some((_, members, founded)) = prev.iter().find(|(id, ..)| *id == e.clan.0) else {
                             continue;
                         };
                         r.size_sum += members.len();
-                        r.ages
-                            .push(sim.time.tick.saturating_sub(*founded) / TICKS_PER_DAY);
-                        let living: Vec<u64> = members
-                            .iter()
-                            .copied()
-                            .filter(|m| alive.contains(m))
-                            .collect();
+                        r.ages.push(sim.time.tick.saturating_sub(*founded) / TICKS_PER_DAY);
+                        let living: Vec<u64> = members.iter().copied().filter(|m| alive.contains(m)).collect();
                         let cause = classify(members, &living, &edges, &pos, &mut r);
                         r.causes[cause] += 1;
                         if !living.is_empty() {
@@ -191,13 +165,7 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
             prev = sim
                 .clans
                 .iter()
-                .map(|c| {
-                    (
-                        c.id.0,
-                        c.members.iter().map(|m| m.0).collect(),
-                        c.founded_tick,
-                    )
-                })
+                .map(|c| (c.id.0, c.members.iter().map(|m| m.0).collect(), c.founded_tick))
                 .collect();
         }
         // Une fois par jour : retours, et jours-personnes en clan.
@@ -208,13 +176,8 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                 r.member_days_old += c.members.len() as u64;
             }
         }
-        let strong: BTreeSet<(u64, u64)> = sim
-            .social
-            .bonds
-            .iter()
-            .filter(|&(_, &w)| w >= BOND_THRESHOLD)
-            .map(|(&k, _)| k)
-            .collect();
+        let strong: BTreeSet<(u64, u64)> =
+            sim.social.bonds.iter().filter(|&(_, &w)| w >= BOND_THRESHOLD).map(|(&k, _)| k).collect();
         for c in &sim.clans {
             let ids: Vec<u64> = c.members.iter().map(|m| m.0).collect();
             let n = ids.len();
@@ -225,8 +188,7 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                 }
             }
             for a in &ids {
-                r.degree
-                    .push(strong.iter().filter(|(x, y)| x == a || y == a).count() as f64);
+                r.degree.push(strong.iter().filter(|(x, y)| x == a || y == a).count() as f64);
             }
             if n > 1 {
                 r.density.push(inside as f64 / (n * (n - 1) / 2) as f64);
@@ -235,10 +197,7 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
         following.retain(|(t, living)| {
             let back = sim.clans.iter().any(|c| {
                 c.founded_tick > *t - 1 && {
-                    let n = living
-                        .iter()
-                        .filter(|m| c.members.iter().any(|a| a.0 == **m))
-                        .count();
+                    let n = living.iter().filter(|m| c.members.iter().any(|a| a.0 == **m)).count();
                     2 * n >= living.len()
                 }
             });
@@ -295,38 +254,22 @@ fn classify(
             *count.entry(find(&mut parent, m)).or_default() += 1;
         }
     }
-    let Some((&root, _)) = count
-        .iter()
-        .max_by_key(|&(root, n)| (*n, std::cmp::Reverse(*root)))
-    else {
+    let Some((&root, _)) = count.iter().max_by_key(|&(root, n)| (*n, std::cmp::Reverse(*root))) else {
         return 1;
     };
-    let component: Vec<u64> = bonded
-        .iter()
-        .copied()
-        .filter(|&x| find(&mut parent, x) == root)
-        .collect();
+    let component: Vec<u64> =
+        bonded.iter().copied().filter(|&x| find(&mut parent, x) == root).collect();
     if component.len() < 8 {
         *r.small_sizes.entry(component.len()).or_default() += 1;
         return 2;
     }
-    let pts: Vec<(f64, f64)> = component
-        .iter()
-        .filter_map(|id| pos.get(id).copied())
-        .collect();
+    let pts: Vec<(f64, f64)> = component.iter().filter_map(|id| pos.get(id).copied()).collect();
     let n = pts.len().max(1) as f64;
-    let (cx, cy) = pts
-        .iter()
-        .fold((0.0, 0.0), |(sx, sy), &(x, y)| (sx + x / n, sy + y / n));
-    let frac = pts
-        .iter()
-        .filter(|&&(x, y)| (x - cx).hypot(y - cy) <= RESIDENCE_RADIUS_TILES)
-        .count() as f64
-        / n;
+    let (cx, cy) = pts.iter().fold((0.0, 0.0), |(sx, sy), &(x, y)| (sx + x / n, sy + y / n));
+    let frac = pts.iter().filter(|&&(x, y)| (x - cx).hypot(y - cy) <= RESIDENCE_RADIUS_TILES).count() as f64 / n;
     if frac < 0.7 {
         r.scattered_frac += frac;
-        r.scattered_ratio
-            .push(component.len() as f64 / members.len() as f64);
+        r.scattered_ratio.push(component.len() as f64 / members.len() as f64);
         r.scattered_core.push(resident_fraction(living, pos));
         return 3;
     }
@@ -336,13 +279,8 @@ fn classify(
 fn resident_fraction(ids: &[u64], pos: &BTreeMap<u64, (f64, f64)>) -> f64 {
     let pts: Vec<(f64, f64)> = ids.iter().filter_map(|id| pos.get(id).copied()).collect();
     let n = pts.len().max(1) as f64;
-    let (cx, cy) = pts
-        .iter()
-        .fold((0.0, 0.0), |(sx, sy), &(x, y)| (sx + x / n, sy + y / n));
-    pts.iter()
-        .filter(|&&(x, y)| (x - cx).hypot(y - cy) <= RESIDENCE_RADIUS_TILES)
-        .count() as f64
-        / n
+    let (cx, cy) = pts.iter().fold((0.0, 0.0), |(sx, sy), &(x, y)| (sx + x / n, sy + y / n));
+    pts.iter().filter(|&&(x, y)| (x - cx).hypot(y - cy) <= RESIDENCE_RADIUS_TILES).count() as f64 / n
 }
 
 fn median(v: &[f64]) -> f64 {
@@ -354,10 +292,7 @@ fn median(v: &[f64]) -> f64 {
 fn print_report(r: &Report) {
     let d = r.dissolved.max(1) as f64;
     println!("\n## {}", r.label);
-    println!(
-        "  clans formés {} · dissous {} · absorbés {}",
-        r.formed, r.dissolved, r.merged
-    );
+    println!("  clans formés {} · dissous {} · absorbés {}", r.formed, r.dissolved, r.merged);
     if r.dissolved > 0 {
         let causes: Vec<String> = CAUSES
             .iter()
@@ -365,15 +300,9 @@ fn print_report(r: &Report) {
             .map(|(name, n)| format!("{name} {n} ({:.0} %)", 100.0 * n as f64 / d))
             .collect();
         println!("  causes : {}", causes.join(" · "));
-        println!(
-            "  taille de la composante (trop petit) : {:?}",
-            r.small_sizes
-        );
+        println!("  taille de la composante (trop petit) : {:?}", r.small_sizes);
         if r.causes[3] > 0 {
-            println!(
-                "  fraction résidente moyenne (dispersé) : {:.2}",
-                r.scattered_frac / r.causes[3] as f64
-            );
+            println!("  fraction résidente moyenne (dispersé) : {:.2}", r.scattered_frac / r.causes[3] as f64);
             let core_ok = r.scattered_core.iter().filter(|&&f| f >= 0.7).count();
             println!(
                 "  dispersé : composante/clan médian {:.2} (max {:.1}) ; anciens membres seuls résidents (≥ 0,7) {}/{} ; leur fraction médiane {:.2}",
@@ -386,11 +315,7 @@ fn print_report(r: &Report) {
         }
         let mut ages = r.ages.clone();
         ages.sort_unstable();
-        let q = |p: f64| {
-            ages.get(((ages.len() as f64 - 1.0) * p).round() as usize)
-                .copied()
-                .unwrap_or(0)
-        };
+        let q = |p: f64| ages.get(((ages.len() as f64 - 1.0) * p).round() as usize).copied().unwrap_or(0);
         println!(
             "  clan dissous : {:.1} membres en moyenne ; âge (j) médian {} · q90 {} · max {}",
             r.size_sum as f64 / d,
@@ -399,13 +324,7 @@ fn print_report(r: &Report) {
             q(1.0)
         );
         let n = r.returns.len().max(1) as f64;
-        let within = |days: u64| {
-            r.returns
-                .iter()
-                .filter(|x| x.is_some_and(|v| v <= days))
-                .count() as f64
-                / n
-        };
+        let within = |days: u64| r.returns.iter().filter(|x| x.is_some_and(|v| v <= days)).count() as f64 / n;
         println!(
             "  retour du groupe (≥ moitié des survivants dans un clan neuf) : ≤ 1 j {:.0} % · ≤ 3 j {:.0} % · ≤ {RETURN_HORIZON_DAYS} j {:.0} % ({} suivis)",
             100.0 * within(1),

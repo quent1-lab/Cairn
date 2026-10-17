@@ -44,20 +44,18 @@ use crate::combat::{self, Clash, Engagement};
 use crate::commerce::{self, Expedition};
 use crate::demography::{self, Demographics, HumanView, Kinship, Sex, Traits};
 use crate::disease::{self, Illness};
-use crate::ecology;
 use crate::energy;
+use crate::ecology;
 use crate::exposure::Exposures;
-use crate::fauna::{self, FaunaId, Herd, HerdView, Kill, Pack, PackView};
 use crate::fire::{self, Fire};
+use crate::fauna::{self, FaunaId, Herd, HerdView, Kill, Pack, PackView};
 use crate::memory::{self, Memory};
 use crate::names;
 use crate::pathfind;
-use crate::pressure::{self, ClanPressure};
 use crate::salt;
+use crate::pressure::{self, ClanPressure};
 use crate::skills::{self, Skills};
-use crate::social::{
-    self, Clan, ClanEvent, ClanId, ClanMembership, ClanRelations, ClanView, SocialGraph,
-};
+use crate::social::{self, Clan, ClanEvent, ClanId, ClanMembership, ClanRelations, ClanView, SocialGraph};
 use crate::structures::{self, Structure, StructureKind};
 use crate::tech::{self, Knowledge, TechEvent, TechId, TechTree};
 use crate::world::World;
@@ -160,10 +158,7 @@ const HUNT_SUCCESS_PER_HOUR: f32 = 0.02;
 /// compétence double au mieux.
 /// De nuit, l'approche se fait à l'aveugle : la chance suit la vue (MAR-2).
 fn hunt_succeeds(seed: WorldSeed, tick: u64, hunter: AgentId, skill: f32, sight: f32) -> bool {
-    let mut rng = Pcg32::new(
-        seed.derive(crate::salt::HUNT) ^ cairn_core::splitmix64(tick),
-        hunter.0,
-    );
+    let mut rng = Pcg32::new(seed.derive(crate::salt::HUNT) ^ cairn_core::splitmix64(tick), hunter.0);
     rng.next_f32() < HUNT_SUCCESS_PER_HOUR * (0.5 + skill) * sight
 }
 
@@ -483,16 +478,8 @@ impl Profiler {
             "phase", "part", "ms", "appels", "µs/appel"
         );
         for (nom, (nanos, calls)) in v {
-            let pct = if total == 0 {
-                0.0
-            } else {
-                *nanos as f64 / total as f64 * 100.0
-            };
-            let us = if *calls == 0 {
-                0.0
-            } else {
-                *nanos as f64 / *calls as f64 / 1000.0
-            };
+            let pct = if total == 0 { 0.0 } else { *nanos as f64 / total as f64 * 100.0 };
+            let us = if *calls == 0 { 0.0 } else { *nanos as f64 / *calls as f64 / 1000.0 };
             let ms = *nanos as f64 / 1e6;
             out += &format!("{nom:<18}{pct:>7.1} %{ms:>10.0}{calls:>14}{us:>12.1}\n");
         }
@@ -585,10 +572,7 @@ impl Sim {
             Behavior::default(),
             traits,
             demo,
-            Kinship {
-                mother: None,
-                father: None,
-            },
+            Kinship { mother: None, father: None },
             Memory::default(),
             Skills::founder(&traits),
             ClanMembership::default(),
@@ -606,16 +590,10 @@ impl Sim {
         // Et incroyant : on ne croit que pour avoir vu (voir `crate::faith`).
         // Ajouté après coup, `hecs` plafonnant un bundle à 15 composants — un
         // agent en porte désormais seize.
-        let _ = self
-            .agents
-            .insert_one(entity, crate::faith::Faith::default());
+        let _ = self.agents.insert_one(entity, crate::faith::Faith::default());
         // Un adulte a un passé infectieux : son immunité acquise.
-        let _ = self
-            .agents
-            .insert_one(entity, crate::disease::Illness::founder());
-        let _ = self
-            .agents
-            .insert_one(entity, crate::yields::Yields::default());
+        let _ = self.agents.insert_one(entity, crate::disease::Illness::founder());
+        let _ = self.agents.insert_one(entity, crate::yields::Yields::default());
         id
     }
 
@@ -642,21 +620,13 @@ impl Sim {
                 health: 1.0,
                 last_damage: None,
                 ..Physiology::with_full_reserves(
-                    &Demographics {
-                        sex,
-                        born_tick: self.time.tick as i64,
-                        pregnancy: None,
-                    },
+                    &Demographics { sex, born_tick: self.time.tick as i64, pregnancy: None },
                     self.time.tick,
                 )
             },
             Behavior::default(),
             traits,
-            Demographics {
-                sex,
-                born_tick: self.time.tick as i64,
-                pregnancy: None,
-            },
+            Demographics { sex, born_tick: self.time.tick as i64, pregnancy: None },
             kin,
             // Un nouveau-né ne sait rien et ne connaît rien : tout est à
             // apprendre — c'est ce qui rend l'oubli générationnel possible.
@@ -677,16 +647,10 @@ impl Sim {
             Wound::default(),
         ));
         // Un nouveau-né naît incroyant : le monde ne se souvient pas pour lui.
-        let _ = self
-            .agents
-            .insert_one(entity, crate::faith::Faith::default());
+        let _ = self.agents.insert_one(entity, crate::faith::Faith::default());
         // Un système immunitaire vierge : tout reste à rencontrer.
-        let _ = self
-            .agents
-            .insert_one(entity, crate::disease::Illness::default());
-        let _ = self
-            .agents
-            .insert_one(entity, crate::yields::Yields::default());
+        let _ = self.agents.insert_one(entity, crate::disease::Illness::default());
+        let _ = self.agents.insert_one(entity, crate::yields::Yields::default());
         id
     }
 
@@ -713,8 +677,7 @@ impl Sim {
     ) -> FaunaId {
         let id = FaunaId(self.next_fauna_id);
         self.next_fauna_id += 1;
-        self.fauna
-            .spawn((id, Position { x, y }, Herd::new(population, species)));
+        self.fauna.spawn((id, Position { x, y }, Herd::new(population, species)));
         id
     }
 
@@ -726,8 +689,7 @@ impl Sim {
         let species = fauna::Species::predator_for_biome(biome, &mut rng);
         let id = FaunaId(self.next_fauna_id);
         self.next_fauna_id += 1;
-        self.fauna
-            .spawn((id, Position { x, y }, Pack::new(population, species)));
+        self.fauna.spawn((id, Position { x, y }, Pack::new(population, species)));
         id
     }
 
@@ -743,8 +705,7 @@ impl Sim {
     ) -> FaunaId {
         let id = FaunaId(self.next_fauna_id);
         self.next_fauna_id += 1;
-        self.fauna
-            .spawn((id, Position { x, y }, Pack::new(population, species)));
+        self.fauna.spawn((id, Position { x, y }, Pack::new(population, species)));
         id
     }
 
@@ -809,11 +770,7 @@ impl Sim {
     /// l'appelant, donc les entrées sont ordonnées par construction (elles ne
     /// peuvent pas remonter le temps).
     pub(crate) fn record(&mut self, pos: (i64, i64), kind: crate::chronicle::EventKind) {
-        self.chronicle.push(crate::chronicle::Event {
-            tick: self.time.tick,
-            pos,
-            kind,
-        });
+        self.chronicle.push(crate::chronicle::Event { tick: self.time.tick, pos, kind });
     }
 
     /// Le nom d'un agent **vivant** (voir `crate::names`) — `None` s'il est
@@ -888,38 +845,14 @@ impl Sim {
         let clan_views: BTreeMap<ClanId, ClanView> = self
             .clans
             .iter()
-            .map(|c| {
-                (
-                    c.id,
-                    ClanView {
-                        home: c.home,
-                        stock: c.stock,
-                        desired: c.desired,
-                        members: c.members.len(),
-                    },
-                )
-            })
+            .map(|c| (c.id, ClanView { home: c.home, stock: c.stock, desired: c.desired, members: c.members.len() }))
             .collect();
         // On extrait les composants de l'agent (copies, plus un clone de la
         // mémoire) pour relâcher l'emprunt de `self.agents` avant d'appeler
         // `brain::inspect`, qui veut `&mut self.world`.
         let agriculture = self.tech_tree.id_of("agriculture");
 
-        let (
-            pos,
-            phys,
-            traits,
-            demo,
-            kin,
-            clan,
-            carrying,
-            current,
-            knows_agriculture,
-            mem,
-            fervor,
-            wound,
-            returns,
-        ) = self
+        let (pos, phys, traits, demo, kin, clan, carrying, current, knows_agriculture, mem, fervor, wound, returns) = self
             .agents
             .query::<(
                 &AgentId,
@@ -939,43 +872,23 @@ impl Sim {
             )>()
             .iter()
             .find(|(_, (aid, ..))| aid.0 == id.0)
-            .map(
-                |(
-                    _,
-                    (
-                        _,
-                        pos,
-                        phys,
-                        traits,
-                        demo,
-                        kin,
-                        membership,
-                        carrying,
-                        behavior,
-                        knowledge,
-                        mem,
-                        faith,
-                        wound,
-                        yields,
-                    ),
-                )| {
-                    (
-                        *pos,
-                        *phys,
-                        *traits,
-                        *demo,
-                        *kin,
-                        membership.0,
-                        carrying.0,
-                        behavior.task.map(|t| t.kind),
-                        agriculture.is_some_and(|a| knowledge.has(a)),
-                        mem.clone(),
-                        faith.fervor,
-                        wound.0,
-                        yields.weights(),
-                    )
-                },
-            )?;
+            .map(|(_, (_, pos, phys, traits, demo, kin, membership, carrying, behavior, knowledge, mem, faith, wound, yields))| {
+                (
+                    *pos,
+                    *phys,
+                    *traits,
+                    *demo,
+                    *kin,
+                    membership.0,
+                    carrying.0,
+                    behavior.task.map(|t| t.kind),
+                    agriculture.is_some_and(|a| knowledge.has(a)),
+                    mem.clone(),
+                    faith.fervor,
+                    wound.0,
+                    yields.weights(),
+                )
+            })?;
         if demo.is_infant(time.tick) {
             return None;
         }
@@ -996,15 +909,7 @@ impl Sim {
             returns,
         };
         Some(brain::inspect(
-            &mut self.world,
-            time,
-            &ctx,
-            &mem,
-            current,
-            &herds,
-            &packs,
-            &humans,
-            &clan_views,
+            &mut self.world, time, &ctx, &mem, current, &herds, &packs, &humans, &clan_views,
             &self.clan_relations,
             &self.shrines,
         ))
@@ -1042,17 +947,7 @@ impl Sim {
         let clan_views: BTreeMap<ClanId, ClanView> = self
             .clans
             .iter()
-            .map(|c| {
-                (
-                    c.id,
-                    ClanView {
-                        home: c.home,
-                        stock: c.stock,
-                        desired: c.desired,
-                        members: c.members.len(),
-                    },
-                )
-            })
+            .map(|c| (c.id, ClanView { home: c.home, stock: c.stock, desired: c.desired, members: c.members.len() }))
             .collect();
 
         // L'id de l'agriculture, résolu une seule fois : sert à déballer un
@@ -1069,40 +964,25 @@ impl Sim {
         let _ph = phase(); // 1 deliberation
         // ticks (tick + i) % période == 0, ou dès qu'il n'a plus de tâche.
         // Les nourrissons ne délibèrent pas : ils sont portés.
-        for (
-            _,
-            (
-                id,
-                pos,
-                phys,
-                traits,
-                demo,
-                kin,
-                membership,
-                carrying,
-                knowledge,
-                faith,
-                behavior,
-                mem,
-                wound,
-                yields,
-            ),
-        ) in self.agents.query_mut::<(
-            &AgentId,
-            &Position,
-            &Physiology,
-            &Traits,
-            &Demographics,
-            &Kinship,
-            &ClanMembership,
-            &Carrying,
-            &Knowledge,
-            &crate::faith::Faith,
-            &mut Behavior,
-            &mut Memory,
-            &Wound,
-            &crate::yields::Yields,
-        )>() {
+        for (_, (id, pos, phys, traits, demo, kin, membership, carrying, knowledge, faith, behavior, mem, wound, yields)) in self
+            .agents
+            .query_mut::<(
+                &AgentId,
+                &Position,
+                &Physiology,
+                &Traits,
+                &Demographics,
+                &Kinship,
+                &ClanMembership,
+                &Carrying,
+                &Knowledge,
+                &crate::faith::Faith,
+                &mut Behavior,
+                &mut Memory,
+                &Wound,
+                &crate::yields::Yields,
+            )>()
+        {
             if demo.is_infant(time.tick) {
                 continue;
             }
@@ -1129,10 +1009,7 @@ impl Sim {
                     (!distress).then(|| commerce::waypoint(exp))
                 });
                 if let Some(target) = expedition_wp {
-                    behavior.task = Some(crate::agent::Task {
-                        kind: TaskKind::Expedition,
-                        target,
-                    });
+                    behavior.task = Some(crate::agent::Task { kind: TaskKind::Expedition, target });
                 } else {
                     let current = behavior.task.map(|t| t.kind);
                     let ctx = AgentCtx {
@@ -1177,10 +1054,7 @@ impl Sim {
         // dépôts (chasse) et retraits (`EatFromStock`) s'y accumulent au fil
         // des agents, reportée sur `self.clans` une fois la boucle finie.
         let mut kills: Vec<Kill> = Vec::new();
-        let mut path_budget = PathBudget {
-            left: PATH_REQUESTS_PER_TICK,
-            denied: 0,
-        };
+        let mut path_budget = PathBudget { left: PATH_REQUESTS_PER_TICK, denied: 0 };
         let mut clan_stock: BTreeMap<ClanId, f32> =
             self.clans.iter().map(|c| (c.id, c.stock)).collect();
         // Copie de travail des structures : `Build` y pousse la structure
@@ -1192,21 +1066,7 @@ impl Sim {
         let mut shares: Vec<Share> = Vec::new();
         for (
             _,
-            (
-                id,
-                pos,
-                phys,
-                traits,
-                demo,
-                behavior,
-                mem,
-                agent_skills,
-                membership,
-                carrying,
-                prestige,
-                wound,
-                ledger,
-            ),
+            (id, pos, phys, traits, demo, behavior, mem, agent_skills, membership, carrying, prestige, wound, ledger),
         ) in self.agents.query_mut::<(
             &AgentId,
             &mut Position,
@@ -1227,9 +1087,7 @@ impl Sim {
                 continue;
             }
             // L'heure se compte à l'activité qu'on mène en l'entamant (MAR-6).
-            let pursuit = behavior
-                .task
-                .and_then(|t| crate::yields::Pursuit::of(t.kind));
+            let pursuit = behavior.task.and_then(|t| crate::yields::Pursuit::of(t.kind));
             // La capacité de travail porte l'âge (un enfant cueille mal) **et**
             // la plaie (un blessé peine à tout — §3.1) : c'est là que
             // « improductif » se paie. Le savoir-faire, lui, vit dans `Skills`.
@@ -1281,12 +1139,8 @@ impl Sim {
             if behavior.activity == Activity::Walking
                 && demo.is_adult(time.tick)
                 && sight >= fauna::TRAIL_SIGHT
-                && let Some((spot, at)) = fauna::crossed_trail(
-                    &self.herd_trails,
-                    before,
-                    (pos.x, pos.y),
-                    fauna::TRAIL_READ_TILES,
-                )
+                && let Some((spot, at)) =
+                    fauna::crossed_trail(&self.herd_trails, before, (pos.x, pos.y), fauna::TRAIL_READ_TILES)
                 && mem.game.is_none_or(|(_, seen)| seen < at)
             {
                 mem.game = Some(((spot.0.floor() as i64, spot.1.floor() as i64), at));
@@ -1322,9 +1176,7 @@ impl Sim {
         // Part des membres de chaque clan qui savent conserver.
         let mut preserving: BTreeMap<ClanId, (u32, u32)> = BTreeMap::new();
         let preservation = self.tech_tree.id_of("preservation");
-        for (_, (membership, knowledge)) in
-            self.agents.query::<(&ClanMembership, &Knowledge)>().iter()
-        {
+        for (_, (membership, knowledge)) in self.agents.query::<(&ClanMembership, &Knowledge)>().iter() {
             if let Some(clan_id) = membership.0 {
                 let e = preserving.entry(clan_id).or_insert((0, 0));
                 e.1 += 1;
@@ -1343,10 +1195,7 @@ impl Sim {
                 clan.stock = (f64::from(stock.max(0.0)) * keep) as f32;
             }
             if let Some(kind) = clan.desired
-                && self
-                    .structures
-                    .iter()
-                    .any(|s| s.clan == clan.id && s.kind == kind)
+                && self.structures.iter().any(|s| s.clan == clan.id && s.kind == kind)
             {
                 clan.desired = None;
             }
@@ -1379,21 +1228,13 @@ impl Sim {
             .collect();
         // Instantané des positions humaines : la souillure d'une eau se lit
         // aux humains présents autour (voir `disease`).
-        let humans_at: Vec<(f64, f64)> = self
-            .agents
-            .query::<(&Position, &AgentId)>()
-            .iter()
-            .map(|(_, (p, _))| (p.x, p.y))
-            .collect();
+        let humans_at: Vec<(f64, f64)> =
+            self.agents.query::<(&Position, &AgentId)>().iter().map(|(_, (p, _))| (p.x, p.y)).collect();
         let disease_seed = self.world.seed().derive(crate::salt::DISEASE) ^ splitmix64(time.tick);
         // Les nourrissons portés : leur masse alourdit la marche de qui les
         // porte (la mère, ou celle qui l'a recueilli).
         let mut carried_kg: BTreeMap<u64, f32> = BTreeMap::new();
-        for (_, (id, demo, kin)) in self
-            .agents
-            .query::<(&AgentId, &Demographics, &Kinship)>()
-            .iter()
-        {
+        for (_, (id, demo, kin)) in self.agents.query::<(&AgentId, &Demographics, &Kinship)>().iter() {
             if demo.is_infant(time.tick)
                 && let Some(carer) = self.fosters.get(&id.0).copied().or(kin.mother)
             {
@@ -1403,34 +1244,21 @@ impl Sim {
         }
         let mut dead = Vec::new();
         let mut sheltered = 0u64;
-        for (
-            entity,
-            (
-                id,
-                pos,
-                phys,
-                traits,
-                demo,
-                behavior,
-                membership,
-                exposures,
-                wound,
-                illness,
-                carrying,
-            ),
-        ) in self.agents.query_mut::<(
-            &AgentId,
-            &Position,
-            &mut Physiology,
-            &Traits,
-            &Demographics,
-            &Behavior,
-            &ClanMembership,
-            &mut Exposures,
-            &mut Wound,
-            &mut Illness,
-            &Carrying,
-        )>() {
+        for (entity, (id, pos, phys, traits, demo, behavior, membership, exposures, wound, illness, carrying)) in
+            self.agents.query_mut::<(
+                &AgentId,
+                &Position,
+                &mut Physiology,
+                &Traits,
+                &Demographics,
+                &Behavior,
+                &ClanMembership,
+                &mut Exposures,
+                &mut Wound,
+                &mut Illness,
+                &Carrying,
+            )>()
+        {
             let (x, y) = pos.tile();
             let tile = self.world.tile(x, y);
             // L'agent voit ce qui l'entoure : on enregistre le gisement et la
@@ -1457,20 +1285,12 @@ impl Sim {
             let body = energy::Body::of(age, demo.sex);
             phys.scale = body.scale();
             phys.reserve_target = body.reserve_target(age, demo.sex);
-            let load_kg = carried_kg.get(&id.0).copied().unwrap_or(0.0)
-                + carrying.0 * energy::KG_PER_MEAT_POINT;
-            let fever = illness
-                .active
-                .iter()
-                .flatten()
-                .map(|i| i.severity)
-                .fold(0.0f32, f32::max);
+            let load_kg = carried_kg.get(&id.0).copied().unwrap_or(0.0) + carrying.0 * energy::KG_PER_MEAT_POINT;
+            let fever = illness.active.iter().flatten().map(|i| i.severity).fold(0.0f32, f32::max);
             let mut kcal = body.hourly_kcal(behavior.activity, felt, load_kg, fever);
             if let Some(pregnancy) = demo.pregnancy {
-                let days_left =
-                    pregnancy.due_tick.saturating_sub(time.tick) as f64 / TICKS_PER_DAY as f64;
-                kcal += energy::pregnancy_kcal_day(demography::GESTATION_DAYS as f64 - days_left)
-                    / 24.0;
+                let days_left = pregnancy.due_tick.saturating_sub(time.tick) as f64 / TICKS_PER_DAY as f64;
+                kcal += energy::pregnancy_kcal_day(demography::GESTATION_DAYS as f64 - days_left) / 24.0;
             }
             phys.drift(felt, behavior.activity, traits.endurance, kcal);
             // La plaie se referme lentement, quoi qu'il arrive (§3.1) — elle
@@ -1529,22 +1349,9 @@ impl Sim {
             // Une mort ordinaire est une statistique ; la mort de celui qui
             // menait un clan est une succession — et donc un fait de Chronique.
             if let Some(clan) = self.clans.iter().find(|c| c.chief == agent).map(|c| c.id) {
-                self.record(
-                    pos,
-                    EventKind::ChiefFallen {
-                        clan,
-                        agent,
-                        sex,
-                        cause,
-                    },
-                );
+                self.record(pos, EventKind::ChiefFallen { clan, agent, sex, cause });
             }
-            self.deaths.push(DeathRecord {
-                tick: time.tick,
-                agent,
-                cause,
-                pos,
-            });
+            self.deaths.push(DeathRecord { tick: time.tick, agent, cause, pos });
         }
 
         self.end("3 physiologie", _ph);
@@ -1703,8 +1510,7 @@ impl Sim {
             fence,
         );
         #[cfg(feature = "profile")]
-        self.prof
-            .count("4d regen", self.world.generated - generated_before);
+        self.prof.count("4d regen", self.world.generated - generated_before);
         for entity in dead_herds {
             let _ = self.fauna.despawn(entity);
         }
@@ -1774,8 +1580,7 @@ impl Sim {
                     .query::<(&Herd, &Position)>()
                     .iter()
                     .filter(|(_, (h, p))| {
-                        h.anchor.is_none()
-                            && fauna::nearest_human_d2((p.x, p.y), &human_positions) > r2
+                        h.anchor.is_none() && fauna::nearest_human_d2((p.x, p.y), &human_positions) > r2
                     })
                     .map(|(e, _)| e)
                     .collect();
@@ -1789,13 +1594,9 @@ impl Sim {
                 .iter()
                 .map(|(_, (_, pos))| (pos.x, pos.y))
                 .collect();
-            if let Some((x, y)) = fauna::daily_immigration(
-                &human_positions,
-                &herd_positions,
-                &mut self.world,
-                seed,
-                time,
-            ) {
+            if let Some((x, y)) =
+                fauna::daily_immigration(&human_positions, &herd_positions, &mut self.world, seed, time)
+            {
                 self.spawn_herd(x, y, fauna::HERD_START);
             }
             // Symétrique : sans réensemencement des meutes, une extinction de
@@ -1824,12 +1625,8 @@ impl Sim {
         // 5. Écologie quotidienne, à minuit.
         let _ph = phase(); // 5 ecologie
         if time.tick.is_multiple_of(TICKS_PER_DAY) {
-            let eco_humans: Vec<(f64, f64)> = self
-                .agents
-                .query::<&Position>()
-                .iter()
-                .map(|(_, p)| (p.x, p.y))
-                .collect();
+            let eco_humans: Vec<(f64, f64)> =
+                self.agents.query::<&Position>().iter().map(|(_, p)| (p.x, p.y)).collect();
             ecology::daily_regrowth(
                 &mut self.world,
                 &self.climate,
@@ -1924,10 +1721,7 @@ fn execute(
         // novice en gâche un quart — et chaque mise à mort forge le geste bien
         // plus qu'une heure d'affût.
         let nutrition = meat_hunger(prey.species) * (0.75 + 0.25 * agent_skills.hunting);
-        ledger.gain(
-            crate::yields::Pursuit::Hunt,
-            f64::from(nutrition) * KCAL_PER_HUNGER,
-        );
+        ledger.gain(crate::yields::Pursuit::Hunt, f64::from(nutrition) * KCAL_PER_HUNGER);
         skills::practice(
             &mut agent_skills.hunting,
             skills::hunt_cap(traits),
@@ -1948,11 +1742,7 @@ fn execute(
         // ou laissé sur place, comme avant.
         let offered = surplus * traits.sociability;
         if offered > 0.0 {
-            shares.push(Share {
-                giver: id,
-                pos: (pos.x, pos.y),
-                amount: offered,
-            });
+            shares.push(Share { giver: id, pos: (pos.x, pos.y), amount: offered });
             surplus -= offered;
         }
         // Ce qu'il n'offre pas, il le garde — clan ou pas : rapporté au foyer
@@ -1962,10 +1752,7 @@ fn execute(
             crate::food_stats::fed(crate::food_stats::Source::HuntCarried, surplus);
         }
         behavior.task = None;
-        return Some(Kill {
-            herd: prey.entity,
-            head: HUNT_YIELD_HEAD,
-        });
+        return Some(Kill { herd: prey.entity, head: HUNT_YIELD_HEAD });
     }
 
     // Affronter une meute : comme la chasse, la cible **bouge** (on ré-évalue la
@@ -1993,12 +1780,7 @@ fn execute(
         // est atténuée par force + combat. Le geste se forge dans `resolve`.
         let power = combat::ATTACK_POWER * traits.strength * (0.5 + agent_skills.combat) * work;
         let defense = 0.3 * traits.strength + 0.4 * agent_skills.combat;
-        engagements.push(Engagement {
-            attacker: id,
-            pack: prey.entity,
-            power,
-            defense,
-        });
+        engagements.push(Engagement { attacker: id, pack: prey.entity, power, defense });
         behavior.task = None; // une passe d'armes, puis on redélibère
         return None;
     }
@@ -2029,10 +1811,7 @@ fn execute(
             crate::food_stats::fed(crate::food_stats::Source::Herd, meat);
         }
         behavior.task = None;
-        return Some(Kill {
-            herd: cheptel.entity,
-            head: HERD_HARVEST_HEAD,
-        });
+        return Some(Kill { herd: cheptel.entity, head: HERD_HARVEST_HEAD });
     }
 
     // Razzier un rival : comme la chasse, la cible bouge (un humain d'un clan
@@ -2074,10 +1853,7 @@ fn execute(
             return None;
         }
         behavior.activity = Activity::Fighting;
-        clashes.push(Clash {
-            attacker: id,
-            target: tid,
-        });
+        clashes.push(Clash { attacker: id, target: tid });
         behavior.task = None; // une passe d'armes, puis on redélibère
         return None;
     }
@@ -2363,11 +2139,7 @@ fn advance(
     let is_land = |x: i64, y: i64| world.worldgen().elevation(x, y) > 0.0;
     match pathfind::astar(pos.tile(), target, is_land, pathfind::NODE_BUDGET) {
         Some(waypoints) if !waypoints.is_empty() => {
-            let mut route = Route {
-                goal: target,
-                waypoints,
-                cursor: 0,
-            };
+            let mut route = Route { goal: target, waypoints, cursor: 0 };
             let outcome = follow_route(world, &mut route, pos, target);
             routes.insert(id.0, route);
             outcome
@@ -2381,12 +2153,7 @@ fn advance(
 /// les étapes dans la même heure** tant qu'il reste de la marche. Un trajet
 /// s'arrêtait à chaque étape (32 à 45 m) en jetant le reste de l'heure :
 /// contourner l'eau se faisait à ~45 m/h au lieu de 4 km/h.
-fn follow_route(
-    world: &mut World,
-    route: &mut Route,
-    pos: &mut Position,
-    target: (i64, i64),
-) -> Move {
+fn follow_route(world: &mut World, route: &mut Route, pos: &mut Position, target: (i64, i64)) -> Move {
     let mut budget = WALK_TILES_PER_TICK;
     let mut moved = false;
     loop {
@@ -2396,11 +2163,7 @@ fn follow_route(
             route.cursor += 1;
         }
         let heading_to_goal = route.cursor >= route.waypoints.len();
-        let step_target = if heading_to_goal {
-            target
-        } else {
-            route.waypoints[route.cursor]
-        };
+        let step_target = if heading_to_goal { target } else { route.waypoints[route.cursor] };
         match walk_budgeted(world, pos, step_target, &mut budget) {
             Move::Arrived if heading_to_goal => return Move::Arrived,
             Move::Arrived => {
@@ -2431,12 +2194,7 @@ fn walk_line(world: &mut World, pos: &mut Position, target: (i64, i64)) -> Move 
 
 /// [`walk_line`] sur ce qui reste de marche dans l'heure (`budget`, en
 /// tuiles, décompté) : c'est ce qui laisse un trajet enchaîner ses étapes.
-fn walk_budgeted(
-    world: &mut World,
-    pos: &mut Position,
-    target: (i64, i64),
-    budget: &mut f64,
-) -> Move {
+fn walk_budgeted(world: &mut World, pos: &mut Position, target: (i64, i64), budget: &mut f64) -> Move {
     let mut moved = false;
     while *budget > 0.0 {
         let dx = target.0 as f64 + 0.5 - pos.x;
@@ -2447,11 +2205,7 @@ fn walk_budgeted(
         }
         let step = WALK_SAMPLE_TILES.min(dist).min(*budget);
         let next = (pos.x + dx / dist * step, pos.y + dy / dist * step);
-        if world
-            .worldgen()
-            .elevation(next.0.floor() as i64, next.1.floor() as i64)
-            <= 0.0
-        {
+        if world.worldgen().elevation(next.0.floor() as i64, next.1.floor() as i64) <= 0.0 {
             return if moved { Move::Moved } else { Move::Stuck };
         }
         pos.x = next.0;
@@ -2474,16 +2228,7 @@ mod tests {
     fn fingerprint(sim: &Sim) -> Vec<(u64, u64, u64, u32, u32, u32, u64, u32, u16, u32)> {
         let mut all: Vec<_> = sim
             .agents
-            .query::<(
-                &AgentId,
-                &Position,
-                &Physiology,
-                &Traits,
-                &Memory,
-                &Skills,
-                &Exposures,
-                &Knowledge,
-            )>()
+            .query::<(&AgentId, &Position, &Physiology, &Traits, &Memory, &Skills, &Exposures, &Knowledge)>()
             .iter()
             .map(|(_, (id, pos, phys, traits, mem, sk, exp, kn))| {
                 (
@@ -2513,14 +2258,8 @@ mod tests {
         for r in 0..400i64 {
             let d = r * step;
             for &(x, y) in &[
-                (d, 0),
-                (-d, 0),
-                (0, d),
-                (0, -d),
-                (d, d),
-                (-d, d),
-                (d, -d),
-                (-d, -d),
+                (d, 0), (-d, 0), (0, d), (0, -d),
+                (d, d), (-d, d), (d, -d), (-d, -d),
             ] {
                 // Marge d'élévation : franchement à l'intérieur des terres.
                 if sim.world.worldgen().elevation(x, y) > 0.05 {
@@ -2549,7 +2288,9 @@ mod tests {
         sim.fauna
             .query::<(&Herd, &Position)>()
             .iter()
-            .filter(|(_, (_, p))| (p.x - center.0 as f64).hypot(p.y - center.1 as f64) < r)
+            .filter(|(_, (_, p))| {
+                (p.x - center.0 as f64).hypot(p.y - center.1 as f64) < r
+            })
             .map(|(_, (h, _))| h.population)
             .sum()
     }
@@ -2563,10 +2304,8 @@ mod tests {
         let mut sim = Sim::new(WorldSeed(seed), 2048);
         sim.allow_fauna_immigration = false;
         sim.allow_wildfires = false;
-        let seed_point = (
-            cairn_core::km_to_tiles(1500.0) as i64,
-            cairn_core::km_to_tiles(2100.0) as i64,
-        );
+        let seed_point =
+            (cairn_core::km_to_tiles(1500.0) as i64, cairn_core::km_to_tiles(2100.0) as i64);
         let home = crate::scenario::find_home(&mut sim, seed_point);
         let (mut placed, mut k) = (0, 0i64);
         while placed < agents && k < 10_000 {
@@ -2650,18 +2389,9 @@ mod tests {
                 sim.spawn_herd_species(x, y, 80.0, species);
             }
         }
-        let heads = |sim: &Sim| -> f32 {
-            sim.fauna
-                .query::<&Herd>()
-                .iter()
-                .map(|(_, h)| h.population)
-                .sum()
-        };
+        let heads = |sim: &Sim| -> f32 { sim.fauna.query::<&Herd>().iter().map(|(_, h)| h.population).sum() };
         let before = heads(&sim);
-        assert!(
-            before >= 0.9 * heads_needed,
-            "semis incomplet : {before:.0} têtes sur {heads_needed:.0}"
-        );
+        assert!(before >= 0.9 * heads_needed, "semis incomplet : {before:.0} têtes sur {heads_needed:.0}");
         for _ in 0..20 * TICKS_PER_DAY {
             sim.step();
         }
@@ -2683,17 +2413,7 @@ mod tests {
     #[test]
     fn la_cueillette_ne_rend_pas_plus_que_la_plante_ne_produit() {
         use cairn_worldgen::Biome::*;
-        for biome in [
-            HotDesert,
-            ColdDesert,
-            Tundra,
-            Steppe,
-            Savanna,
-            Grassland,
-            Taiga,
-            TemperateForest,
-            TropicalForest,
-        ] {
+        for biome in [HotDesert, ColdDesert, Tundra, Steppe, Savanna, Grassland, Taiga, TemperateForest, TropicalForest] {
             let npp = f64::from(ecology::npp_g_m2_yr(biome)) * ecology::PLANT_KCAL_PER_G;
             let gathered = gathering_kcal_m2_yr(biome);
             assert!(
@@ -2724,82 +2444,39 @@ mod tests {
                 }
             }
             let target = target.expect("une tuile riche près du foyer");
-            let mut pos = Position {
-                x: target.0 as f64 + 0.5,
-                y: target.1 as f64 + 0.5,
-            };
-            let mut phys = Physiology {
-                hunger: 0.3,
-                ..Physiology::default()
-            };
+            let mut pos = Position { x: target.0 as f64 + 0.5, y: target.1 as f64 + 0.5 };
+            let mut phys = Physiology { hunger: 0.3, ..Physiology::default() };
             let mut carrying = Carrying::default();
             let traits = Traits::default();
             let clan = avec_clan.then_some(social::ClanId(1));
             for h in 0..4 {
-                let mut behavior = Behavior {
-                    task: Some(Task {
-                        kind: TaskKind::Forage,
-                        target,
-                    }),
-                    ..Behavior::default()
-                };
+                let mut behavior = Behavior { task: Some(Task { kind: TaskKind::Forage, target }), ..Behavior::default() };
                 execute(
-                    &mut sim.world,
-                    &mut BTreeMap::new(),
-                    &mut PathBudget {
-                        left: PATH_REQUESTS_PER_TICK,
-                        denied: 0,
-                    },
-                    AgentId(0),
-                    &mut pos,
-                    &mut phys,
-                    &mut behavior,
-                    &[],
-                    &[],
-                    &[],
-                    1.0,
-                    &traits,
-                    &mut Skills::default(),
-                    clan,
-                    &mut BTreeMap::new(),
-                    &mut carrying,
-                    &mut Prestige::default(),
-                    &mut Vec::new(),
-                    &mut Vec::new(),
-                    &mut Vec::new(),
-                    &mut Vec::new(),
-                    &mut crate::yields::Yields::default(),
-                    tick + h,
-                    1.0,
+                    &mut sim.world, &mut BTreeMap::new(), &mut PathBudget { left: PATH_REQUESTS_PER_TICK, denied: 0 },
+                    AgentId(0), &mut pos, &mut phys, &mut behavior, &[], &[], &[], 1.0, &traits,
+                    &mut Skills::default(), clan, &mut BTreeMap::new(), &mut carrying,
+                    &mut Prestige::default(), &mut Vec::new(), &mut Vec::new(), &mut Vec::new(),
+                    &mut Vec::new(), &mut crate::yields::Yields::default(), tick + h, 1.0,
                 );
             }
             carrying.0
         };
         assert_eq!(porte(false), 0.0, "sans clan, on ne cueille que pour soi");
-        assert!(
-            porte(true) > 0.1,
-            "un membre de clan doit rapporter de sa cueillette ({:.3} point porté)",
-            porte(true)
-        );
+        assert!(porte(true) > 0.1, "un membre de clan doit rapporter de sa cueillette ({:.3} point porté)", porte(true));
     }
 
     /// Le premier tick où l'approche d'`hunter` tue : les tests qui vérifient
     /// ce qu'une prise **rapporte** (et non combien on en fait) chassent à
     /// ce tick-là.
     fn tick_de_prise(sim: &Sim, hunter: AgentId, skill: f32) -> u64 {
-        (0..)
-            .find(|&t| hunt_succeeds(sim.world.seed(), t, hunter, skill, 1.0))
-            .unwrap()
+        (0..).find(|&t| hunt_succeeds(sim.world.seed(), t, hunter, skill, 1.0)).unwrap()
     }
 
     /// Une tuile de terre ferme proche de `home + (dx, 0)`, pour poser un
     /// troupeau à une distance voulue de l'humain du foyer.
     fn land_near(sim: &mut Sim, home: (i64, i64), dx: f64) -> (f64, f64) {
         for k in 0..400 {
-            let (x, y) = (
-                home.0 as f64 + dx + (k % 20) as f64 * 50.0,
-                home.1 as f64 + (k / 20) as f64 * 50.0,
-            );
+            let (x, y) = (home.0 as f64 + dx + (k % 20) as f64 * 50.0, home.1 as f64 + (k / 20) as f64 * 50.0);
             if sim.world.tile(x as i64, y as i64).is_walkable() {
                 return (x, y);
             }
@@ -2863,16 +2540,8 @@ mod tests {
         for _ in 0..TICKS_PER_DAY + 1 {
             sim.step();
         }
-        let vivants: Vec<FaunaId> = sim
-            .fauna
-            .query::<(&FaunaId, &Herd)>()
-            .iter()
-            .map(|(_, (id, _))| *id)
-            .collect();
-        assert!(
-            vivants.contains(&proche),
-            "le troupeau à 2 km d'un humain doit rester simulé"
-        );
+        let vivants: Vec<FaunaId> = sim.fauna.query::<(&FaunaId, &Herd)>().iter().map(|(_, (id, _))| *id).collect();
+        assert!(vivants.contains(&proche), "le troupeau à 2 km d'un humain doit rester simulé");
         assert!(
             !vivants.contains(&lointain),
             "un troupeau à 20 km de tout humain est encore simulé : l'aire de la faune n'a pas de borne"
@@ -2909,19 +2578,9 @@ mod tests {
         }
         for i in 0..10 {
             let angle = i as f64 * 0.63;
-            sim.spawn_pack(
-                center.0 + angle.cos() * 200.0,
-                center.1 + angle.sin() * 200.0,
-                8.0,
-            );
+            sim.spawn_pack(center.0 + angle.cos() * 200.0, center.1 + angle.sin() * 200.0, 8.0);
         }
-        let predators = |sim: &Sim| -> f32 {
-            sim.fauna
-                .query::<&Pack>()
-                .iter()
-                .map(|(_, p)| p.population)
-                .sum()
-        };
+        let predators = |sim: &Sim| -> f32 { sim.fauna.query::<&Pack>().iter().map(|(_, p)| p.population).sum() };
         let before = predators(&sim);
         // 60 jours : sans recrutement, la famine (0,02/j) laisse ~30 % des
         // prédateurs ; sans territoire, bien nourris, ils croissent.
@@ -2959,21 +2618,10 @@ mod tests {
         for _ in 0..TICKS_PER_DAY + 1 {
             sim.step();
         }
-        let vivants: Vec<FaunaId> = sim
-            .fauna
-            .query::<(&FaunaId, &Herd)>()
-            .iter()
-            .map(|(_, (id, _))| *id)
-            .collect();
+        let vivants: Vec<FaunaId> = sim.fauna.query::<(&FaunaId, &Herd)>().iter().map(|(_, (id, _))| *id).collect();
         let presents = [a, b].iter().filter(|id| vivants.contains(id)).count();
-        assert_eq!(
-            presents, 1,
-            "deux troupeaux d'aurochs à 100 m, 60 têtes à eux deux, doivent n'en faire qu'un"
-        );
-        assert!(
-            vivants.contains(&c),
-            "un troupeau d'une autre espèce ne fusionne pas"
-        );
+        assert_eq!(presents, 1, "deux troupeaux d'aurochs à 100 m, 60 têtes à eux deux, doivent n'en faire qu'un");
+        assert!(vivants.contains(&c), "un troupeau d'une autre espèce ne fusionne pas");
         assert!(
             vivants.contains(&d) && vivants.contains(&e),
             "deux troupeaux dont la réunion dépasserait la fission restent séparés"
@@ -3007,23 +2655,13 @@ mod tests {
                 sim.spawn_herd_species(x, y, 40.0, species);
             }
         }
-        let heads = |sim: &Sim| -> f32 {
-            sim.fauna
-                .query::<&Herd>()
-                .iter()
-                .map(|(_, h)| h.population)
-                .sum()
-        };
+        let heads = |sim: &Sim| -> f32 { sim.fauna.query::<&Herd>().iter().map(|(_, h)| h.population).sum() };
         let before = heads(&sim);
         let seed = sim.world.seed();
         for _ in 0..30 * TICKS_PER_DAY {
             // Une menace sur chaque troupeau, à chaque tick : ils fuient sans fin.
-            let threats: Vec<(f64, f64)> = sim
-                .fauna
-                .query::<(&Herd, &Position)>()
-                .iter()
-                .map(|(_, (_, p))| (p.x, p.y))
-                .collect();
+            let threats: Vec<(f64, f64)> =
+                sim.fauna.query::<(&Herd, &Position)>().iter().map(|(_, (_, p))| (p.x, p.y)).collect();
             let time = sim.time;
             fauna::update_herds(
                 &mut sim.fauna,
@@ -3060,22 +2698,11 @@ mod tests {
             for t in 0..13 * TICKS_PER_DAY {
                 // Un jour de calme d'abord : le domaine se pose au premier tour
                 // de pâture, pas au bout d'une fuite.
-                let menace = t == TICKS_PER_DAY
-                    || (TICKS_PER_DAY..(1 + jours_de_menace) * TICKS_PER_DAY).contains(&t);
+                let menace = t == TICKS_PER_DAY || (TICKS_PER_DAY..(1 + jours_de_menace) * TICKS_PER_DAY).contains(&t);
                 // Harcelé : la menace le suit, toujours du même côté (des
                 // chasseurs qui reviennent depuis leur camp, à l'ouest).
-                let herd_pos = sim
-                    .fauna
-                    .query::<(&Herd, &Position)>()
-                    .iter()
-                    .map(|(_, (_, p))| (p.x, p.y))
-                    .next()
-                    .unwrap();
-                let threats: Vec<(f64, f64)> = if menace {
-                    vec![(herd_pos.0 - 150.0, herd_pos.1)]
-                } else {
-                    vec![]
-                };
+                let herd_pos = sim.fauna.query::<(&Herd, &Position)>().iter().map(|(_, (_, p))| (p.x, p.y)).next().unwrap();
+                let threats: Vec<(f64, f64)> = if menace { vec![(herd_pos.0 - 150.0, herd_pos.1)] } else { vec![] };
                 let time = sim.time;
                 fauna::update_herds(
                     &mut sim.fauna,
@@ -3090,22 +2717,13 @@ mod tests {
                 );
                 sim.time.tick += 1;
             }
-            let herd = sim
-                .fauna
-                .query::<&Herd>()
-                .iter()
-                .map(|(_, h)| *h)
-                .next()
-                .unwrap();
+            let herd = sim.fauna.query::<&Herd>().iter().map(|(_, h)| *h).next().unwrap();
             let domaine = herd.home.unwrap();
             (domaine.0 - center.0).hypot(domaine.1 - center.1)
         };
         let rayon = fauna::Species::Deer.home_range_radius();
         let une_fois = eloignement(0);
-        assert!(
-            une_fois < 0.25 * rayon,
-            "dérangé une fois, il garde son domaine : centre déplacé de {une_fois:.0} tuiles (rayon {rayon:.0})"
-        );
+        assert!(une_fois < 0.25 * rayon, "dérangé une fois, il garde son domaine : centre déplacé de {une_fois:.0} tuiles (rayon {rayon:.0})");
         let sans_cesse = eloignement(10);
         assert!(
             sans_cesse > rayon,
@@ -3139,10 +2757,7 @@ mod tests {
         while sim.world.worldgen().elevation(sx, home.1) > 0.0 && sx < home.0 + 200_000 {
             sx += 8;
         }
-        assert!(
-            sx < home.0 + 200_000,
-            "aucun océan à l'est du foyer (seed atypique)"
-        );
+        assert!(sx < home.0 + 200_000, "aucun océan à l'est du foyer (seed atypique)");
         // Départ sur la terre juste avant le rivage ; cible au-delà de l'eau.
         let start = (sx - 48, home.1);
         let target = (sx + 800, home.1);
@@ -3150,48 +2765,26 @@ mod tests {
             sim.world.worldgen().elevation(start.0, start.1) > 0.0,
             "le départ doit être sur la terre"
         );
-        assert!(
-            straight_blocked(&sim, start, target),
-            "la ligne droite doit être coupée par l'eau"
-        );
+        assert!(straight_blocked(&sim, start, target), "la ligne droite doit être coupée par l'eau");
 
         let id = AgentId(0);
-        let mut pos = Position {
-            x: start.0 as f64 + 0.5,
-            y: start.1 as f64 + 0.5,
-        };
+        let mut pos = Position { x: start.0 as f64 + 0.5, y: start.1 as f64 + 0.5 };
         let origin = (pos.x, pos.y);
         let mut routes: BTreeMap<u64, Route> = BTreeMap::new();
         // Le trajet peut être épuisé avant la fin (on marche désormais à pleine
         // vitesse le long d'un trajet) : on vérifie qu'il a existé.
         let mut routed = false;
         for _ in 0..8 {
-            let mut budget = PathBudget {
-                left: PATH_REQUESTS_PER_TICK,
-                denied: 0,
-            };
-            advance(
-                &mut sim.world,
-                &mut routes,
-                &mut budget,
-                id,
-                &mut pos,
-                target,
-            );
+            let mut budget = PathBudget { left: PATH_REQUESTS_PER_TICK, denied: 0 };
+            advance(&mut sim.world, &mut routes, &mut budget, id, &mut pos, target);
             routed |= routes.contains_key(&id.0);
         }
         assert!(routed, "un trajet A* d'évitement doit être créé");
         let moved = (pos.x - origin.0).hypot(pos.y - origin.1);
-        assert!(
-            moved > 1.0,
-            "l'agent doit s'être déplacé le long de la route ({moved:.1} tuiles)"
-        );
+        assert!(moved > 1.0, "l'agent doit s'être déplacé le long de la route ({moved:.1} tuiles)");
         // Et il reste sur la terre (jamais dans l'eau).
         assert!(
-            sim.world
-                .worldgen()
-                .elevation(pos.x.floor() as i64, pos.y.floor() as i64)
-                > 0.0,
+            sim.world.worldgen().elevation(pos.x.floor() as i64, pos.y.floor() as i64) > 0.0,
             "l'agent ne doit jamais marcher dans l'eau"
         );
     }
@@ -3251,18 +2844,9 @@ mod tests {
         );
         // Et elle se lit : chaque entrée produit une phrase datée et nommée.
         for line in sim.chronicle_tail(20) {
-            assert!(
-                line.starts_with("An "),
-                "chaque entrée s'ouvre sur sa date : {line}"
-            );
-            assert!(
-                line.ends_with('.'),
-                "et se termine comme une phrase : {line}"
-            );
-            assert!(
-                !line.contains("AgentId"),
-                "aucun type Rust ne fuit : {line}"
-            );
+            assert!(line.starts_with("An "), "chaque entrée s'ouvre sur sa date : {line}");
+            assert!(line.ends_with('.'), "et se termine comme une phrase : {line}");
+            assert!(!line.contains("AgentId"), "aucun type Rust ne fuit : {line}");
         }
     }
 
@@ -3301,10 +2885,7 @@ mod tests {
         assert!(
             !sim.chronicle.iter().any(|e| matches!(
                 e.kind,
-                crate::chronicle::EventKind::ClanDissolved {
-                    clan: ClanId(9999),
-                    ..
-                }
+                crate::chronicle::EventKind::ClanDissolved { clan: ClanId(9999), .. }
             )),
             "un clan d'un jour n'a pas d'histoire à clore"
         );
@@ -3318,12 +2899,8 @@ mod tests {
     #[test]
     fn la_population_accumule_des_expositions_en_vivant() {
         let sim = scenario(42, 30, 24 * 20);
-        let total: u32 = sim
-            .agents
-            .query::<&Exposures>()
-            .iter()
-            .map(|(_, e)| e.count())
-            .sum();
+        let total: u32 =
+            sim.agents.query::<&Exposures>().iter().map(|(_, e)| e.count()).sum();
         assert!(
             total > 0,
             "après 20 jours, la population doit avoir vu quelque chose ({total} expositions)"
@@ -3382,10 +2959,7 @@ mod tests {
                  contre {temoin:.0} sans (départ {depart:.0})"
             );
         }
-        assert!(
-            tues > 20.0,
-            "les chasseurs doivent prélever du gibier ({tues:.0} têtes sur 4 seeds)"
-        );
+        assert!(tues > 20.0, "les chasseurs doivent prélever du gibier ({tues:.0} têtes sur 4 seeds)");
     }
 
     #[test]
@@ -3406,9 +2980,7 @@ mod tests {
         for seed in [42u64, 7, 1337, 2024] {
             let (mut sim, _) = scenario_au_foyer(seed, 20, 3);
             for _ in 0..24 * 30 {
-                for (_, (phys, carrying)) in
-                    sim.agents.query_mut::<(&mut Physiology, &mut Carrying)>()
-                {
+                for (_, (phys, carrying)) in sim.agents.query_mut::<(&mut Physiology, &mut Carrying)>() {
                     phys.hunger = phys.hunger.max(0.9);
                     carrying.0 = 0.0;
                 }
@@ -3416,10 +2988,7 @@ mod tests {
             }
             avec_prise += usize::from(sim.hunted_head > 0.0);
         }
-        assert!(
-            avec_prise >= 3,
-            "des affamés près du gibier doivent chasser et tuer ({avec_prise} seeds sur 4)"
-        );
+        assert!(avec_prise >= 3, "des affamés près du gibier doivent chasser et tuer ({avec_prise} seeds sur 4)");
     }
 
     #[test]
@@ -3469,10 +3038,7 @@ mod tests {
     fn deux_seeds_divergent() {
         let a = scenario(42, 30, 24 * 4);
         let b = scenario(43, 30, 24 * 4);
-        assert!(
-            a.population() > 0,
-            "extinction : scénario invalide pour le test"
-        );
+        assert!(a.population() > 0, "extinction : scénario invalide pour le test");
         assert_ne!(fingerprint(&a), fingerprint(&b));
     }
 
@@ -3496,17 +3062,10 @@ mod tests {
         // Grossesse imposée, à terme dans 2 jours : on teste la naissance et
         // l'enfance, pas la rencontre (testée par ailleurs).
         let due = sim.time.tick + 48;
-        let father_traits = Traits {
-            curiosity: 0.9,
-            ..Traits::default()
-        };
+        let father_traits = Traits { curiosity: 0.9, ..Traits::default() };
         for (_, (id, demo)) in sim.agents.query_mut::<(&AgentId, &mut Demographics)>() {
             if *id == mother {
-                demo.pregnancy = Some(Pregnancy {
-                    due_tick: due,
-                    father,
-                    father_traits,
-                });
+                demo.pregnancy = Some(Pregnancy { due_tick: due, father, father_traits });
             }
         }
 
@@ -3523,14 +3082,7 @@ mod tests {
         let mut child = None;
         for (_, (id, pos, kin, traits, demo, phys)) in sim
             .agents
-            .query::<(
-                &AgentId,
-                &Position,
-                &Kinship,
-                &Traits,
-                &Demographics,
-                &Physiology,
-            )>()
+            .query::<(&AgentId, &Position, &Kinship, &Traits, &Demographics, &Physiology)>()
             .iter()
         {
             if *id == mother {
@@ -3558,16 +3110,9 @@ mod tests {
         }
         // Porté : après 6 jours de vie, toujours dans les bras de sa mère.
         let d = (cx - mother_pos.0).hypot(cy - mother_pos.1);
-        assert!(
-            d < 1.0,
-            "le nourrisson doit être porté ({d:.1} tuiles de sa mère)"
-        );
+        assert!(d < 1.0, "le nourrisson doit être porté ({d:.1} tuiles de sa mère)");
         // Allaité : la faim ne s'accumule pas.
-        assert!(
-            phys.hunger < 0.5,
-            "nourrisson affamé ({:.2}) malgré l'allaitement",
-            phys.hunger
-        );
+        assert!(phys.hunger < 0.5, "nourrisson affamé ({:.2}) malgré l'allaitement", phys.hunger);
     }
 
     /// Le revers de l'allaitement : un nourrisson sans mère n'a personne
@@ -3581,10 +3126,7 @@ mod tests {
             home.1 as f64 + 0.5,
             Sex::Male,
             Traits::default(),
-            Kinship {
-                mother: None,
-                father: None,
-            },
+            Kinship { mother: None, father: None },
         );
         for _ in 0..24 * 8 {
             sim.step();
@@ -3617,15 +3159,11 @@ mod tests {
                 home.1 as f64 + 0.5,
                 Sex::Male,
                 Traits::default(),
-                Kinship {
-                    mother: Some(mother),
-                    father: None,
-                },
+                Kinship { mother: Some(mother), father: None },
             );
             let tick = sim.time.tick as i64;
             for (_, (id, demo, phys, behavior)) in
-                sim.agents
-                    .query_mut::<(&AgentId, &mut Demographics, &mut Physiology, &mut Behavior)>()
+                sim.agents.query_mut::<(&AgentId, &mut Demographics, &mut Physiology, &mut Behavior)>()
             {
                 if *id == child {
                     demo.born_tick = tick - 360 * 24;
@@ -3648,21 +3186,12 @@ mod tests {
                 .unwrap()
         };
         let (faim, soif) = apres(Activity::Idle);
-        assert!(
-            faim > 0.45,
-            "une heure de tétée ne couvre plus qu'une part d'une heure de besoin (faim {faim:.3})"
-        );
-        assert!(
-            soif > 0.75,
-            "le lait seul n'étanche plus la soif d'un enfant d'un an (soif {soif:.3})"
-        );
+        assert!(faim > 0.45, "une heure de tétée ne couvre plus qu'une part d'une heure de besoin (faim {faim:.3})");
+        assert!(soif > 0.75, "le lait seul n'étanche plus la soif d'un enfant d'un an (soif {soif:.3})");
         let (_, soif) = apres(Activity::Drinking);
         assert_eq!(soif, 0.0, "quand sa mère boit, il boit");
         let (faim, _) = apres(Activity::Eating);
-        assert!(
-            faim < 0.1,
-            "quand sa mère mange, elle lui donne un repas à sa faim (faim {faim:.3})"
-        );
+        assert!(faim < 0.1, "quand sa mère mange, elle lui donne un repas à sa faim (faim {faim:.3})");
     }
 
     /// MOR-4, débat du 2026-10-17 : l'enfant ne boit que si sa mère a vraiment
@@ -3678,15 +3207,11 @@ mod tests {
                 home.1 as f64 + 0.5,
                 Sex::Male,
                 Traits::default(),
-                Kinship {
-                    mother: Some(mother),
-                    father: None,
-                },
+                Kinship { mother: Some(mother), father: None },
             );
             let tick = sim.time.tick as i64;
             for (_, (id, demo, phys, behavior)) in
-                sim.agents
-                    .query_mut::<(&AgentId, &mut Demographics, &mut Physiology, &mut Behavior)>()
+                sim.agents.query_mut::<(&AgentId, &mut Demographics, &mut Physiology, &mut Behavior)>()
             {
                 if *id == child {
                     demo.born_tick = tick - 360 * 24;
@@ -3698,22 +3223,10 @@ mod tests {
                 }
             }
             demography::nurse_infants(&mut sim);
-            sim.agents
-                .query::<(&AgentId, &Physiology)>()
-                .iter()
-                .find(|(_, (id, _))| **id == child)
-                .map(|(_, (_, p))| p.thirst)
-                .unwrap()
+            sim.agents.query::<(&AgentId, &Physiology)>().iter().find(|(_, (id, _))| **id == child).map(|(_, (_, p))| p.thirst).unwrap()
         };
-        assert_eq!(
-            soif_enfant(0.0),
-            0.0,
-            "la mère a bu à l'eau douce : l'enfant boit"
-        );
-        assert!(
-            soif_enfant(0.6) > 0.7,
-            "la mère n'est pas désaltérée : l'enfant non plus"
-        );
+        assert_eq!(soif_enfant(0.0), 0.0, "la mère a bu à l'eau douce : l'enfant boit");
+        assert!(soif_enfant(0.6) > 0.7, "la mère n'est pas désaltérée : l'enfant non plus");
     }
 
     #[test]
@@ -3726,10 +3239,7 @@ mod tests {
                 home.1 as f64 + 0.5,
                 Sex::Male,
                 Traits::default(),
-                Kinship {
-                    mother: Some(mother),
-                    father: None,
-                },
+                Kinship { mother: Some(mother), father: None },
             );
             for _ in 0..48 {
                 // La mère a très faim (au-dessus de l'ancien seuil) ; ses
@@ -3759,15 +3269,9 @@ mod tests {
                 .unwrap()
         };
         let reserves = infant_thirst_after(false);
-        assert!(
-            reserves < 0.3,
-            "une mère affamée mais pas épuisée allaite encore ({reserves:.2})"
-        );
+        assert!(reserves < 0.3, "une mère affamée mais pas épuisée allaite encore ({reserves:.2})");
         let epuisee = infant_thirst_after(true);
-        assert!(
-            epuisee > reserves + 0.3,
-            "une mère épuisée par la famine n'a presque plus de lait ({epuisee:.2})"
-        );
+        assert!(epuisee > reserves + 0.3, "une mère épuisée par la famine n'a presque plus de lait ({epuisee:.2})");
     }
 
     /// La proximité de parenté : sœur 0,5, grand-mère et tante 0,25, cousine
@@ -3777,9 +3281,7 @@ mod tests {
     fn la_proximite_de_parente_se_lit_dans_les_naissances() {
         // 1 et 2 ont deux enfants, 10 et 11 ; 10 et 20 ont 30 ; 11 et 21 ont 31.
         let parents: BTreeMap<u64, (u64, u64)> =
-            [(10, (1, 2)), (11, (1, 2)), (30, (10, 20)), (31, (11, 21))]
-                .into_iter()
-                .collect();
+            [(10, (1, 2)), (11, (1, 2)), (30, (10, 20)), (31, (11, 21))].into_iter().collect();
         let k = |a, b| demography::kin_closeness(&parents, a, b);
         assert_eq!(k(10, 11), 0.5, "sœurs");
         assert_eq!(k(1, 30), 0.25, "grand-mère");
@@ -3805,34 +3307,18 @@ mod tests {
                 }
             }
             if sisters {
-                sim.births.push(BirthRecord {
-                    tick: 0,
-                    mother: dead_mother,
-                    father,
-                    child: woman,
-                });
+                sim.births.push(BirthRecord { tick: 0, mother: dead_mother, father, child: woman });
             }
-            let own = Kinship {
-                mother: Some(woman),
-                father: None,
-            };
+            let own = Kinship { mother: Some(woman), father: None };
             sim.spawn_child(at.0, at.1, Sex::Male, Traits::default(), own);
             let orphan = sim.spawn_child(
                 at.0,
                 at.1,
                 Sex::Female,
                 Traits::default(),
-                Kinship {
-                    mother: Some(dead_mother),
-                    father: Some(father),
-                },
+                Kinship { mother: Some(dead_mother), father: Some(father) },
             );
-            sim.births.push(BirthRecord {
-                tick: 0,
-                mother: dead_mother,
-                father,
-                child: orphan,
-            });
+            sim.births.push(BirthRecord { tick: 0, mother: dead_mother, father, child: orphan });
             orphans.push(orphan);
         }
         (sim, orphans)
@@ -3851,32 +3337,18 @@ mod tests {
                 sim.time.tick = day * cairn_core::TICKS_PER_DAY;
                 demography::adopt_orphans(&mut sim);
             }
-            orphans
-                .iter()
-                .filter(|o| sim.fosters.contains_key(&o.0))
-                .count()
+            orphans.iter().filter(|o| sim.fosters.contains_key(&o.0)).count()
         };
         let (soeurs, etrangeres) = (adopted(true), adopted(false));
-        assert!(
-            soeurs >= 14,
-            "des grandes sœurs qui allaitent prennent presque tous les orphelins ({soeurs}/20)"
-        );
-        assert!(
-            etrangeres <= 4,
-            "des étrangères n'en prennent presque aucun ({etrangeres}/20)"
-        );
+        assert!(soeurs >= 14, "des grandes sœurs qui allaitent prennent presque tous les orphelins ({soeurs}/20)");
+        assert!(etrangeres <= 4, "des étrangères n'en prennent presque aucun ({etrangeres}/20)");
     }
 
     /// Pris par une femme qui allaite, l'orphelin est porté et nourri, et vit.
     #[test]
     fn un_orphelin_pris_par_une_femme_qui_allaite_survit() {
         let (mut sim, orphans) = orphans_with_nursing_women(true, 1);
-        let woman = sim
-            .births
-            .iter()
-            .find(|b| b.child != orphans[0])
-            .map(|b| b.child)
-            .unwrap();
+        let woman = sim.births.iter().find(|b| b.child != orphans[0]).map(|b| b.child).unwrap();
         sim.fosters.insert(orphans[0].0, woman);
         for _ in 0..24 * 8 {
             sim.step();
@@ -3932,10 +3404,7 @@ mod tests {
             home.1 as f64 + 0.5,
             Sex::Female,
             Traits::default(),
-            Kinship {
-                mother: Some(mother),
-                father: None,
-            },
+            Kinship { mother: Some(mother), father: None },
         );
         // Vieilli à 8 ans : un enfant autonome (marche, cueille) mais pas un
         // adulte — c'est lui qui a le candidat « suivre son parent ».
@@ -3959,12 +3428,8 @@ mod tests {
                 for (_, (id, pos)) in sim.agents.query::<(&AgentId, &Position)>().iter() {
                     positions.insert(id.0, (pos.x, pos.y));
                 }
-                let m = positions
-                    .get(&mother.0)
-                    .expect("mère morte : scénario invalide");
-                let c = positions
-                    .get(&child.0)
-                    .expect("enfant mort : scénario invalide");
+                let m = positions.get(&mother.0).expect("mère morte : scénario invalide");
+                let c = positions.get(&child.0).expect("enfant mort : scénario invalide");
                 distances.push((c.0 - m.0).hypot(c.1 - m.1));
             }
         }
@@ -3989,10 +3454,7 @@ mod tests {
         for _ in 0..24 * 10 {
             sim.step();
             for (_, (id, pos)) in sim.agents.query::<(&AgentId, &Position)>().iter() {
-                stepped
-                    .entry(id.0)
-                    .or_default()
-                    .insert(crate::memory::cell_of(pos.tile()));
+                stepped.entry(id.0).or_default().insert(crate::memory::cell_of(pos.tile()));
             }
         }
         let mut checked = 0;
@@ -4010,10 +3472,7 @@ mod tests {
             spring_seen += mem.springs.len();
         }
         assert!(checked > 0, "population disparue : scénario invalide");
-        assert!(
-            spring_seen > 0,
-            "personne n'a mémorisé la moindre source en 10 jours ?"
-        );
+        assert!(spring_seen > 0, "personne n'a mémorisé la moindre source en 10 jours ?");
         // Chaque source mémorisée est une vraie source (eau douce à la tuile).
         let springs: Vec<(u64, (i64, i64))> = sim
             .agents
@@ -4033,10 +3492,7 @@ mod tests {
             .query::<(&Traits, &Skills)>()
             .iter()
             .any(|(_, (t, s))| s.foraging > 0.5 * crate::skills::forage_cap(t) + 1e-4);
-        assert!(
-            progressed,
-            "10 jours de cueillette doivent forger la compétence"
-        );
+        assert!(progressed, "10 jours de cueillette doivent forger la compétence");
     }
 
     /// Critère : « deux groupes qui se rencontrent échangent de l'information
@@ -4099,18 +3555,11 @@ mod tests {
             }
             let (mut curious, mut dull) = ((0usize, 0usize), (0usize, 0usize));
             for (_, (id, mem)) in sim.agents.query::<(&AgentId, &Memory)>().iter() {
-                let bucket = if id.0 % 2 == 0 {
-                    &mut curious
-                } else {
-                    &mut dull
-                };
+                let bucket = if id.0 % 2 == 0 { &mut curious } else { &mut dull };
                 bucket.0 += mem.known.len();
                 bucket.1 += 1;
             }
-            assert!(
-                curious.1 > 0 && dull.1 > 0,
-                "un groupe s'est éteint : scénario invalide"
-            );
+            assert!(curious.1 > 0 && dull.1 > 0, "un groupe s'est éteint : scénario invalide");
             let mean_curious = curious.0 as f64 / curious.1 as f64;
             let mean_dull = dull.0 as f64 / dull.1 as f64;
             assert!(
@@ -4132,10 +3581,8 @@ mod tests {
             for _ in 0..24 {
                 sim.step();
             }
-            if let Some(e) = sim
-                .clan_events
-                .iter()
-                .find(|e| e.kind == social::ClanEventKind::Formed)
+            if let Some(e) =
+                sim.clan_events.iter().find(|e| e.kind == social::ClanEventKind::Formed)
             {
                 return Some(e.clan);
             }
@@ -4183,29 +3630,18 @@ mod tests {
     #[test]
     fn un_clan_s_efface_quand_ses_membres_disparaissent() {
         let (mut sim, _) = scenario_setup(42, 24, 0);
-        let clan_id =
-            run_until_clan_formed(&mut sim, 40).expect("scénario invalide : aucun clan formé");
-        assert!(
-            sim.clans.iter().any(|c| c.id == clan_id),
-            "le clan tout juste formé doit exister"
-        );
+        let clan_id = run_until_clan_formed(&mut sim, 40).expect("scénario invalide : aucun clan formé");
+        assert!(sim.clans.iter().any(|c| c.id == clan_id), "le clan tout juste formé doit exister");
 
-        let victims: Vec<hecs::Entity> = sim
-            .agents
-            .query::<&AgentId>()
-            .iter()
-            .map(|(e, _)| e)
-            .collect();
+        let victims: Vec<hecs::Entity> =
+            sim.agents.query::<&AgentId>().iter().map(|(e, _)| e).collect();
         for e in victims {
             let _ = sim.agents.despawn(e);
         }
         for _ in 0..24 {
             sim.step();
         }
-        assert!(
-            sim.clans.is_empty(),
-            "sans le moindre membre, le clan ne peut plus être détecté"
-        );
+        assert!(sim.clans.is_empty(), "sans le moindre membre, le clan ne peut plus être détecté");
         assert!(
             sim.clan_events
                 .iter()
@@ -4230,13 +3666,7 @@ mod tests {
         let fingerprint = |sim: &Sim| -> Vec<(u64, u64, Vec<u64>)> {
             sim.clans
                 .iter()
-                .map(|c| {
-                    (
-                        c.id.0,
-                        c.founded_tick,
-                        c.members.iter().map(|m| m.0).collect(),
-                    )
-                })
+                .map(|c| (c.id.0, c.founded_tick, c.members.iter().map(|m| m.0).collect()))
                 .collect()
         };
         assert_eq!(fingerprint(&a), fingerprint(&b));
@@ -4282,11 +3712,7 @@ mod tests {
             for _ in 0..24 * 20 {
                 sim.step();
             }
-            let clan = sim
-                .clans
-                .first()
-                .cloned()
-                .expect("le clan doit exister à 60 j (40 + 20)");
+            let clan = sim.clans.first().cloned().expect("le clan doit exister à 60 j (40 + 20)");
             let spread_60d = clan_spread(&sim, &clan);
             for _ in 0..24 * 40 {
                 sim.step();
@@ -4321,28 +3747,14 @@ mod tests {
     fn une_chasse_fructueuse_charge_le_surplus_porte() {
         let mut sim = Sim::new(WorldSeed(42), 512);
         let home = find_land(&sim);
-        let mut pos = Position {
-            x: home.0 as f64 + 0.5,
-            y: home.1 as f64 + 0.5,
-        };
-        let mut phys = Physiology {
-            hunger: 0.3,
-            ..Physiology::default()
-        };
-        let mut behavior = Behavior {
-            task: Some(Task {
-                kind: TaskKind::Hunt,
-                target: home,
-            }),
-            ..Behavior::default()
-        };
+        let mut pos = Position { x: home.0 as f64 + 0.5, y: home.1 as f64 + 0.5 };
+        let mut phys = Physiology { hunger: 0.3, ..Physiology::default() };
+        let mut behavior =
+            Behavior { task: Some(Task { kind: TaskKind::Hunt, target: home }), ..Behavior::default() };
         let traits = Traits::default();
         let mut skills = Skills::default();
         let mut routes: BTreeMap<u64, Route> = BTreeMap::new();
-        let mut budget = PathBudget {
-            left: PATH_REQUESTS_PER_TICK,
-            denied: 0,
-        };
+        let mut budget = PathBudget { left: PATH_REQUESTS_PER_TICK, denied: 0 };
         let clan_id = social::ClanId(3);
         let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::new();
         let mut carrying = Carrying::default();
@@ -4350,13 +3762,14 @@ mod tests {
         let mut structures: Vec<Structure> = Vec::new();
         // Le troupeau est juste sous la main : cette scène teste la
         // mécanique de mise à mort, pas l'approche.
-        let herd = HerdView {
-            entity: hecs::Entity::DANGLING,
-            pos: (pos.x, pos.y),
-            population: 20.0,
-            species: fauna::Species::Deer,
-            tameness: 0.0,
-        };
+        let herd =
+            HerdView {
+                entity: hecs::Entity::DANGLING,
+                pos: (pos.x, pos.y),
+                population: 20.0,
+                species: fauna::Species::Deer,
+                tameness: 0.0,
+            };
 
         let mut shares = Vec::new();
         let tick = tick_de_prise(&sim, AgentId(0), skills.hunting);
@@ -4387,14 +3800,8 @@ mod tests {
             1.0,
         );
 
-        assert!(
-            kill.is_some(),
-            "le troupeau est à portée : la chasse doit réussir"
-        );
-        assert!(
-            phys.hunger < 1e-6,
-            "la faim doit être totalement comblée (nutrition > faim initiale)"
-        );
+        assert!(kill.is_some(), "le troupeau est à portée : la chasse doit réussir");
+        assert!(phys.hunger < 1e-6, "la faim doit être totalement comblée (nutrition > faim initiale)");
         assert!(
             carrying.0 > 0.0,
             "le surplus (nutrition au-delà de la faim comblée) doit être porté par le chasseur"
@@ -4432,25 +3839,11 @@ mod tests {
                     ph.hunger = 0.8;
                 }
             }
-            let mut pos = Position {
-                x: home.0 as f64 + 0.5,
-                y: home.1 as f64 + 0.5,
-            };
-            let mut phys = Physiology {
-                hunger: 0.3,
-                ..Physiology::default()
-            };
-            let mut behavior = Behavior {
-                task: Some(Task {
-                    kind: TaskKind::Hunt,
-                    target: home,
-                }),
-                ..Behavior::default()
-            };
-            let traits = Traits {
-                sociability,
-                ..Traits::default()
-            };
+            let mut pos = Position { x: home.0 as f64 + 0.5, y: home.1 as f64 + 0.5 };
+            let mut phys = Physiology { hunger: 0.3, ..Physiology::default() };
+            let mut behavior =
+                Behavior { task: Some(Task { kind: TaskKind::Hunt, target: home }), ..Behavior::default() };
+            let traits = Traits { sociability, ..Traits::default() };
             let herd = HerdView {
                 entity: hecs::Entity::DANGLING,
                 pos: (pos.x, pos.y),
@@ -4461,33 +3854,11 @@ mod tests {
             let tick = tick_de_prise(&sim, AgentId(9_999), Skills::default().hunting);
             let mut shares = Vec::new();
             execute(
-                &mut sim.world,
-                &mut BTreeMap::new(),
-                &mut PathBudget {
-                    left: PATH_REQUESTS_PER_TICK,
-                    denied: 0,
-                },
-                AgentId(9_999),
-                &mut pos,
-                &mut phys,
-                &mut behavior,
-                &[herd],
-                &[],
-                &[],
-                1.0,
-                &traits,
-                &mut Skills::default(),
-                None,
-                &mut BTreeMap::new(),
-                &mut Carrying::default(),
-                &mut Prestige::default(),
-                &mut Vec::new(),
-                &mut Vec::new(),
-                &mut Vec::new(),
-                &mut shares,
-                &mut crate::yields::Yields::default(),
-                tick,
-                1.0,
+                &mut sim.world, &mut BTreeMap::new(), &mut PathBudget { left: PATH_REQUESTS_PER_TICK, denied: 0 },
+                AgentId(9_999), &mut pos, &mut phys, &mut behavior, &[herd], &[], &[], 1.0,
+                &traits, &mut Skills::default(), None, &mut BTreeMap::new(),
+                &mut Carrying::default(), &mut Prestige::default(), &mut Vec::new(),
+                &mut Vec::new(), &mut Vec::new(), &mut shares, &mut crate::yields::Yields::default(), tick, 1.0,
             );
             resolve_shares(&mut sim, &shares);
             sim.agents
@@ -4499,14 +3870,8 @@ mod tests {
         };
         let solitaire = voisin_apres(0.0);
         let sociable = voisin_apres(1.0);
-        assert!(
-            (solitaire - 0.8).abs() < 1e-6,
-            "un solitaire ne partage pas (faim du voisin {solitaire:.2})"
-        );
-        assert!(
-            sociable < 0.05,
-            "un chasseur sociable doit rassasier son voisin (faim restante {sociable:.2})"
-        );
+        assert!((solitaire - 0.8).abs() < 1e-6, "un solitaire ne partage pas (faim du voisin {solitaire:.2})");
+        assert!(sociable < 0.05, "un chasseur sociable doit rassasier son voisin (faim restante {sociable:.2})");
     }
 
     /// D10, la conservation : le stock du clan n'a plus de plafond, il
@@ -4517,16 +3882,8 @@ mod tests {
     #[test]
     fn le_stock_du_clan_pourrit_au_lieu_d_etre_plafonne() {
         let (mut sim, home) = scenario_setup(3, 2, 0);
-        let members: Vec<AgentId> = sim
-            .agents
-            .query::<&AgentId>()
-            .iter()
-            .map(|(_, id)| *id)
-            .collect();
-        for (_, (phys, membership)) in sim
-            .agents
-            .query_mut::<(&mut Physiology, &mut ClanMembership)>()
-        {
+        let members: Vec<AgentId> = sim.agents.query::<&AgentId>().iter().map(|(_, id)| *id).collect();
+        for (_, (phys, membership)) in sim.agents.query_mut::<(&mut Physiology, &mut ClanMembership)>() {
             phys.hunger = 0.0; // repus : personne ne puise
             membership.0 = Some(social::ClanId(1));
         }
@@ -4544,12 +3901,7 @@ mod tests {
         for _ in 0..20 {
             sim.step();
         }
-        let stock = sim
-            .clans
-            .iter()
-            .find(|c| c.id == social::ClanId(1))
-            .unwrap()
-            .stock;
+        let stock = sim.clans.iter().find(|c| c.id == social::ClanId(1)).unwrap().stock;
         assert!(
             (20.0..26.0).contains(&stock),
             "30 points de stock deviennent {stock:.1} en 20 heures (attendu ~22,7 : un pourrissement, pas un plafond)"
@@ -4563,19 +3915,10 @@ mod tests {
     #[test]
     fn un_clan_qui_sait_conserver_garde_sa_reserve() {
         let (mut sim, home) = scenario_setup(3, 2, 0);
-        let preservation = sim
-            .tech_tree
-            .id_of("preservation")
-            .expect("la conservation doit exister");
-        let members: Vec<AgentId> = sim
-            .agents
-            .query::<&AgentId>()
-            .iter()
-            .map(|(_, id)| *id)
-            .collect();
+        let preservation = sim.tech_tree.id_of("preservation").expect("la conservation doit exister");
+        let members: Vec<AgentId> = sim.agents.query::<&AgentId>().iter().map(|(_, id)| *id).collect();
         for (_, (phys, membership, know)) in
-            sim.agents
-                .query_mut::<(&mut Physiology, &mut ClanMembership, &mut Knowledge)>()
+            sim.agents.query_mut::<(&mut Physiology, &mut ClanMembership, &mut Knowledge)>()
         {
             phys.hunger = 0.0;
             membership.0 = Some(social::ClanId(1));
@@ -4600,17 +3943,8 @@ mod tests {
             }
             sim.step();
         }
-        let stock = sim
-            .clans
-            .iter()
-            .find(|c| c.id == social::ClanId(1))
-            .unwrap()
-            .stock;
-        assert!(
-            stock > 29.5,
-            "un clan qui sait conserver perd {:.1} points sur 30 en 20 heures",
-            30.0 - stock
-        );
+        let stock = sim.clans.iter().find(|c| c.id == social::ClanId(1)).unwrap().stock;
+        assert!(stock > 29.5, "un clan qui sait conserver perd {:.1} points sur 30 en 20 heures", 30.0 - stock);
     }
 
     /// D10, pister : aucun troupeau à vue, mais un souvenir récent d'en avoir
@@ -4620,13 +3954,7 @@ mod tests {
     fn un_affame_qui_se_souvient_du_gibier_part_le_pister() {
         let candidats = |souvenir: bool| -> bool {
             let (mut sim, home) = scenario_setup(5, 1, 0);
-            let id = sim
-                .agents
-                .query::<&AgentId>()
-                .iter()
-                .map(|(_, a)| *a)
-                .next()
-                .unwrap();
+            let id = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).next().unwrap();
             sim.time.tick = 12; // midi (CHA-2b) : de nuit, une piste ne se lit pas
             let tick = sim.time.tick;
             for (_, (phys, mem)) in sim.agents.query_mut::<(&mut Physiology, &mut Memory)>() {
@@ -4635,16 +3963,10 @@ mod tests {
                     mem.game = Some(((home.0 + 2_000, home.1), tick));
                 }
             }
-            sim.inspect_agent(id)
-                .unwrap()
-                .iter()
-                .any(|m| m.kind == TaskKind::Track)
+            sim.inspect_agent(id).unwrap().iter().any(|m| m.kind == TaskKind::Track)
         };
         assert!(!candidats(false), "sans souvenir, rien ne dit où pister");
-        assert!(
-            candidats(true),
-            "un affamé qui se souvient d'un troupeau doit envisager de le pister"
-        );
+        assert!(candidats(true), "un affamé qui se souvient d'un troupeau doit envisager de le pister");
     }
 
     /// CHA-2b : une piste ne se lit pas dans le noir. De nuit, un affamé qui se
@@ -4653,13 +3975,7 @@ mod tests {
     #[test]
     fn le_pisteur_s_arrete_a_la_nuit() {
         let (mut sim, home) = scenario_setup(5, 1, 0);
-        let id = sim
-            .agents
-            .query::<&AgentId>()
-            .iter()
-            .map(|(_, a)| *a)
-            .next()
-            .unwrap();
+        let id = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).next().unwrap();
         // Minuit, et un tick où l'agent ne délibère pas : seule l'exécution joue.
         let mut tick = 10 * TICKS_PER_DAY;
         while (tick + 1).wrapping_add(id.0) % brain::DELIBERATION_PERIOD == 0 {
@@ -4667,40 +3983,19 @@ mod tests {
         }
         sim.time.tick = tick;
         let spot = (home.0 + 2_000, home.1);
-        for (_, (phys, mem, behavior)) in sim
-            .agents
-            .query_mut::<(&mut Physiology, &mut Memory, &mut Behavior)>()
-        {
+        for (_, (phys, mem, behavior)) in sim.agents.query_mut::<(&mut Physiology, &mut Memory, &mut Behavior)>() {
             phys.hunger = 0.8;
             mem.game = Some((spot, tick));
-            behavior.task = Some(Task {
-                kind: TaskKind::Track,
-                target: spot,
-            });
+            behavior.task = Some(Task { kind: TaskKind::Track, target: spot });
         }
         assert!(
-            !sim.inspect_agent(id)
-                .unwrap()
-                .iter()
-                .any(|m| m.kind == TaskKind::Track),
+            !sim.inspect_agent(id).unwrap().iter().any(|m| m.kind == TaskKind::Track),
             "de nuit, pister ne doit pas être envisagé"
         );
         sim.step();
-        let (behavior, mem) = sim
-            .agents
-            .query_mut::<(&Behavior, &Memory)>()
-            .into_iter()
-            .next()
-            .map(|(_, b)| b)
-            .unwrap();
-        assert!(
-            behavior.task.is_none_or(|t| t.kind != TaskKind::Track),
-            "la nuit tombée, le pisteur s'arrête"
-        );
-        assert!(
-            mem.game.is_some(),
-            "le souvenir de la piste reste pour le matin"
-        );
+        let (behavior, mem) = sim.agents.query_mut::<(&Behavior, &Memory)>().into_iter().next().map(|(_, b)| b).unwrap();
+        assert!(behavior.task.is_none_or(|t| t.kind != TaskKind::Track), "la nuit tombée, le pisteur s'arrête");
+        assert!(mem.game.is_some(), "le souvenir de la piste reste pour le matin");
     }
 
     /// D10, pister (suite) : le souvenir d'un troupeau survit à sa sortie du
@@ -4718,17 +4013,8 @@ mod tests {
             phys.hunger = 0.8;
         }
         sim.step(); // délibération : le troupeau est vu
-        let seen = sim
-            .agents
-            .query::<&Memory>()
-            .iter()
-            .next()
-            .map(|(_, m)| m.game)
-            .unwrap();
-        assert!(
-            seen.is_some(),
-            "un troupeau à 1,5 km doit être aperçu et retenu"
-        );
+        let seen = sim.agents.query::<&Memory>().iter().next().map(|(_, m)| m.game).unwrap();
+        assert!(seen.is_some(), "un troupeau à 1,5 km doit être aperçu et retenu");
         for (_, (id, pos)) in sim.fauna.query_mut::<(&FaunaId, &mut Position)>() {
             if *id == herd {
                 pos.x += 5_000.0; // parti à 10 km
@@ -4737,17 +4023,8 @@ mod tests {
         for _ in 0..8 {
             sim.step();
         }
-        let kept = sim
-            .agents
-            .query::<&Memory>()
-            .iter()
-            .next()
-            .map(|(_, m)| m.game)
-            .unwrap();
-        assert!(
-            kept.is_some(),
-            "le souvenir du troupeau a disparu dès qu'il est sorti du champ de vue"
-        );
+        let kept = sim.agents.query::<&Memory>().iter().next().map(|(_, m)| m.game).unwrap();
+        assert!(kept.is_some(), "le souvenir du troupeau a disparu dès qu'il est sorti du champ de vue");
     }
 
     /// D10, garder sa prise : un chasseur sans clan ne jette plus ce qu'il ne
@@ -4758,19 +4035,10 @@ mod tests {
     fn un_chasseur_sans_clan_garde_sa_prise_et_la_mange_plus_tard() {
         let mut sim = Sim::new(WorldSeed(42), 512);
         let home = find_land(&sim);
-        let mut pos = Position {
-            x: home.0 as f64 + 0.5,
-            y: home.1 as f64 + 0.5,
-        };
-        let mut phys = Physiology {
-            hunger: 0.3,
-            ..Physiology::default()
-        };
+        let mut pos = Position { x: home.0 as f64 + 0.5, y: home.1 as f64 + 0.5 };
+        let mut phys = Physiology { hunger: 0.3, ..Physiology::default() };
         let mut carrying = Carrying::default();
-        let traits = Traits {
-            sociability: 0.0,
-            ..Traits::default()
-        };
+        let traits = Traits { sociability: 0.0, ..Traits::default() };
         let herd = HerdView {
             entity: hecs::Entity::DANGLING,
             pos: (pos.x, pos.y),
@@ -4779,70 +4047,23 @@ mod tests {
             tameness: 0.0,
         };
         let tick = tick_de_prise(&sim, AgentId(0), Skills::default().hunting);
-        let mut run = |task: Option<Task>,
-                       phys: &mut Physiology,
-                       carrying: &mut Carrying,
-                       pos: &mut Position| {
-            let mut behavior = Behavior {
-                task,
-                ..Behavior::default()
-            };
+        let mut run = |task: Option<Task>, phys: &mut Physiology, carrying: &mut Carrying, pos: &mut Position| {
+            let mut behavior = Behavior { task, ..Behavior::default() };
             execute(
-                &mut sim.world,
-                &mut BTreeMap::new(),
-                &mut PathBudget {
-                    left: PATH_REQUESTS_PER_TICK,
-                    denied: 0,
-                },
-                AgentId(0),
-                pos,
-                phys,
-                &mut behavior,
-                &[herd],
-                &[],
-                &[],
-                1.0,
-                &traits,
-                &mut Skills::default(),
-                None,
-                &mut BTreeMap::new(),
-                carrying,
-                &mut Prestige::default(),
-                &mut Vec::new(),
-                &mut Vec::new(),
-                &mut Vec::new(),
-                &mut Vec::new(),
-                &mut crate::yields::Yields::default(),
-                tick,
-                1.0,
+                &mut sim.world, &mut BTreeMap::new(), &mut PathBudget { left: PATH_REQUESTS_PER_TICK, denied: 0 },
+                AgentId(0), pos, phys, &mut behavior, &[herd], &[], &[], 1.0, &traits,
+                &mut Skills::default(), None, &mut BTreeMap::new(), carrying,
+                &mut Prestige::default(), &mut Vec::new(), &mut Vec::new(), &mut Vec::new(),
+                &mut Vec::new(), &mut crate::yields::Yields::default(), tick, 1.0,
             );
         };
-        run(
-            Some(Task {
-                kind: TaskKind::Hunt,
-                target: home,
-            }),
-            &mut phys,
-            &mut carrying,
-            &mut pos,
-        );
-        assert!(
-            carrying.0 > 5.0,
-            "sans clan, le chasseur doit garder sa prise ({:.2} porté)",
-            carrying.0
-        );
+        run(Some(Task { kind: TaskKind::Hunt, target: home }), &mut phys, &mut carrying, &mut pos);
+        assert!(carrying.0 > 5.0, "sans clan, le chasseur doit garder sa prise ({:.2} porté)", carrying.0);
         phys.hunger = 0.8;
         let porte = carrying.0;
         run(None, &mut phys, &mut carrying, &mut pos);
-        assert!(
-            phys.hunger < 0.1,
-            "affamé, il mange ce qu'il porte (faim restante {:.2})",
-            phys.hunger
-        );
-        assert!(
-            carrying.0 < porte,
-            "ce qu'il a mangé sort de ce qu'il porte"
-        );
+        assert!(phys.hunger < 0.1, "affamé, il mange ce qu'il porte (faim restante {:.2})", phys.hunger);
+        assert!(carrying.0 < porte, "ce qu'il a mangé sort de ce qu'il porte");
     }
 
     /// MAR-6a, le choix suit le rendement appris : deux adultes sans clan,
@@ -4855,17 +4076,8 @@ mod tests {
             let (mut sim, home) = scenario_setup(5, 1, 0);
             sim.time.tick = 12;
             sim.spawn_herd(home.0 as f64 + 300.0, home.1 as f64, 30.0);
-            let id = sim
-                .agents
-                .query::<&AgentId>()
-                .iter()
-                .map(|(_, a)| *a)
-                .next()
-                .unwrap();
-            for (_, (phys, yields)) in sim
-                .agents
-                .query_mut::<(&mut Physiology, &mut crate::yields::Yields)>()
-            {
+            let id = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).next().unwrap();
+            for (_, (phys, yields)) in sim.agents.query_mut::<(&mut Physiology, &mut crate::yields::Yields)>() {
                 phys.hunger = 0.5;
                 if appris {
                     for _ in 0..100 {
@@ -4883,10 +4095,7 @@ mod tests {
                 .map_or(0.0, |m| m.score)
         };
         let (naif, averti) = (score(false), score(true));
-        assert!(
-            naif > 0.0,
-            "un affamé, un troupeau à vue : il doit envisager la chasse"
-        );
+        assert!(naif > 0.0, "un affamé, un troupeau à vue : il doit envisager la chasse");
         assert!(
             averti < 0.5 * naif,
             "la chasse lui rapporte le quart de la cueillette, il la pèse pourtant {averti:.3} contre {naif:.3}"
@@ -4902,15 +4111,8 @@ mod tests {
             let (mut sim, home) = scenario_setup(5, 1, 0);
             sim.time.tick = 12; // midi (MAR-2) : de nuit, le troupeau n'est pas à vue
             sim.spawn_herd(home.0 as f64 + 300.0, home.1 as f64, 30.0);
-            let id = sim
-                .agents
-                .query::<&AgentId>()
-                .iter()
-                .map(|(_, a)| *a)
-                .next()
-                .unwrap();
-            for (_, (phys, carrying)) in sim.agents.query_mut::<(&mut Physiology, &mut Carrying)>()
-            {
+            let id = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).next().unwrap();
+            for (_, (phys, carrying)) in sim.agents.query_mut::<(&mut Physiology, &mut Carrying)>() {
                 phys.hunger = 0.5;
                 carrying.0 = porte;
             }
@@ -4921,10 +4123,7 @@ mod tests {
                 .map_or(0.0, |m| m.score)
         };
         let (demuni, pourvu) = (score(0.0), score(5.0));
-        assert!(
-            demuni > 0.0,
-            "un affamé sans viande, un troupeau à vue : il doit envisager la chasse"
-        );
+        assert!(demuni > 0.0, "un affamé sans viande, un troupeau à vue : il doit envisager la chasse");
         assert!(
             pourvu < 0.3 * demuni,
             "qui porte cinq points de viande chasse presque autant ({pourvu:.3}) qu'un démuni ({demuni:.3})"
@@ -4940,17 +4139,8 @@ mod tests {
     fn un_affame_d_un_clan_part_en_quete_sur_le_territoire() {
         let quete = |faim: f32, avec_clan: bool, reserve: f32| -> Option<(f32, f64)> {
             let (mut sim, home) = scenario_au_foyer(5, 1, 0);
-            let id = sim
-                .agents
-                .query::<&AgentId>()
-                .iter()
-                .map(|(_, a)| *a)
-                .next()
-                .unwrap();
-            for (_, (phys, membership)) in sim
-                .agents
-                .query_mut::<(&mut Physiology, &mut ClanMembership)>()
-            {
+            let id = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).next().unwrap();
+            for (_, (phys, membership)) in sim.agents.query_mut::<(&mut Physiology, &mut ClanMembership)>() {
                 phys.hunger = faim;
                 if avec_clan {
                     membership.0 = Some(social::ClanId(1));
@@ -4973,12 +4163,7 @@ mod tests {
             let mut best: Option<(f32, f64)> = None;
             for t in 0..8 {
                 sim.time.tick = t * 4;
-                if let Some(m) = sim
-                    .inspect_agent(id)
-                    .unwrap()
-                    .iter()
-                    .find(|m| m.kind == TaskKind::SeekGame)
-                {
+                if let Some(m) = sim.inspect_agent(id).unwrap().iter().find(|m| m.kind == TaskKind::SeekGame) {
                     let d = ((m.target.0 - home.0) as f64).hypot((m.target.1 - home.1) as f64);
                     let km = cairn_core::tiles_to_km(d);
                     if best.is_none_or(|(_, b)| km > b) {
@@ -4988,24 +4173,14 @@ mod tests {
             }
             best
         };
-        let (affame, loin) = quete(0.9, true, 0.0)
-            .expect("un affamé d'un clan, sans gibier en vue, doit envisager une quête");
-        assert!(
-            loin > 2.0,
-            "une quête part au-delà du regard (2 km), au plus loin {loin:.1} km sur huit directions"
-        );
+        let (affame, loin) = quete(0.9, true, 0.0).expect("un affamé d'un clan, sans gibier en vue, doit envisager une quête");
+        assert!(loin > 2.0, "une quête part au-delà du regard (2 km), au plus loin {loin:.1} km sur huit directions");
         // Repu, et un clan pourvu (une réserve pleine pour son seul membre) : rien
         // ne pousse à chasser. Un clan sans réserve, lui, enverrait même un repu
         // chasser pour les siens (H2) — voulu.
         let repu = quete(0.0, true, STOCK_SCALE_PER_MEMBER).map_or(0.0, |(s, _)| s);
-        assert!(
-            repu < 0.2 * affame,
-            "un repu ne part guère en quête ({repu:.3} contre {affame:.3})"
-        );
-        assert!(
-            quete(0.9, false, 0.0).is_none(),
-            "sans clan, pas de foyer d'où partir en quête"
-        );
+        assert!(repu < 0.2 * affame, "un repu ne part guère en quête ({repu:.3} contre {affame:.3})");
+        assert!(quete(0.9, false, 0.0).is_none(), "sans clan, pas de foyer d'où partir en quête");
     }
 
     /// D2, la faim disperse : un affamé peut pousser sa quête au-delà du
@@ -5017,17 +4192,8 @@ mod tests {
     fn la_faim_pousse_la_quete_au_dela_du_territoire_sans_couper_le_rappel() {
         let portee = |faim: f32, reserve: f32| -> f64 {
             let (mut sim, home) = scenario_au_foyer(5, 1, 0);
-            let id = sim
-                .agents
-                .query::<&AgentId>()
-                .iter()
-                .map(|(_, a)| *a)
-                .next()
-                .unwrap();
-            for (_, (phys, membership)) in sim
-                .agents
-                .query_mut::<(&mut Physiology, &mut ClanMembership)>()
-            {
+            let id = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).next().unwrap();
+            for (_, (phys, membership)) in sim.agents.query_mut::<(&mut Physiology, &mut ClanMembership)>() {
                 phys.hunger = faim;
                 membership.0 = Some(social::ClanId(1));
             }
@@ -5044,12 +4210,7 @@ mod tests {
             let mut far: f64 = 0.0;
             for t in 0..16 {
                 sim.time.tick = t * 4;
-                if let Some(m) = sim
-                    .inspect_agent(id)
-                    .unwrap()
-                    .iter()
-                    .find(|m| m.kind == TaskKind::SeekGame)
-                {
+                if let Some(m) = sim.inspect_agent(id).unwrap().iter().find(|m| m.kind == TaskKind::SeekGame) {
                     let d = ((m.target.0 - home.0) as f64).hypot((m.target.1 - home.1) as f64);
                     far = far.max(cairn_core::tiles_to_km(d));
                 }
@@ -5058,10 +4219,7 @@ mod tests {
         };
         let territoire = cairn_core::tiles_to_km(social::RESIDENCE_RADIUS_TILES);
         let affame = portee(0.95, STOCK_SCALE_PER_MEMBER);
-        assert!(
-            affame > territoire,
-            "un affamé doit pouvoir chercher au-delà du territoire ({affame:.1} km)"
-        );
+        assert!(affame > territoire, "un affamé doit pouvoir chercher au-delà du territoire ({affame:.1} km)");
         let pour_les_siens = portee(0.0, 0.0);
         assert!(
             pour_les_siens <= territoire,
@@ -5070,17 +4228,8 @@ mod tests {
 
         // Loin du foyer, le rappel est toujours là.
         let (mut sim, home) = scenario_au_foyer(5, 1, 0);
-        let id = sim
-            .agents
-            .query::<&AgentId>()
-            .iter()
-            .map(|(_, a)| *a)
-            .next()
-            .unwrap();
-        for (_, (phys, membership)) in sim
-            .agents
-            .query_mut::<(&mut Physiology, &mut ClanMembership)>()
-        {
+        let id = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).next().unwrap();
+        for (_, (phys, membership)) in sim.agents.query_mut::<(&mut Physiology, &mut ClanMembership)>() {
             phys.hunger = 0.95;
             membership.0 = Some(social::ClanId(1));
         }
@@ -5096,10 +4245,7 @@ mod tests {
             rivalry: 0.0,
         });
         assert!(
-            sim.inspect_agent(id)
-                .unwrap()
-                .iter()
-                .any(|m| m.kind == TaskKind::ReturnToClan && m.score > 0.0),
+            sim.inspect_agent(id).unwrap().iter().any(|m| m.kind == TaskKind::ReturnToClan && m.score > 0.0),
             "à 8 km du foyer, rentrer reste un choix offert"
         );
     }
@@ -5112,22 +4258,15 @@ mod tests {
         for r in 0..400i64 {
             for k in 0..(8 * r.max(1)) {
                 let a = (
-                    start.0
-                        + ((k as f64 / (8 * r.max(1)) as f64 * std::f64::consts::TAU).cos()
-                            * r as f64
-                            * 60.0) as i64,
-                    start.1
-                        + ((k as f64 / (8 * r.max(1)) as f64 * std::f64::consts::TAU).sin()
-                            * r as f64
-                            * 60.0) as i64,
+                    start.0 + ((k as f64 / (8 * r.max(1)) as f64 * std::f64::consts::TAU).cos() * r as f64 * 60.0) as i64,
+                    start.1 + ((k as f64 / (8 * r.max(1)) as f64 * std::f64::consts::TAU).sin() * r as f64 * 60.0) as i64,
                 );
                 let b = (a.0 + 400, a.1);
                 if !land(a.0, a.1) || !land(b.0, b.1) {
                     continue;
                 }
                 let wet = (1..400).any(|i| !land(a.0 + i, a.1));
-                if wet && crate::pathfind::astar(a, b, land, crate::pathfind::NODE_BUDGET).is_some()
-                {
+                if wet && crate::pathfind::astar(a, b, land, crate::pathfind::NODE_BUDGET).is_some() {
                     return (a, b);
                 }
             }
@@ -5144,32 +4283,15 @@ mod tests {
     fn un_budget_epuise_n_est_pas_un_chemin_bloque() {
         let (mut sim, _) = scenario_setup(7, 0, 0);
         let (a, b) = across_water(&sim);
-        let mut pos = Position {
-            x: a.0 as f64 + 0.5,
-            y: a.1 as f64 + 0.5,
-        };
+        let mut pos = Position { x: a.0 as f64 + 0.5, y: a.1 as f64 + 0.5 };
         let mut routes = BTreeMap::new();
         let mut empty = PathBudget { left: 0, denied: 0 };
         // On marche d'abord jusqu'à la rive ; c'est là que l'A* serait demandé.
         for _ in 0..10 {
-            let m = advance(
-                &mut sim.world,
-                &mut routes,
-                &mut empty,
-                AgentId(1),
-                &mut pos,
-                b,
-            );
-            assert_ne!(
-                m,
-                Move::Stuck,
-                "faute de budget, on attend : ce n'est pas un chemin bloqué"
-            );
+            let m = advance(&mut sim.world, &mut routes, &mut empty, AgentId(1), &mut pos, b);
+            assert_ne!(m, Move::Stuck, "faute de budget, on attend : ce n'est pas un chemin bloqué");
         }
-        assert!(
-            empty.denied >= 1,
-            "arrivé à la rive, la demande de trajet est refusée et comptée"
-        );
+        assert!(empty.denied >= 1, "arrivé à la rive, la demande de trajet est refusée et comptée");
     }
 
     /// Bug de l'eau (2026-10-03) : un trajet A* s'arrêtait à chaque étape
@@ -5180,23 +4302,13 @@ mod tests {
     fn un_trajet_qui_contourne_l_eau_avance_d_une_heure_de_marche() {
         let (mut sim, _) = scenario_setup(7, 0, 0);
         let (a, b) = across_water(&sim);
-        let mut pos = Position {
-            x: a.0 as f64 + 0.5,
-            y: a.1 as f64 + 0.5,
-        };
+        let mut pos = Position { x: a.0 as f64 + 0.5, y: a.1 as f64 + 0.5 };
         let mut routes = BTreeMap::new();
         let mut budget = PathBudget { left: 8, denied: 0 };
         let mut walked = 0.0;
         for _ in 0..3 {
             let before = (pos.x, pos.y);
-            let m = advance(
-                &mut sim.world,
-                &mut routes,
-                &mut budget,
-                AgentId(1),
-                &mut pos,
-                b,
-            );
+            let m = advance(&mut sim.world, &mut routes, &mut budget, AgentId(1), &mut pos, b);
             walked += (pos.x - before.0).hypot(pos.y - before.1);
             if m == Move::Arrived {
                 return;
@@ -5217,17 +4329,8 @@ mod tests {
     #[test]
     fn la_soif_qui_tue_prime_sur_la_chasse() {
         let (mut sim, home) = scenario_au_foyer(5, 1, 0);
-        let spring = sim
-            .world
-            .nearest_spring(home, 5)
-            .expect("une source près du foyer");
-        let id = sim
-            .agents
-            .query::<&AgentId>()
-            .iter()
-            .map(|(_, a)| *a)
-            .next()
-            .unwrap();
+        let spring = sim.world.nearest_spring(home, 5).expect("une source près du foyer");
+        let id = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).next().unwrap();
         let at = (spring.0 as f64 + 80.5, spring.1 as f64 + 0.5); // ~160 m de la source
         for (_, (pos, phys)) in sim.agents.query_mut::<(&mut Position, &mut Physiology)>() {
             pos.x = at.0;
@@ -5238,16 +4341,8 @@ mod tests {
         }
         sim.spawn_herd(at.0 + 5.0, at.1, 60.0);
         let scores = sim.inspect_agent(id).unwrap();
-        let drink = scores
-            .iter()
-            .filter(|m| m.kind == TaskKind::Drink)
-            .map(|m| m.score)
-            .fold(0.0, f32::max);
-        let other = scores
-            .iter()
-            .filter(|m| m.kind != TaskKind::Drink)
-            .map(|m| m.score)
-            .fold(0.0, f32::max);
+        let drink = scores.iter().filter(|m| m.kind == TaskKind::Drink).map(|m| m.score).fold(0.0, f32::max);
+        let other = scores.iter().filter(|m| m.kind != TaskKind::Drink).map(|m| m.score).fold(0.0, f32::max);
         assert!(
             drink > other + 0.2,
             "assoiffé à mort, boire ({drink:.2}) doit nettement primer sur tout le reste ({other:.2})"
@@ -5259,15 +4354,8 @@ mod tests {
             phys.health = 1.0;
         }
         let scores = sim.inspect_agent(id).unwrap();
-        let drink = scores
-            .iter()
-            .filter(|m| m.kind == TaskKind::Drink)
-            .map(|m| m.score)
-            .fold(0.0, f32::max);
-        assert!(
-            drink <= 1.0,
-            "sans urgence, le score de boire reste dans sa plage ordinaire ({drink:.2})"
-        );
+        let drink = scores.iter().filter(|m| m.kind == TaskKind::Drink).map(|m| m.score).fold(0.0, f32::max);
+        assert!(drink <= 1.0, "sans urgence, le score de boire reste dans sa plage ordinaire ({drink:.2})");
     }
 
     /// Piste F (run longue tempéré 42 : deux bandes à plus de 900 km l'une de
@@ -5292,28 +4380,18 @@ mod tests {
         }
         let side = crate::fauna::RANGE_ZONE_TILES;
         let zone = crate::fauna::range_zone(pos);
-        let center = |dx: i64, dy: i64| {
-            (
-                ((zone.0 + dx) as f64 + 0.5) * side,
-                ((zone.1 + dy) as f64 + 0.5) * side,
-            )
-        };
+        let center = |dx: i64, dy: i64| (((zone.0 + dx) as f64 + 0.5) * side, ((zone.1 + dy) as f64 + 0.5) * side);
         // Deux mailles riches parmi les voisines : l'inconnue (vue la première
         // dans l'ordre de parcours) et la connue (vue la dernière). Le reste du
         // pays alentour est vidé.
-        let order: Vec<(i64, i64)> = (-1..=1)
-            .flat_map(|dy| (-1..=1).map(move |dx| (dx, dy)))
-            .filter(|&d| d != (0, 0))
-            .collect();
+        let order: Vec<(i64, i64)> =
+            (-1..=1).flat_map(|dy| (-1..=1).map(move |dx| (dx, dy))).filter(|&d| d != (0, 0)).collect();
         let rich: Vec<(i64, i64)> = order
             .iter()
             .copied()
             .filter(|&(dx, dy)| sim.world.edible_kcal(center(dx, dy), sim.time.tick) > 1.0e6)
             .collect();
-        assert!(
-            rich.len() >= 2,
-            "il faut deux mailles riches autour du foyer"
-        );
+        assert!(rich.len() >= 2, "il faut deux mailles riches autour du foyer");
         let (unknown, familiar) = (rich[0], *rich.last().unwrap());
         sim.world.gather(center(0, 0), sim.time.tick, f64::MAX);
         for &(dx, dy) in &order {
@@ -5328,8 +4406,7 @@ mod tests {
             while y < known.1 + side / 2.0 {
                 let mut x = known.0 - side / 2.0;
                 while x < known.0 + side / 2.0 {
-                    mem.known
-                        .insert(crate::memory::cell_of((x as i64, y as i64)));
+                    mem.known.insert(crate::memory::cell_of((x as i64, y as i64)));
                     x += step;
                 }
                 y += step;
@@ -5342,12 +4419,10 @@ mod tests {
             .filter(|m| m.kind == TaskKind::Wander && m.score > 0.0)
             .map(|m| m.target)
             // Le changement de pays vise le centre d'une maille voisine.
-            .find(|t| {
-                order.iter().any(|&(dx, dy)| {
-                    let c = center(dx, dy);
-                    (c.0 as i64, c.1 as i64) == *t
-                })
-            });
+            .find(|t| order.iter().any(|&(dx, dy)| {
+                let c = center(dx, dy);
+                (c.0 as i64, c.1 as i64) == *t
+            }));
         let target = target.expect("une maille plus riche doit être envisagée");
         assert_eq!(
             crate::fauna::range_zone((target.0 as f64, target.1 as f64)),
@@ -5364,18 +4439,9 @@ mod tests {
     #[test]
     fn le_soir_on_rentre_dormir_au_campement() {
         let (mut sim, home) = scenario_au_foyer(5, 1, 0);
-        let id = sim
-            .agents
-            .query::<&AgentId>()
-            .iter()
-            .map(|(_, a)| *a)
-            .next()
-            .unwrap();
+        let id = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).next().unwrap();
         let camp = (home.0 as f64 + 1_500.5, home.1 as f64 + 0.5); // 3 km
-        for (_, (phys, membership)) in sim
-            .agents
-            .query_mut::<(&mut Physiology, &mut ClanMembership)>()
-        {
+        for (_, (phys, membership)) in sim.agents.query_mut::<(&mut Physiology, &mut ClanMembership)>() {
             phys.fatigue = 0.7;
             membership.0 = Some(social::ClanId(1));
         }
@@ -5395,10 +4461,7 @@ mod tests {
             .iter()
             .filter(|m| m.kind == TaskKind::Sleep)
             .find(|m| ((m.target.0 as f64 - camp.0).hypot(m.target.1 as f64 - camp.1)) < 50.0);
-        assert!(
-            rentrer.is_some(),
-            "un membre fatigué, la nuit, loin du camp, doit envisager d'y rentrer dormir"
-        );
+        assert!(rentrer.is_some(), "un membre fatigué, la nuit, loin du camp, doit envisager d'y rentrer dormir");
     }
 
     /// D11 : un humain mourait de soif à 300 m d'une source qu'il ne pouvait
@@ -5409,33 +4472,18 @@ mod tests {
     #[test]
     fn une_source_hors_d_atteinte_est_mise_de_cote() {
         let (mut sim, home) = scenario_au_foyer(42, 1, 0);
-        let proche = sim
-            .world
-            .nearest_spring(home, 5)
-            .expect("le foyer des bancs a une source à portée");
+        let proche = sim.world.nearest_spring(home, 5).expect("le foyer des bancs a une source à portée");
         let loin_depart = (home.0 + 1_500, home.1 + 1_500);
-        let autre = sim
-            .world
-            .nearest_spring(loin_depart, 5)
-            .expect("une seconde source dans la région");
+        let autre = sim.world.nearest_spring(loin_depart, 5).expect("une seconde source dans la région");
         assert_ne!(proche, autre);
-        for (_, (phys, mem, behavior)) in sim
-            .agents
-            .query_mut::<(&mut Physiology, &mut Memory, &mut Behavior)>()
-        {
+        for (_, (phys, mem, behavior)) in sim.agents.query_mut::<(&mut Physiology, &mut Memory, &mut Behavior)>() {
             phys.thirst = 0.9;
             mem.springs = vec![proche, autre];
             behavior.task = None;
             behavior.stuck_on = Some(proche); // la marche vers elle vient d'échouer
         }
         sim.step();
-        let task = sim
-            .agents
-            .query::<&Behavior>()
-            .iter()
-            .next()
-            .map(|(_, b)| b.task)
-            .unwrap();
+        let task = sim.agents.query::<&Behavior>().iter().next().map(|(_, b)| b.task).unwrap();
         assert_eq!(
             task.map(|t| (t.kind, t.target)),
             Some((TaskKind::Drink, autre)),
@@ -5450,28 +4498,16 @@ mod tests {
     fn rapporter_le_surplus_au_foyer_alimente_le_stock_a_parts_egales() {
         let mut sim = Sim::new(WorldSeed(42), 512);
         let home = find_land(&sim);
-        let mut pos = Position {
-            x: home.0 as f64 + 0.5,
-            y: home.1 as f64 + 0.5,
-        };
-        let mut phys = Physiology {
-            hunger: 0.0,
-            ..Physiology::default()
-        }; // repu : il ne mange pas en route
+        let mut pos = Position { x: home.0 as f64 + 0.5, y: home.1 as f64 + 0.5 };
+        let mut phys = Physiology { hunger: 0.0, ..Physiology::default() }; // repu : il ne mange pas en route
         let mut behavior = Behavior {
-            task: Some(Task {
-                kind: TaskKind::BringSurplusHome,
-                target: home,
-            }),
+            task: Some(Task { kind: TaskKind::BringSurplusHome, target: home }),
             ..Behavior::default()
         };
         let traits = Traits::default();
         let mut skills = Skills::default();
         let mut routes: BTreeMap<u64, Route> = BTreeMap::new();
-        let mut budget = PathBudget {
-            left: PATH_REQUESTS_PER_TICK,
-            denied: 0,
-        };
+        let mut budget = PathBudget { left: PATH_REQUESTS_PER_TICK, denied: 0 };
         let clan_id = social::ClanId(9);
         let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::new();
         let porte_avant = 0.4;
@@ -5506,10 +4542,7 @@ mod tests {
             1.0,
         );
 
-        assert_eq!(
-            carrying.0, 0.0,
-            "le surplus rapporté doit être entièrement déposé, plus rien porté"
-        );
+        assert_eq!(carrying.0, 0.0, "le surplus rapporté doit être entièrement déposé, plus rien porté");
         assert_eq!(
             clan_stock.get(&clan_id).copied().unwrap_or(0.0),
             porte_avant,
@@ -5527,33 +4560,18 @@ mod tests {
     fn puiser_dans_le_stock_reduit_la_faim_et_le_stock_a_parts_egales() {
         let mut sim = Sim::new(WorldSeed(42), 512);
         let home = find_land(&sim);
-        let mut pos = Position {
-            x: home.0 as f64 + 0.5,
-            y: home.1 as f64 + 0.5,
-        };
+        let mut pos = Position { x: home.0 as f64 + 0.5, y: home.1 as f64 + 0.5 };
         let hunger_avant = 0.6;
-        let mut phys = Physiology {
-            hunger: hunger_avant,
-            ..Physiology::default()
-        };
-        let mut behavior = Behavior {
-            task: Some(Task {
-                kind: TaskKind::EatFromStock,
-                target: home,
-            }),
-            ..Behavior::default()
-        };
+        let mut phys = Physiology { hunger: hunger_avant, ..Physiology::default() };
+        let mut behavior =
+            Behavior { task: Some(Task { kind: TaskKind::EatFromStock, target: home }), ..Behavior::default() };
         let traits = Traits::default();
         let mut skills = Skills::default();
         let mut routes: BTreeMap<u64, Route> = BTreeMap::new();
-        let mut budget = PathBudget {
-            left: PATH_REQUESTS_PER_TICK,
-            denied: 0,
-        };
+        let mut budget = PathBudget { left: PATH_REQUESTS_PER_TICK, denied: 0 };
         let clan_id = social::ClanId(7);
         let stock_avant = 0.5; // moins que la faim : le retrait doit être partiel
-        let mut clan_stock: BTreeMap<social::ClanId, f32> =
-            BTreeMap::from([(clan_id, stock_avant)]);
+        let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::from([(clan_id, stock_avant)]);
         let mut carrying = Carrying::default();
         let mut prestige = Prestige::default();
         let mut structures: Vec<Structure> = Vec::new();
@@ -5594,10 +4612,7 @@ mod tests {
              (faim {hunger_avant} → {}, stock {stock_avant} → {stock_apres})",
             phys.hunger
         );
-        assert!(
-            stock_apres <= 1e-6,
-            "le stock, plus petit que la faim, doit être vidé entièrement"
-        );
+        assert!(stock_apres <= 1e-6, "le stock, plus petit que la faim, doit être vidé entièrement");
     }
 
     /// « Qui bâtit » — construire consomme le stock commun et crée la
@@ -5609,29 +4624,19 @@ mod tests {
     fn batir_consomme_le_stock_et_cree_la_structure() {
         let mut sim = Sim::new(WorldSeed(42), 512);
         let home = find_land(&sim);
-        let mut pos = Position {
-            x: home.0 as f64 + 0.5,
-            y: home.1 as f64 + 0.5,
-        };
+        let mut pos = Position { x: home.0 as f64 + 0.5, y: home.1 as f64 + 0.5 };
         let mut phys = Physiology::default();
         let mut behavior = Behavior {
-            task: Some(Task {
-                kind: TaskKind::Build(StructureKind::Hut),
-                target: home,
-            }),
+            task: Some(Task { kind: TaskKind::Build(StructureKind::Hut), target: home }),
             ..Behavior::default()
         };
         let traits = Traits::default();
         let mut skills = Skills::default();
         let mut routes: BTreeMap<u64, Route> = BTreeMap::new();
-        let mut budget = PathBudget {
-            left: PATH_REQUESTS_PER_TICK,
-            denied: 0,
-        };
+        let mut budget = PathBudget { left: PATH_REQUESTS_PER_TICK, denied: 0 };
         let clan_id = social::ClanId(4);
         let stock_avant = StructureKind::Hut.cost() + 5.0; // de quoi payer, et un reste
-        let mut clan_stock: BTreeMap<social::ClanId, f32> =
-            BTreeMap::from([(clan_id, stock_avant)]);
+        let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::from([(clan_id, stock_avant)]);
         let mut carrying = Carrying::default();
         let mut prestige = Prestige::default();
         let mut structures: Vec<Structure> = Vec::new();
@@ -5674,10 +4679,7 @@ mod tests {
         // Deuxième chantier identique, stock encore suffisant mais la hutte
         // existe déjà : aucun doublon, aucun prélèvement.
         let mut behavior2 = Behavior {
-            task: Some(Task {
-                kind: TaskKind::Build(StructureKind::Hut),
-                target: home,
-            }),
+            task: Some(Task { kind: TaskKind::Build(StructureKind::Hut), target: home }),
             ..Behavior::default()
         };
         let stock_intermediaire = clan_stock[&clan_id];
@@ -5707,15 +4709,8 @@ mod tests {
             0,
             1.0,
         );
-        assert_eq!(
-            structures.len(),
-            1,
-            "une hutte existe déjà : pas de doublon"
-        );
-        assert_eq!(
-            clan_stock[&clan_id], stock_intermediaire,
-            "no-op : le stock ne bouge pas"
-        );
+        assert_eq!(structures.len(), 1, "une hutte existe déjà : pas de doublon");
+        assert_eq!(clan_stock[&clan_id], stock_intermediaire, "no-op : le stock ne bouge pas");
     }
 
     /// Agriculture (Phase 5, chaîne §5.3) : entretenir un champ
@@ -5732,67 +4727,31 @@ mod tests {
             tile.soil_fertility = 200;
             tile.biomass = 20;
         }
-        let mut pos = Position {
-            x: field.0 as f64 + 0.5,
-            y: field.1 as f64 + 0.5,
-        };
+        let mut pos = Position { x: field.0 as f64 + 0.5, y: field.1 as f64 + 0.5 };
         let mut phys = Physiology::default();
         let mut behavior = Behavior {
-            task: Some(Task {
-                kind: TaskKind::Cultivate,
-                target: field,
-            }),
+            task: Some(Task { kind: TaskKind::Cultivate, target: field }),
             ..Behavior::default()
         };
         let traits = Traits::default();
         let mut skills = Skills::default();
         let mut routes: BTreeMap<u64, Route> = BTreeMap::new();
-        let mut budget = PathBudget {
-            left: PATH_REQUESTS_PER_TICK,
-            denied: 0,
-        };
+        let mut budget = PathBudget { left: PATH_REQUESTS_PER_TICK, denied: 0 };
         let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::new();
         let mut carrying = Carrying::default();
         let mut prestige = Prestige::default();
         let mut structures: Vec<Structure> = Vec::new();
 
         execute(
-            &mut sim.world,
-            &mut routes,
-            &mut budget,
-            AgentId(0),
-            &mut pos,
-            &mut phys,
-            &mut behavior,
-            &[],
-            &[],
-            &[],
-            1.0,
-            &traits,
-            &mut skills,
-            None,
-            &mut clan_stock,
-            &mut carrying,
-            &mut prestige,
-            &mut structures,
-            &mut Vec::new(),
-            &mut Vec::new(),
-            &mut Vec::new(),
-            &mut crate::yields::Yields::default(),
-            0,
-            1.0,
+            &mut sim.world, &mut routes, &mut budget, AgentId(0), &mut pos, &mut phys,
+            &mut behavior, &[], &[], &[], 1.0, &traits, &mut skills, None, &mut clan_stock,
+            &mut carrying, &mut prestige, &mut structures, &mut Vec::new(), &mut Vec::new(),
+            &mut Vec::new(), &mut crate::yields::Yields::default(), 0, 1.0,
         );
 
         let tile = sim.world.tile(field.0, field.1);
-        assert!(
-            tile.biomass > 20,
-            "le champ entretenu doit gagner de la biomasse (20 → {})",
-            tile.biomass
-        );
-        assert_eq!(
-            tile.soil_fertility, 199,
-            "l'entretien prélève un peu de fertilité"
-        );
+        assert!(tile.biomass > 20, "le champ entretenu doit gagner de la biomasse (20 → {})", tile.biomass);
+        assert_eq!(tile.soil_fertility, 199, "l'entretien prélève un peu de fertilité");
     }
 
     /// Le candidat « cultiver » n'apparaît que pour qui **maîtrise
@@ -5811,12 +4770,9 @@ mod tests {
         let agri = sim.tech_tree.id_of("agriculture").unwrap();
         let farmer = sim.spawn_agent(home.0 as f64 + 0.5, home.1 as f64 + 0.5);
         let profane = sim.spawn_agent(home.0 as f64 + 0.5, home.1 as f64 + 0.5);
-        for (_, (id, know, phys, membership)) in sim.agents.query_mut::<(
-            &AgentId,
-            &mut Knowledge,
-            &mut Physiology,
-            &mut ClanMembership,
-        )>() {
+        for (_, (id, know, phys, membership)) in
+            sim.agents.query_mut::<(&AgentId, &mut Knowledge, &mut Physiology, &mut ClanMembership)>()
+        {
             phys.hunger = 0.2; // repu : on cultive au calme
             phys.thirst = 0.2;
             phys.cold = 0.0;
@@ -5860,10 +4816,12 @@ mod tests {
         sim.spawn_pack(homef.0 + 50.0, homef.1, 20.0);
         let brave = sim.spawn_agent(homef.0, homef.1);
         let timid = sim.spawn_agent(homef.0, homef.1);
-        for (_, (id, traits, phys, membership)) in
-            sim.agents
-                .query_mut::<(&AgentId, &mut Traits, &mut Physiology, &mut ClanMembership)>()
-        {
+        for (_, (id, traits, phys, membership)) in sim.agents.query_mut::<(
+            &AgentId,
+            &mut Traits,
+            &mut Physiology,
+            &mut ClanMembership,
+        )>() {
             phys.hunger = 0.2; // repu : la survie ne monopolise pas la décision
             phys.thirst = 0.2;
             phys.cold = 0.0;
@@ -5888,9 +4846,7 @@ mod tests {
         });
 
         let hunt_score = |m: &[crate::brain::Motivation]| {
-            m.iter()
-                .find(|x| x.kind == TaskKind::HuntPredator)
-                .map(|x| x.score)
+            m.iter().find(|x| x.kind == TaskKind::HuntPredator).map(|x| x.score)
         };
         let brave_score = hunt_score(&sim.inspect_agent(brave).unwrap())
             .expect("un agressif face à une meute proche envisage de la chasser");
@@ -5917,25 +4873,14 @@ mod tests {
             species: fauna::Species::Aurochs,
             tameness: 0.8, // franchement domestiqué
         };
-        let mut pos = Position {
-            x: homef.0,
-            y: homef.1,
-        };
+        let mut pos = Position { x: homef.0, y: homef.1 };
         let mut phys = Physiology::default();
-        let mut behavior = Behavior {
-            task: Some(Task {
-                kind: TaskKind::Herd,
-                target: home,
-            }),
-            ..Behavior::default()
-        };
+        let mut behavior =
+            Behavior { task: Some(Task { kind: TaskKind::Herd, target: home }), ..Behavior::default() };
         let traits = Traits::default();
         let mut skills = Skills::default();
         let mut routes: BTreeMap<u64, Route> = BTreeMap::new();
-        let mut budget = PathBudget {
-            left: PATH_REQUESTS_PER_TICK,
-            denied: 0,
-        };
+        let mut budget = PathBudget { left: PATH_REQUESTS_PER_TICK, denied: 0 };
         let clan_id = social::ClanId(2);
         let mut clan_stock: BTreeMap<social::ClanId, f32> = BTreeMap::new();
         let mut carrying = Carrying::default();
@@ -5943,30 +4888,10 @@ mod tests {
         let mut structures: Vec<Structure> = Vec::new();
 
         execute(
-            &mut sim.world,
-            &mut routes,
-            &mut budget,
-            AgentId(0),
-            &mut pos,
-            &mut phys,
-            &mut behavior,
-            &[cheptel],
-            &[],
-            &[],
-            1.0,
-            &traits,
-            &mut skills,
-            Some(clan_id),
-            &mut clan_stock,
-            &mut carrying,
-            &mut prestige,
-            &mut structures,
-            &mut Vec::new(),
-            &mut Vec::new(),
-            &mut Vec::new(),
-            &mut crate::yields::Yields::default(),
-            0,
-            1.0,
+            &mut sim.world, &mut routes, &mut budget, AgentId(0), &mut pos, &mut phys,
+            &mut behavior, &[cheptel], &[], &[], 1.0, &traits, &mut skills, Some(clan_id),
+            &mut clan_stock, &mut carrying, &mut prestige, &mut structures, &mut Vec::new(),
+            &mut Vec::new(), &mut Vec::new(), &mut crate::yields::Yields::default(), 0, 1.0,
         );
 
         assert!(
@@ -5990,9 +4915,8 @@ mod tests {
             }
         }
         let herder = sim.spawn_agent(homef.0, homef.1);
-        for (_, (phys, membership)) in sim
-            .agents
-            .query_mut::<(&mut Physiology, &mut ClanMembership)>()
+        for (_, (phys, membership)) in
+            sim.agents.query_mut::<(&mut Physiology, &mut ClanMembership)>()
         {
             phys.hunger = 0.2;
             phys.thirst = 0.2;
@@ -6028,10 +4952,12 @@ mod tests {
         let homef = (home.0 as f64 + 0.5, home.1 as f64 + 0.5);
         let raider = sim.spawn_agent(homef.0, homef.1);
         let rival = sim.spawn_agent(homef.0 + 20.0, homef.1); // ~40 m : à portée de raid
-        for (_, (id, membership, traits, phys)) in
-            sim.agents
-                .query_mut::<(&AgentId, &mut ClanMembership, &mut Traits, &mut Physiology)>()
-        {
+        for (_, (id, membership, traits, phys)) in sim.agents.query_mut::<(
+            &AgentId,
+            &mut ClanMembership,
+            &mut Traits,
+            &mut Physiology,
+        )>() {
             phys.hunger = 0.2;
             phys.thirst = 0.2;
             phys.cold = 0.0;
@@ -6112,10 +5038,7 @@ mod tests {
         let home = find_land(&sim);
         for i in 0..6i64 {
             let (dx, dy) = (i * 6, 0);
-            sim.spawn_agent(
-                home.0 as f64 + dx as f64 + 0.5,
-                home.1 as f64 + dy as f64 + 0.5,
-            );
+            sim.spawn_agent(home.0 as f64 + dx as f64 + 0.5, home.1 as f64 + dy as f64 + 0.5);
         }
         assert_eq!(
             sim.fauna.query::<&Herd>().iter().count(),
@@ -6131,10 +5054,7 @@ mod tests {
                 break;
             }
         }
-        assert!(
-            got_herd,
-            "aucun gibier apparu en 150 j malgré allow_fauna_immigration=true par défaut"
-        );
+        assert!(got_herd, "aucun gibier apparu en 150 j malgré allow_fauna_immigration=true par défaut");
     }
 
     #[test]

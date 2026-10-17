@@ -36,10 +36,9 @@ impl Curve {
         let y = match self {
             Curve::Linear { m, b } => m * x + b,
             Curve::Power { k } => x.powf(k),
-            Curve::Logistic {
-                steepness,
-                midpoint,
-            } => 1.0 / (1.0 + (-steepness * (x - midpoint)).exp()),
+            Curve::Logistic { steepness, midpoint } => {
+                1.0 / (1.0 + (-steepness * (x - midpoint)).exp())
+            }
             Curve::Exponential { k } => ((k * x).exp() - 1.0) / (k.exp() - 1.0),
         };
         y.clamp(0.0, 1.0)
@@ -94,10 +93,7 @@ mod tests {
         let courbes = [
             Curve::Linear { m: 2.0, b: -0.3 },
             Curve::Power { k: 2.0 },
-            Curve::Logistic {
-                steepness: 10.0,
-                midpoint: 0.5,
-            },
+            Curve::Logistic { steepness: 10.0, midpoint: 0.5 },
             Curve::Exponential { k: 3.0 },
         ];
         for c in courbes {
@@ -110,10 +106,7 @@ mod tests {
 
     #[test]
     fn la_logistique_fait_un_seuil() {
-        let c = Curve::Logistic {
-            steepness: 12.0,
-            midpoint: 0.5,
-        };
+        let c = Curve::Logistic { steepness: 12.0, midpoint: 0.5 };
         assert!(c.eval(0.2) < 0.05);
         assert!(c.eval(0.8) > 0.95);
     }

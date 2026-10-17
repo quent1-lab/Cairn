@@ -85,11 +85,7 @@ pub fn waypoint(exp: &Expedition) -> (i64, i64) {
 /// (`WorldGen::deposit`, aucune matérialisation de chunk). `None` si aucun dans
 /// la portée. Base de la prospection d'étain (via `find_nearest_tin`) et de la
 /// reconnaissance géologique (banc `scout`).
-pub fn find_nearest_deposit(
-    world: &World,
-    from: (i64, i64),
-    target: Deposit,
-) -> Option<(i64, i64)> {
+pub fn find_nearest_deposit(world: &World, from: (i64, i64), target: Deposit) -> Option<(i64, i64)> {
     let wg = world.worldgen();
     let is_target = |x: i64, y: i64| {
         let e = wg.elevation(x, y);
@@ -151,15 +147,7 @@ pub(crate) fn dispatch(sim: &mut Sim) {
     let mut infos: BTreeMap<u64, ClanTinInfo> = BTreeMap::new();
     for (_, (id, membership, knowledge, exposures, demo, phys, traits)) in sim
         .agents
-        .query::<(
-            &AgentId,
-            &ClanMembership,
-            &Knowledge,
-            &Exposures,
-            &Demographics,
-            &Physiology,
-            &Traits,
-        )>()
+        .query::<(&AgentId, &ClanMembership, &Knowledge, &Exposures, &Demographics, &Physiology, &Traits)>()
         .iter()
     {
         let Some(cid) = membership.0 else { continue };
@@ -193,28 +181,17 @@ pub(crate) fn dispatch(sim: &mut Sim) {
     // `sim.clans` y est emprunté en écriture, `sim.record` veut tout `sim`.
     let mut departures: Vec<((i64, i64), ClanId, u64, f32)> = Vec::new();
     for clan in &mut sim.clans {
-        let Some(info) = infos.get(&clan.id.0) else {
-            continue;
-        };
+        let Some(info) = infos.get(&clan.id.0) else { continue };
         if !info.has_copper || info.has_tin || info.active || clan.stock < EXPEDITION_COST {
             continue;
         }
-        let Some((envoy, _)) = info.best else {
-            continue;
-        };
+        let Some((envoy, _)) = info.best else { continue };
         let home_tile = (clan.home.0.floor() as i64, clan.home.1.floor() as i64);
         let Some(tin) = find_nearest_tin(&sim.world, home_tile) else {
             continue; // pas d'étain atteignable : jamais de bronze ici
         };
         clan.stock -= EXPEDITION_COST;
-        sim.expeditions.insert(
-            envoy,
-            Expedition {
-                tin,
-                home: clan.home,
-                returning: false,
-            },
-        );
+        sim.expeditions.insert(envoy, Expedition { tin, home: clan.home, returning: false });
         let tiles = ((tin.0 - home_tile.0) as f64).hypot((tin.1 - home_tile.1) as f64);
         departures.push((home_tile, clan.id, envoy, tiles_to_km(tiles) as f32));
     }
@@ -261,9 +238,7 @@ pub(crate) fn advance(sim: &mut Sim) {
     let mut reached_tin: BTreeSet<u64> = BTreeSet::new();
     let mut completed: Vec<u64> = Vec::new();
     for (&aid, exp) in &sim.expeditions {
-        let Some(&pos) = positions.get(&aid) else {
-            continue;
-        }; // mort : nettoyé ailleurs
+        let Some(&pos) = positions.get(&aid) else { continue }; // mort : nettoyé ailleurs
         let target = waypoint(exp);
         let d = (pos.0 - (target.0 as f64 + 0.5)).hypot(pos.1 - (target.1 as f64 + 0.5));
         if d <= REACH_TILES {
@@ -295,14 +270,7 @@ pub(crate) fn advance(sim: &mut Sim) {
             && let Some(clan) = clan_of(sim, aid)
         {
             let pos = (exp.home.0.floor() as i64, exp.home.1.floor() as i64);
-            sim.record(
-                pos,
-                EventKind::ExpeditionReturned {
-                    clan,
-                    agent: AgentId(aid),
-                    sex,
-                },
-            );
+            sim.record(pos, EventKind::ExpeditionReturned { clan, agent: AgentId(aid), sex });
         }
     }
 }
@@ -345,14 +313,7 @@ mod tests {
         // le rayon d'arrivée (REACH_TILES ≈ 250 tuiles) — on téléporte l'agent
         // pour ne pas simuler le trajet réel.
         let tin = (10_000, 0);
-        sim.expeditions.insert(
-            envoy.0,
-            Expedition {
-                tin,
-                home: (0.0, 0.0),
-                returning: false,
-            },
-        );
+        sim.expeditions.insert(envoy.0, Expedition { tin, home: (0.0, 0.0), returning: false });
 
         // L'envoyé n'est pas encore près de l'étain : rien ne se passe.
         advance(&mut sim);
@@ -366,10 +327,7 @@ mod tests {
             }
         }
         advance(&mut sim);
-        assert!(
-            sim.expeditions[&envoy.0].returning,
-            "arrivé à l'étain, il rentre"
-        );
+        assert!(sim.expeditions[&envoy.0].returning, "arrivé à l'étain, il rentre");
         let exposed = sim
             .agents
             .query::<(&AgentId, &Exposures)>()
@@ -385,10 +343,7 @@ mod tests {
             }
         }
         advance(&mut sim);
-        assert!(
-            !sim.expeditions.contains_key(&envoy.0),
-            "rentré : l'expédition est finie"
-        );
+        assert!(!sim.expeditions.contains_key(&envoy.0), "rentré : l'expédition est finie");
     }
 
     #[test]
@@ -422,14 +377,8 @@ mod tests {
         // Si de l'étain est atteignable depuis l'origine (seed 42), une
         // expédition part et le stock est ponctionné.
         if find_nearest_tin(&sim.world, (0, 0)).is_some() {
-            assert!(
-                sim.expeditions.contains_key(&m.0),
-                "une expédition doit être dépêchée"
-            );
-            assert!(
-                sim.clans[0].stock < 20.0,
-                "le voyage est financé par le stock"
-            );
+            assert!(sim.expeditions.contains_key(&m.0), "une expédition doit être dépêchée");
+            assert!(sim.clans[0].stock < 20.0, "le voyage est financé par le stock");
         }
     }
 
@@ -451,9 +400,6 @@ mod tests {
             rivalry: 0.0,
         });
         dispatch(&mut sim);
-        assert!(
-            sim.expeditions.is_empty(),
-            "pas de cuivre, pas de quête d'étain"
-        );
+        assert!(sim.expeditions.is_empty(), "pas de cuivre, pas de quête d'étain");
     }
 }

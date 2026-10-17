@@ -17,9 +17,7 @@ use cairn_core::km_to_tiles;
 /// `hecs` (qui recyclent les slots). C'est lui qui nourrit les flux RNG par
 /// agent — le déterminisme ne doit pas dépendre des détails de l'ECS — et,
 /// plus tard, la Chronique.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
 pub struct AgentId(pub u64);
 
 /// Position **continue** en coordonnées de tuiles (1 tuile = 2 m). Continue :
@@ -392,12 +390,7 @@ impl Physiology {
         let age = demo.age_years(tick);
         let body = crate::energy::Body::of(age, demo.sex);
         let target = body.reserve_target(age, demo.sex);
-        Self {
-            scale: body.scale(),
-            reserves_kcal: target,
-            reserve_target: target,
-            ..Self::default()
-        }
+        Self { scale: body.scale(), reserves_kcal: target, reserve_target: target, ..Self::default() }
     }
 
     /// Le jeûne a vidé les réserves : la faim saturée ronge le corps.
@@ -407,16 +400,11 @@ impl Physiology {
 
     /// Part des réserves perdue (0 : pleines, 1 : vides).
     pub fn depletion(&self) -> f32 {
-        if self.reserve_target <= 0.0 {
-            0.0
-        } else {
-            (1.0 - self.reserves_kcal / self.reserve_target).clamp(0.0, 1.0)
-        }
+        if self.reserve_target <= 0.0 { 0.0 } else { (1.0 - self.reserves_kcal / self.reserve_target).clamp(0.0, 1.0) }
     }
 
     fn reserve_gap_points(&self) -> f32 {
-        ((self.reserve_target - self.reserves_kcal).max(0.0) / crate::energy::KCAL_PER_POINT as f32)
-            .max(0.0)
+        ((self.reserve_target - self.reserves_kcal).max(0.0) / crate::energy::KCAL_PER_POINT as f32).max(0.0)
     }
 
     /// Ce que ce corps peut encore manger, en points de nourriture : sa faim
@@ -438,11 +426,7 @@ impl Physiology {
             phys.hunger -= calmed / phys.scale;
             *left -= calmed;
         };
-        calm(
-            self,
-            HUNGER_FLOOR_PER_DEPLETION * self.depletion(),
-            &mut left,
-        );
+        calm(self, HUNGER_FLOOR_PER_DEPLETION * self.depletion(), &mut left);
         let refill = left.min(self.reserve_gap_points());
         self.reserves_kcal += refill * crate::energy::KCAL_PER_POINT as f32;
         left -= refill;
@@ -498,32 +482,18 @@ mod tests {
             ..Default::default()
         };
         tue.drift(15.0, Activity::Idle, 0.5, REFERENCE_KCAL_PER_TICK);
-        assert!(
-            tue.is_dead(),
-            "un mort au combat ne se relève pas (santé {})",
-            tue.health
-        );
-        assert_eq!(
-            tue.last_damage,
-            Some(DeathCause::Violence),
-            "la cause reste la violence"
-        );
+        assert!(tue.is_dead(), "un mort au combat ne se relève pas (santé {})", tue.health);
+        assert_eq!(tue.last_damage, Some(DeathCause::Violence), "la cause reste la violence");
 
         // Contre-épreuve : un vivant entamé, lui, se soigne bien.
         let mut blesse = Physiology { health: 0.5, ..tue };
         blesse.drift(15.0, Activity::Idle, 0.5, REFERENCE_KCAL_PER_TICK);
-        assert!(
-            blesse.health > 0.5,
-            "un vivant aux besoins couverts récupère"
-        );
+        assert!(blesse.health > 0.5, "un vivant aux besoins couverts récupère");
     }
 
     #[test]
     fn sans_boire_on_meurt_en_trois_jours_environ() {
-        let mut p = Physiology {
-            thirst: 0.0,
-            ..Default::default()
-        };
+        let mut p = Physiology { thirst: 0.0, ..Default::default() };
         let mut heures = 0;
         while !p.is_dead() && heures < 24 * 10 {
             // Climat doux, repos : seule la soif tue.
@@ -557,10 +527,7 @@ mod tests {
 
     #[test]
     fn bien_pourvu_on_recupere() {
-        let mut p = Physiology {
-            health: 0.5,
-            ..Default::default()
-        };
+        let mut p = Physiology { health: 0.5, ..Default::default() };
         for _ in 0..24 {
             p.drift(15.0, Activity::Idle, 0.5, REFERENCE_KCAL_PER_TICK);
             p.hunger = 0.2;
@@ -571,10 +538,7 @@ mod tests {
 
     #[test]
     fn dormir_efface_la_fatigue() {
-        let mut p = Physiology {
-            fatigue: 0.9,
-            ..Default::default()
-        };
+        let mut p = Physiology { fatigue: 0.9, ..Default::default() };
         for _ in 0..8 {
             p.drift(15.0, Activity::Sleeping, 0.5, REFERENCE_KCAL_PER_TICK);
         }
@@ -592,12 +556,7 @@ mod tests {
         let mut abrite = Physiology::default();
         for _ in 0..48 {
             expose.drift(felt_expose, Activity::Idle, 0.5, REFERENCE_KCAL_PER_TICK);
-            abrite.drift(
-                felt_abrite,
-                Activity::Sheltering,
-                0.5,
-                REFERENCE_KCAL_PER_TICK,
-            );
+            abrite.drift(felt_abrite, Activity::Sheltering, 0.5, REFERENCE_KCAL_PER_TICK);
         }
         assert!(expose.cold > 0.15, "à découvert le froid s'accumule");
         assert_eq!(abrite.cold, 0.0, "abrité, aucun stress thermique");
@@ -618,12 +577,7 @@ mod tests {
         let mut hours = 0u32;
         while !p.is_dead() && hours < 24 * 200 {
             p.thirst = 0.0;
-            p.drift(
-                20.0,
-                Activity::Idle,
-                0.5,
-                body.hourly_kcal(Activity::Idle, 20.0, 0.0, 0.0),
-            );
+            p.drift(20.0, Activity::Idle, 0.5, body.hourly_kcal(Activity::Idle, 20.0, 0.0, 0.0));
             hours += 1;
         }
         let days = hours / 24;
@@ -636,23 +590,10 @@ mod tests {
     #[test]
     fn manger_refait_les_reserves() {
         // Réserves entamées de moitié : plancher de faim 0,25.
-        let mut p = Physiology {
-            hunger: 0.9,
-            reserves_kcal: 5_000.0,
-            reserve_target: 10_000.0,
-            ..Default::default()
-        };
+        let mut p = Physiology { hunger: 0.9, reserves_kcal: 5_000.0, reserve_target: 10_000.0, ..Default::default() };
         let eaten = p.eat_points(0.65 + 0.5);
-        assert!(
-            (p.hunger - 0.25).abs() < 1e-4,
-            "faim au plancher : {}",
-            p.hunger
-        );
-        assert!(
-            (p.reserves_kcal - 7_500.0).abs() < 1.0,
-            "réserves en partie refaites : {}",
-            p.reserves_kcal
-        );
+        assert!((p.hunger - 0.25).abs() < 1e-4, "faim au plancher : {}", p.hunger);
+        assert!((p.reserves_kcal - 7_500.0).abs() < 1.0, "réserves en partie refaites : {}", p.reserves_kcal);
         assert!((eaten - 1.15).abs() < 1e-4);
         // Assez pour tout : réserves pleines, faim nulle.
         p.eat_points(10.0);

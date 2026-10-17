@@ -64,7 +64,8 @@ pub struct Theology {
 impl Theology {
     /// Le peuple a-t-il une religion, ou seulement quelques croyants ?
     pub fn is_shared(&self) -> bool {
-        self.members > 0 && self.believers as f32 >= FOLLOWING_FRACTION * self.members as f32
+        self.members > 0
+            && self.believers as f32 >= FOLLOWING_FRACTION * self.members as f32
     }
 
     /// L'étiquette du §6.3 — **dérivée, et jamais une condition** : rien dans le
@@ -179,12 +180,7 @@ impl Sim {
             fervor /= believers as f32;
             benevolence /= believers as f32;
         }
-        Theology {
-            believers,
-            members,
-            fervor,
-            benevolence,
-        }
+        Theology { believers, members, fervor, benevolence }
     }
 }
 
@@ -222,23 +218,11 @@ mod tests {
     /// divinité lui a **fait**, et de rien d'autre.
     #[test]
     fn un_peuple_croit_ce_qu_il_a_vecu() {
-        assert_eq!(
-            scene(8, 8, 4, 0).clan_theology(ClanId(1)).creed(),
-            Creed::Nourishing
-        );
-        assert_eq!(
-            scene(8, 8, 0, 4).clan_theology(ClanId(1)).creed(),
-            Creed::Wrathful
-        );
-        assert_eq!(
-            scene(8, 8, 2, 2).clan_theology(ClanId(1)).creed(),
-            Creed::Capricious
-        );
+        assert_eq!(scene(8, 8, 4, 0).clan_theology(ClanId(1)).creed(), Creed::Nourishing);
+        assert_eq!(scene(8, 8, 0, 4).clan_theology(ClanId(1)).creed(), Creed::Wrathful);
+        assert_eq!(scene(8, 8, 2, 2).clan_theology(ClanId(1)).creed(), Creed::Capricious);
         // Une divinité qui ne s'est jamais manifestée n'a pas de fidèles.
-        assert_eq!(
-            scene(8, 0, 0, 0).clan_theology(ClanId(1)).creed(),
-            Creed::Absent
-        );
+        assert_eq!(scene(8, 0, 0, 0).clan_theology(ClanId(1)).creed(), Creed::Absent);
     }
 
     /// Quelques illuminés ne font pas une religion : il faut qu'une part du
@@ -281,17 +265,13 @@ mod tests {
         assert_eq!(sim.shrines.len(), 1, "le lieu est désigné");
 
         let pres = (100.0, 0.0);
-        assert!(
-            sim.shrine_call(pres, 0.8).is_some(),
-            "un fervent entend l'appel"
-        );
+        assert!(sim.shrine_call(pres, 0.8).is_some(), "un fervent entend l'appel");
         assert!(
             sim.shrine_call(pres, 0.05).is_none(),
             "un tiède ne se dérange pas pour un lieu saint"
         );
         assert!(
-            sim.shrine_call((SHRINE_PULL_TILES + 100.0, 0.0), 0.9)
-                .is_none(),
+            sim.shrine_call((SHRINE_PULL_TILES + 100.0, 0.0), 0.9).is_none(),
             "et l'appel ne porte pas jusqu'au bout du monde"
         );
     }
@@ -326,9 +306,6 @@ mod tests {
         let t = scene(10, 5, 2, 0).clan_theology(ClanId(1));
         assert_eq!(t.believers, 5);
         assert_eq!(t.members, 10);
-        assert!(
-            (t.fervor - 0.8).abs() < 1e-5,
-            "la ferveur des fidèles, pas la moyenne du clan"
-        );
+        assert!((t.fervor - 0.8).abs() < 1e-5, "la ferveur des fidèles, pas la moyenne du clan");
     }
 }

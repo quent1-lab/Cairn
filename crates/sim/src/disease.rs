@@ -112,10 +112,7 @@ pub struct Illness {
 impl Illness {
     /// Un fondateur adulte, aguerri par sa vie d'avant.
     pub fn founder() -> Self {
-        Self {
-            episodes: [FOUNDER_EPISODES; ROUTES],
-            ..Self::default()
-        }
+        Self { episodes: [FOUNDER_EPISODES; ROUTES], ..Self::default() }
     }
 
     pub fn is_sick(&self, route: Route) -> bool {
@@ -130,10 +127,7 @@ impl Illness {
             return false;
         }
         let virulence = VIRULENCE_MEDIAN * (VIRULENCE_SIGMA * gaussian(rng)).exp();
-        self.active[r] = Some(Infection {
-            severity: ONSET_SEVERITY,
-            virulence,
-        });
+        self.active[r] = Some(Infection { severity: ONSET_SEVERITY, virulence });
         true
     }
 
@@ -143,9 +137,7 @@ impl Illness {
     pub fn course(&mut self, defense: f32, tick: u64) -> f32 {
         let mut damage = 0.0;
         for r in 0..ROUTES {
-            let Some(inf) = self.active[r].as_mut() else {
-                continue;
-            };
+            let Some(inf) = self.active[r].as_mut() else { continue };
             let imm = defense * experience(self.episodes[r]);
             let net = (inf.virulence - CLEARANCE_PER_DAY * imm) / TICKS_PER_DAY as f32;
             inf.severity = (inf.severity * net.exp()).min(1.0);
@@ -217,17 +209,11 @@ pub(crate) fn daily(sim: &mut Sim) {
         }
         let r2 = CONTACT_RADIUS_TILES * CONTACT_RADIUS_TILES;
         let stream = seed.derive(salt::CONTAGION) ^ splitmix64(tick) ^ route as u64;
-        for (_, (id, pos, ill)) in sim
-            .agents
-            .query_mut::<(&AgentId, &Position, &mut Illness)>()
-        {
+        for (_, (id, pos, ill)) in sim.agents.query_mut::<(&AgentId, &Position, &mut Illness)>() {
             if ill.is_sick(route) {
                 continue;
             }
-            let k = sick
-                .iter()
-                .filter(|(x, y)| (pos.x - x).powi(2) + (pos.y - y).powi(2) <= r2)
-                .count();
+            let k = sick.iter().filter(|(x, y)| (pos.x - x).powi(2) + (pos.y - y).powi(2) <= r2).count();
             if k == 0 {
                 continue;
             }
@@ -253,10 +239,7 @@ mod tests {
     fn lethality(defense: f32, episodes: u8, trials: u64) -> f64 {
         let mut deaths = 0;
         for k in 0..trials {
-            let mut ill = Illness {
-                episodes: [episodes; ROUTES],
-                ..Illness::default()
-            };
+            let mut ill = Illness { episodes: [episodes; ROUTES], ..Illness::default() };
             ill.infect(Route::Gut, 0, &mut rng(k));
             let mut health = 1.0f32;
             for t in 0..(120 * TICKS_PER_DAY) {
@@ -280,18 +263,9 @@ mod tests {
         let orphan = lethality(defense(0.5, false, 0.1, 0.0), 0, 4000);
         let starving_child = lethality(defense(6.0, false, 0.9, 0.0), 2, 4000);
         let fed_child = lethality(defense(6.0, false, 0.1, 0.0), 2, 4000);
-        assert!(
-            adult < 0.01,
-            "un adulte aguerri survit presque toujours : {adult}"
-        );
-        assert!(
-            orphan > fed_infant,
-            "le lait protège : {orphan} vs {fed_infant}"
-        );
-        assert!(
-            starving_child > 2.0 * fed_child,
-            "la faim tue par l'infection : {starving_child} vs {fed_child}"
-        );
+        assert!(adult < 0.01, "un adulte aguerri survit presque toujours : {adult}");
+        assert!(orphan > fed_infant, "le lait protège : {orphan} vs {fed_infant}");
+        assert!(starving_child > 2.0 * fed_child, "la faim tue par l'infection : {starving_child} vs {fed_child}");
     }
 
     #[test]
@@ -307,10 +281,7 @@ mod tests {
             t += 1;
         }
         assert_eq!(ill.episodes[0], 1);
-        assert!(
-            !ill.infect(Route::Gut, t, &mut r),
-            "convalescence : pas de réinfection immédiate"
-        );
+        assert!(!ill.infect(Route::Gut, t, &mut r), "convalescence : pas de réinfection immédiate");
         assert!(ill.infect(Route::Gut, t + IMMUNE_DAYS * TICKS_PER_DAY, &mut r));
         assert!(experience(1) > experience(0));
     }

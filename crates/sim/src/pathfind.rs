@@ -36,14 +36,8 @@ pub const NODE_BUDGET: usize = 2500;
 
 /// Les 8 voisins d'une cellule.
 const NEIGHBORS: [(i64, i64); 8] = [
-    (1, 0),
-    (-1, 0),
-    (0, 1),
-    (0, -1),
-    (1, 1),
-    (1, -1),
-    (-1, 1),
-    (-1, -1),
+    (1, 0), (-1, 0), (0, 1), (0, -1),
+    (1, 1), (1, -1), (-1, 1), (-1, -1),
 ];
 
 /// La ligne droite de `a` à `b` reste-t-elle sur la terre ? (échantillon
@@ -53,10 +47,7 @@ fn segment_on_land(a: (i64, i64), b: (i64, i64), is_land: &impl Fn(i64, i64) -> 
     let n = (dx.hypot(dy) / 2.0).ceil() as i64;
     (0..=n).all(|k| {
         let t = k as f64 / n.max(1) as f64;
-        is_land(
-            (a.0 as f64 + 0.5 + dx * t).floor() as i64,
-            (a.1 as f64 + 0.5 + dy * t).floor() as i64,
-        )
+        is_land((a.0 as f64 + 0.5 + dx * t).floor() as i64, (a.1 as f64 + 0.5 + dy * t).floor() as i64)
     })
 }
 
@@ -74,10 +65,7 @@ fn to_cell(tile: (i64, i64)) -> (i64, i64) {
 
 /// Tuile au centre d'une cellule — le point où l'agent vise réellement.
 fn cell_center(cell: (i64, i64)) -> (i64, i64) {
-    (
-        cell.0 * NAV_STRIDE + NAV_STRIDE / 2,
-        cell.1 * NAV_STRIDE + NAV_STRIDE / 2,
-    )
+    (cell.0 * NAV_STRIDE + NAV_STRIDE / 2, cell.1 * NAV_STRIDE + NAV_STRIDE / 2)
 }
 
 /// Cherche un chemin de `start_tile` à `goal_tile` en contournant l'eau.
@@ -329,14 +317,8 @@ mod tests {
         let n = dx.hypot(dy).ceil() as i64;
         let clear = (0..=n).all(|k| {
             let t = k as f64 / n.max(1) as f64;
-            is_land(
-                (start.0 as f64 + dx * t).floor() as i64,
-                (start.1 as f64 + dy * t).floor() as i64,
-            )
+            is_land((start.0 as f64 + dx * t).floor() as i64, (start.1 as f64 + dy * t).floor() as i64)
         });
-        assert!(
-            clear,
-            "le premier tronçon {start:?} → {first:?} traverse l'eau"
-        );
+        assert!(clear, "le premier tronçon {start:?} → {first:?} traverse l'eau");
     }
 }

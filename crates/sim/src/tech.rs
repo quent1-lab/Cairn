@@ -147,18 +147,12 @@ impl Age {
 /// ses techs, ou `Paleolithic` par défaut (un clan sans tech marquante en est
 /// encore là). Fonction **pure** — l'étiquette se recalcule, ne se stocke pas.
 pub fn age_of(corpus: &BTreeSet<TechId>, tree: &TechTree) -> Age {
-    corpus
-        .iter()
-        .filter_map(|&t| tree.get(t).age)
-        .max()
-        .unwrap_or(Age::Paleolithic)
+    corpus.iter().filter_map(|&t| tree.get(t).age).max().unwrap_or(Age::Paleolithic)
 }
 
 /// Identifiant dense d'une technologie : un index dans [`TechTree`]. Stable
 /// pour une version donnée du RON (l'ordre de déclaration fixe les index).
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
 pub struct TechId(pub u16);
 
 /// Une technologie telle qu'**écrite** dans le RON : prérequis par nom. Forme
@@ -259,8 +253,8 @@ impl TechTree {
     /// une source *externe* (fichier serveur, à venir) peut légitimement être
     /// invalide, et l'appelant doit pouvoir le rapporter.
     pub fn from_ron(src: &str) -> Result<TechTree, String> {
-        let specs: Vec<TechSpec> = ron::from_str(src)
-            .map_err(|e| format!("RON de l'arbre technologique invalide : {e}"))?;
+        let specs: Vec<TechSpec> =
+            ron::from_str(src).map_err(|e| format!("RON de l'arbre technologique invalide : {e}"))?;
 
         // Index nom → id, dans l'ordre de déclaration ; rejette les doublons.
         let mut by_name: BTreeMap<String, TechId> = BTreeMap::new();
@@ -480,15 +474,18 @@ pub(crate) fn reveal(sim: &mut Sim, agent: AgentId) -> Option<TechId> {
     // or la requête emprunte l'ECS (même patron que partout ailleurs).
     let mut found: Option<Revealed> = None;
 
-    for (_, (id, pos, demo, membership, exposures, mem, knowledge)) in sim.agents.query_mut::<(
-        &AgentId,
-        &Position,
-        &Demographics,
-        &ClanMembership,
-        &Exposures,
-        &Memory,
-        &mut Knowledge,
-    )>() {
+    for (_, (id, pos, demo, membership, exposures, mem, knowledge)) in sim
+        .agents
+        .query_mut::<(
+            &AgentId,
+            &Position,
+            &Demographics,
+            &ClanMembership,
+            &Exposures,
+            &Memory,
+            &mut Knowledge,
+        )>()
+    {
         if *id != agent {
             continue;
         }
@@ -502,10 +499,7 @@ pub(crate) fn reveal(sim: &mut Sim, agent: AgentId) -> Option<TechId> {
                 || !tech.prereq_exposure.iter().all(|&e| exposures.has(e))
                 || (!tech.prereq_exposure_any.is_empty()
                     && !tech.prereq_exposure_any.iter().any(|&e| exposures.has(e)))
-                || !tech
-                    .prereq_environment
-                    .iter()
-                    .all(|c| env_access(*c, &tile, mem, (pos.x, pos.y)))
+                || !tech.prereq_environment.iter().all(|c| env_access(*c, &tile, mem, (pos.x, pos.y)))
             {
                 continue;
             }
@@ -528,15 +522,7 @@ pub(crate) fn reveal(sim: &mut Sim, agent: AgentId) -> Option<TechId> {
         agent: Some(agent),
         clan,
     });
-    sim.record(
-        pos,
-        EventKind::TechDiscovered {
-            tech,
-            agent,
-            sex,
-            clan,
-        },
-    );
+    sim.record(pos, EventKind::TechDiscovered { tech, agent, sex, clan });
     Some(tech)
 }
 
@@ -552,8 +538,9 @@ pub(crate) fn insight(sim: &mut Sim) {
     // qu'on ne pourra plus retrouver le jour où on lira le journal.
     let mut told: Vec<((i64, i64), EventKind)> = Vec::new();
 
-    for (_, (id, pos, phys, traits, demo, membership, exposures, skills, mem, knowledge)) in
-        sim.agents.query_mut::<(
+    for (_, (id, pos, phys, traits, demo, membership, exposures, skills, mem, knowledge)) in sim
+        .agents
+        .query_mut::<(
             &AgentId,
             &Position,
             &Physiology,
@@ -578,12 +565,8 @@ pub(crate) fn insight(sim: &mut Sim) {
             continue;
         }
         // Face « raison de penser » : la pression, agrégée à son clan.
-        let Some(clan_id) = membership.0 else {
-            continue;
-        };
-        let Some(pressure) = sim.clan_pressure.get(&clan_id) else {
-            continue;
-        };
+        let Some(clan_id) = membership.0 else { continue };
+        let Some(pressure) = sim.clan_pressure.get(&clan_id) else { continue };
 
         // La tuile courante, pour les prérequis d'environnement. Déjà résidente
         // (la physiologie l'a lue ce tick) — pas de matérialisation en plus.
@@ -599,27 +582,17 @@ pub(crate) fn insight(sim: &mut Sim) {
                 || !tech.prereq_exposure.iter().all(|&e| exposures.has(e))
                 || (!tech.prereq_exposure_any.is_empty()
                     && !tech.prereq_exposure_any.iter().any(|&e| exposures.has(e)))
-                || !tech
-                    .prereq_environment
-                    .iter()
-                    .all(|c| env_access(*c, &tile, mem, (pos.x, pos.y)))
+                || !tech.prereq_environment.iter().all(|c| env_access(*c, &tile, mem, (pos.x, pos.y)))
             {
                 continue;
             }
             // Pression pertinente : la plus forte des pressions listées. Nulle
             // → pas d'insight (le facteur essentiel du §5.2).
-            let pf = tech
-                .pressure
-                .iter()
-                .map(|p| p.of(pressure))
-                .fold(0.0_f32, f32::max);
+            let pf = tech.pressure.iter().map(|p| p.of(pressure)).fold(0.0_f32, f32::max);
             if pf <= 0.0 {
                 continue;
             }
-            let competence = tech
-                .skill
-                .map(|s| s.of(skills))
-                .unwrap_or(NEUTRAL_COMPETENCE);
+            let competence = tech.skill.map(|s| s.of(skills)).unwrap_or(NEUTRAL_COMPETENCE);
             let p = BASE_INSIGHT_PER_DAY * traits.curiosity * competence * pf;
             if rng.next_f64() < f64::from(p) {
                 knowledge.insert(tech.id);
@@ -715,19 +688,11 @@ pub(crate) fn diffuse(sim: &mut Sim) {
         if !has_neighbor {
             continue;
         }
-        let mut rng = Pcg32::new(
-            seed.derive(salt::DIFFUSION) ^ splitmix64(tick),
-            views[i].id.0,
-        );
+        let mut rng = Pcg32::new(seed.derive(salt::DIFFUSION) ^ splitmix64(tick), views[i].id.0);
         // Savoir-faire (ordre trié du BTreeSet → suite de tirages reproductible).
         for &t in &techs_here {
             if views[i].knows.contains(&t)
-                || !sim
-                    .tech_tree
-                    .get(t)
-                    .prereq_techs
-                    .iter()
-                    .all(|p| views[i].knows.contains(p))
+                || !sim.tech_tree.get(t).prereq_techs.iter().all(|p| views[i].knows.contains(p))
             {
                 continue;
             }
@@ -750,9 +715,8 @@ pub(crate) fn diffuse(sim: &mut Sim) {
         if gained_techs[i].is_empty() && gained_exposures[i].is_empty() {
             continue;
         }
-        if let Ok((knowledge, exposures)) = sim
-            .agents
-            .query_one_mut::<(&mut Knowledge, &mut Exposures)>(views[i].entity)
+        if let Ok((knowledge, exposures)) =
+            sim.agents.query_one_mut::<(&mut Knowledge, &mut Exposures)>(views[i].entity)
         {
             for t in &gained_techs[i] {
                 knowledge.insert(*t);
@@ -781,12 +745,8 @@ pub(crate) fn forget(sim: &mut Sim) {
     }
     // On relève d'abord les disparues (l'emprunt de `sim.known_techs` doit être
     // rendu avant d'écrire dans `sim`), puis on les journalise.
-    let lost: Vec<TechId> = sim
-        .known_techs
-        .iter()
-        .copied()
-        .filter(|t| !current.contains(t))
-        .collect();
+    let lost: Vec<TechId> =
+        sim.known_techs.iter().copied().filter(|t| !current.contains(t)).collect();
     for t in lost {
         sim.tech_events.push(TechEvent {
             tick,
@@ -850,13 +810,7 @@ mod tests {
             desired: None,
             rivalry: 0.0,
         });
-        sim.clan_pressure.insert(
-            ClanId(1),
-            ClanPressure {
-                cold,
-                ..Default::default()
-            },
-        );
+        sim.clan_pressure.insert(ClanId(1), ClanPressure { cold, ..Default::default() });
         (sim, a, fire)
     }
 
@@ -867,12 +821,7 @@ mod tests {
         for _ in 0..days {
             sim.time.tick += TICKS_PER_DAY;
             insight(sim);
-            if sim
-                .agents
-                .query::<&Knowledge>()
-                .iter()
-                .any(|(_, k)| k.has(fire))
-            {
+            if sim.agents.query::<&Knowledge>().iter().any(|(_, k)| k.has(fire)) {
                 return true;
             }
         }
@@ -883,10 +832,7 @@ mod tests {
     fn le_feu_se_decouvre_sous_froid_exposition_et_oisivete() {
         // Voie de la friction : bois + silex.
         let (mut sim, _, fire) = scene(1.0, &[Exposure::Flint, Exposure::Wood]);
-        assert!(
-            run_days(&mut sim, fire, 8000),
-            "le feu doit finir par être découvert"
-        );
+        assert!(run_days(&mut sim, fire, 8000), "le feu doit finir par être découvert");
         assert!(
             sim.tech_events.iter().any(|e| e.tech == fire),
             "la découverte doit être journalisée"
@@ -899,10 +845,7 @@ mod tests {
         // silex. Un clan qui n'a jamais croisé de silex peut quand même
         // maîtriser le feu après avoir vu un incendie.
         let (mut sim, _, fire) = scene(1.0, &[Exposure::Wood, Exposure::Fire]);
-        assert!(
-            run_days(&mut sim, fire, 8000),
-            "voir un incendie ouvre aussi la voie du feu"
-        );
+        assert!(run_days(&mut sim, fire, 8000), "voir un incendie ouvre aussi la voie du feu");
     }
 
     #[test]
@@ -910,20 +853,14 @@ mod tests {
         // Ni silex ni feu vu : l'alternative « au moins un parmi » n'est pas
         // remplie → le feu reste hors de portée malgré le bois et le froid.
         let (mut sim, _, fire) = scene(1.0, &[Exposure::Wood]);
-        assert!(
-            !run_days(&mut sim, fire, 8000),
-            "le bois seul n'allume rien"
-        );
+        assert!(!run_days(&mut sim, fire, 8000), "le bois seul n'allume rien");
     }
 
     #[test]
     fn sans_exposition_pas_de_feu() {
         // Mêmes conditions favorables, mais l'agent n'a rien vu du tout.
         let (mut sim, _, fire) = scene(1.0, &[]);
-        assert!(
-            !run_days(&mut sim, fire, 8000),
-            "sans exposition, le feu reste hors de portée"
-        );
+        assert!(!run_days(&mut sim, fire, 8000), "sans exposition, le feu reste hors de portée");
         assert!(sim.tech_events.is_empty(), "aucune découverte journalisée");
     }
 
@@ -932,10 +869,7 @@ mod tests {
         // Exposé et au confort, mais aucune pression (froid nul) : la face
         // « raison de penser » manque → pas d'insight.
         let (mut sim, _, fire) = scene(0.0, &[Exposure::Flint, Exposure::Wood]);
-        assert!(
-            !run_days(&mut sim, fire, 8000),
-            "sans pression, un clan repu n'invente rien"
-        );
+        assert!(!run_days(&mut sim, fire, 8000), "sans pression, un clan repu n'invente rien");
     }
 
     /// L'entité `hecs` d'un agent, par son identifiant stable (pour les tests
@@ -1024,10 +958,7 @@ mod tests {
             .query::<(&AgentId, &Knowledge)>()
             .iter()
             .any(|(_, (id, k))| *id != teacher && k.has(pottery));
-        assert!(
-            !learned,
-            "sans le feu (prérequis), la poterie ne s'apprend pas"
-        );
+        assert!(!learned, "sans le feu (prérequis), la poterie ne s'apprend pas");
     }
 
     /// L'oubli : une tech disparaît du monde quand son **dernier** porteur
@@ -1048,19 +979,13 @@ mod tests {
         // Un porteur meurt : il en reste un → pas d'oubli.
         let _ = sim.agents.despawn(entity_of(&sim, a));
         forget(&mut sim);
-        assert!(
-            sim.known_techs.contains(&fire),
-            "un porteur survit : pas d'oubli"
-        );
+        assert!(sim.known_techs.contains(&fire), "un porteur survit : pas d'oubli");
         assert!(sim.tech_events.is_empty());
 
         // Le dernier porteur meurt : le feu disparaît, journalisé.
         let _ = sim.agents.despawn(entity_of(&sim, b));
         forget(&mut sim);
-        assert!(
-            !sim.known_techs.contains(&fire),
-            "plus aucun porteur : le feu est oublié"
-        );
+        assert!(!sim.known_techs.contains(&fire), "plus aucun porteur : le feu est oublié");
         assert_eq!(sim.tech_events.len(), 1);
         assert_eq!(sim.tech_events[0].kind, TechEventKind::Forgotten);
         assert_eq!(sim.tech_events[0].tech, fire);
@@ -1098,10 +1023,7 @@ mod tests {
             .query::<(&AgentId, &Exposures)>()
             .iter()
             .any(|(_, (id, e))| *id != trader && e.has(Exposure::Wood));
-        assert!(
-            !got_wood,
-            "le bois ne se troque pas (on ne colporte pas une forêt)"
-        );
+        assert!(!got_wood, "le bois ne se troque pas (on ne colporte pas une forêt)");
     }
 
     /// La chaîne du bronze est bien en place, avec son verrou : le bronze exige
@@ -1109,9 +1031,7 @@ mod tests {
     #[test]
     fn la_chaine_du_bronze_est_en_place() {
         let tree = TechTree::embedded();
-        let copper = tree
-            .id_of("copper_metallurgy")
-            .expect("métallurgie du cuivre");
+        let copper = tree.id_of("copper_metallurgy").expect("métallurgie du cuivre");
         let bronze = tree.id_of("bronze").expect("bronze");
         assert_eq!(tree.get(bronze).prereq_techs, vec![copper]);
         assert!(
@@ -1133,9 +1053,8 @@ mod tests {
         let neo: BTreeSet<TechId> = [id("fire_mastery"), id("pottery")].into_iter().collect();
         assert_eq!(age_of(&neo, &tree), Age::Neolithic);
         // Le bronze l'emporte, même en gardant les techs antérieures (le max).
-        let bronze: BTreeSet<TechId> = [id("fire_mastery"), id("pottery"), id("bronze")]
-            .into_iter()
-            .collect();
+        let bronze: BTreeSet<TechId> =
+            [id("fire_mastery"), id("pottery"), id("bronze")].into_iter().collect();
         assert_eq!(age_of(&bronze, &tree), Age::BronzeAge);
     }
 
@@ -1145,17 +1064,10 @@ mod tests {
         assert!(tree.len() >= 3, "l'amorce a au moins feu/cuisson/poterie");
 
         let fire = tree.id_of("fire_mastery").expect("le feu doit exister");
-        assert!(
-            tree.get(fire).prereq_techs.is_empty(),
-            "le feu n'a pas de savoir préalable"
-        );
+        assert!(tree.get(fire).prereq_techs.is_empty(), "le feu n'a pas de savoir préalable");
         // Recette à deux voies : bois obligatoire, puis silex OU feu vu.
         assert!(tree.get(fire).prereq_exposure.contains(&Exposure::Wood));
-        assert!(
-            tree.get(fire)
-                .prereq_exposure_any
-                .contains(&Exposure::Flint)
-        );
+        assert!(tree.get(fire).prereq_exposure_any.contains(&Exposure::Flint));
         assert!(tree.get(fire).prereq_exposure_any.contains(&Exposure::Fire));
         assert!(tree.get(fire).pressure.contains(&TechPressure::Cold));
 
@@ -1192,21 +1104,11 @@ mod tests {
 
     #[test]
     fn les_mappages_lisent_le_bon_facteur() {
-        let p = ClanPressure {
-            famine: 0.1,
-            cold: 0.7,
-            threat: 0.3,
-            crowding: 0.2,
-        };
+        let p = ClanPressure { famine: 0.1, cold: 0.7, threat: 0.3, crowding: 0.2 };
         assert_eq!(TechPressure::Cold.of(&p), 0.7);
         assert_eq!(TechPressure::Threat.of(&p), 0.3);
 
-        let s = Skills {
-            foraging: 0.4,
-            hunting: 0.6,
-            oratory: 0.2,
-            combat: 0.0,
-        };
+        let s = Skills { foraging: 0.4, hunting: 0.6, oratory: 0.2, combat: 0.0 };
         assert_eq!(TechSkill::Foraging.of(&s), 0.4);
         assert_eq!(TechSkill::Hunting.of(&s), 0.6);
     }

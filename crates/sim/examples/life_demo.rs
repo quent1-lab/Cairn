@@ -66,10 +66,7 @@ fn main() {
             }
         }
     }
-    println!(
-        "{placed} agents lâchés dans un rayon de {} m",
-        ring * 12 * 2
-    );
+    println!("{placed} agents lâchés dans un rayon de {} m", ring * 12 * 2);
 
     // Le gibier : semé sur une grille autour du foyer, à ~1,5 km de pas, sur
     // les terres seulement. Densité de départ, pas plafond : la suite est
@@ -105,20 +102,8 @@ fn main() {
 
     println!(
         "{:>4} {:>5} {:>5} | {:>5} {:>5} {:>5} | {:>5} {:>5} {:>5} {:>4} | {:>6} {:>6} {:>6} | {:>6}",
-        "mois",
-        "pop",
-        "naiss",
-        "faim",
-        "soif",
-        "froid",
-        "†faim",
-        "†soif",
-        "†froid",
-        "†âge",
-        "gibier",
-        "loc3km",
-        "prises",
-        "préda"
+        "mois", "pop", "naiss", "faim", "soif", "froid", "†faim", "†soif", "†froid", "†âge",
+        "gibier", "loc3km", "prises", "préda"
     );
 
     let start = std::time::Instant::now();
@@ -279,11 +264,7 @@ fn age_pyramid(sim: &Sim) {
         if n == 0 {
             continue;
         }
-        let label = if i == 16 {
-            "80+ ".to_string()
-        } else {
-            format!("{:>2}-{:<2}", i * 5, i * 5 + 4)
-        };
+        let label = if i == 16 { "80+ ".to_string() } else { format!("{:>2}-{:<2}", i * 5, i * 5 + 4) };
         println!("  {label} | {} {n}", "█".repeat(n.min(60)));
     }
 }

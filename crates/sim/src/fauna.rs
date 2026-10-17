@@ -176,14 +176,14 @@ pub fn accessible_forage_g_m2_yr(biome: Biome) -> f32 {
     use Biome::*;
     match biome {
         Ocean | Coast | Glacier => 0.0,
-        HotDesert | ColdDesert => 9.0, // ~90 × 10 %
-        Tundra => 28.0,                // ~140 × 20 %
-        Taiga => 40.0,                 // ~800 × 5 %
-        TemperateForest => 60.0,       // ~1 200 × 5 %
-        Steppe => 100.0,               // ~350 × 30 %
-        TropicalForest => 110.0,       // ~2 200 × 5 %
-        Grassland => 180.0,            // ~600 × 30 %
-        Savanna => 270.0,              // ~900 × 30 %
+        HotDesert | ColdDesert => 9.0,  // ~90 × 10 %
+        Tundra => 28.0,                 // ~140 × 20 %
+        Taiga => 40.0,                  // ~800 × 5 %
+        TemperateForest => 60.0,        // ~1 200 × 5 %
+        Steppe => 100.0,                // ~350 × 30 %
+        TropicalForest => 110.0,        // ~2 200 × 5 %
+        Grassland => 180.0,             // ~600 × 30 %
+        Savanna => 270.0,               // ~900 × 30 %
     }
 }
 
@@ -571,12 +571,7 @@ pub struct Pack {
 
 impl Pack {
     pub fn new(population: f32, species: Species) -> Self {
-        Self {
-            population,
-            last_kills: 0.0,
-            species,
-            quarry: None,
-        }
+        Self { population, last_kills: 0.0, species, quarry: None }
     }
 }
 
@@ -723,11 +718,7 @@ pub fn pack_kills(population: f32, prey_available: f32) -> f32 {
 fn away_from(pos: (f64, f64), threat: (f64, f64)) -> (f64, f64) {
     let (dx, dy) = (pos.0 - threat.0, pos.1 - threat.1);
     let len = (dx * dx + dy * dy).sqrt();
-    if len < 1e-6 {
-        (1.0, 0.0)
-    } else {
-        (dx / len, dy / len)
-    }
+    if len < 1e-6 { (1.0, 0.0) } else { (dx / len, dy / len) }
 }
 
 /// La menace la plus proche dans `threats`, si elle est dans le `radius` de
@@ -750,11 +741,7 @@ fn nearest_threat(pos: (f64, f64), threats: &[(f64, f64)], radius: f64) -> Optio
 /// des chunks pour ça écroulerait le LRU.
 fn try_move(world: &World, pos: &mut Position, dir: (f64, f64), step: f64) {
     let next = (pos.x + dir.0 * step, pos.y + dir.1 * step);
-    if world
-        .worldgen()
-        .elevation(next.0.floor() as i64, next.1.floor() as i64)
-        > 0.0
-    {
+    if world.worldgen().elevation(next.0.floor() as i64, next.1.floor() as i64) > 0.0 {
         pos.x = next.0;
         pos.y = next.1;
     }
@@ -791,14 +778,8 @@ fn best_pasture(
     let mut acc: (f64, f64, u32) = (0.0, f64::INFINITY, 0);
     for (dx, dy) in [
         (0, 0),
-        (r, 0),
-        (-r, 0),
-        (0, r),
-        (0, -r),
-        (r, r),
-        (-r, r),
-        (r, -r),
-        (-r, -r),
+        (r, 0), (-r, 0), (0, r), (0, -r),
+        (r, r), (-r, r), (r, -r), (-r, -r),
     ] {
         let p = (here.0 + dx, here.1 + dy);
         let tile = world.tile(p.0, p.1);
@@ -843,12 +824,7 @@ fn best_pasture(
 /// qui produit la migration saisonnière — l'hiver rend la bande d'origine
 /// stérile, le troupeau descend, et le printemps le fait remonter. Aucun
 /// calendrier n'est consulté.
-fn migration_heading(
-    world: &mut World,
-    climate: &Climate,
-    pos: (f64, f64),
-    time: SimTime,
-) -> (f64, f64) {
+fn migration_heading(world: &mut World, climate: &Climate, pos: (f64, f64), time: SimTime) -> (f64, f64) {
     let here = (pos.0.floor() as i64, pos.1.floor() as i64);
     let (north, south) = (here.1 - MIGRATE_PROBE_TILES, here.1 + MIGRATE_PROBE_TILES);
     let t_north = {
@@ -859,11 +835,7 @@ fn migration_heading(
         let tile = world.tile(here.0, south);
         climate.daily_mean(&tile, south, time)
     };
-    if t_north > t_south {
-        (0.0, -1.0)
-    } else {
-        (0.0, 1.0)
-    }
+    if t_north > t_south { (0.0, -1.0) } else { (0.0, 1.0) }
 }
 
 /// Durée pendant laquelle une piste de troupeau se lit (CHA-2) : quelques
@@ -883,8 +855,7 @@ pub const TRAIL_SIGHT: f32 = 0.5;
 
 /// Les pistes des troupeaux sauvages : une position par heure, sur
 /// [`TRAIL_HOURS`]. Clé : `FaunaId` (ordre stable).
-pub type HerdTrails =
-    std::collections::BTreeMap<u64, std::collections::VecDeque<((f64, f64), u64)>>;
+pub type HerdTrails = std::collections::BTreeMap<u64, std::collections::VecDeque<((f64, f64), u64)>>;
 
 /// Une heure de pistes : chaque troupeau sauvage laisse sa trace ; les traces
 /// trop vieilles s'effacent ; les troupeaux disparus aussi.
@@ -897,10 +868,7 @@ pub fn lay_trails(fauna: &hecs::World, trails: &mut HerdTrails, tick: u64) {
         alive.insert(id.0);
         let t = trails.entry(id.0).or_default();
         t.push_back(((pos.x, pos.y), tick));
-        while t
-            .front()
-            .is_some_and(|(_, at)| tick.saturating_sub(*at) >= TRAIL_HOURS)
-        {
+        while t.front().is_some_and(|(_, at)| tick.saturating_sub(*at) >= TRAIL_HOURS) {
             t.pop_front();
         }
     }
@@ -910,12 +878,7 @@ pub fn lay_trails(fauna: &hecs::World, trails: &mut HerdTrails, tick: u64) {
 /// La marche de `from` à `to` croise-t-elle une piste fraîche ? Renvoie le
 /// point le plus récent de cette piste (où elle mène) et son heure. Le
 /// pisteur suit la trace : il apprend où le troupeau est passé en dernier.
-pub fn crossed_trail(
-    trails: &HerdTrails,
-    from: (f64, f64),
-    to: (f64, f64),
-    reach: f64,
-) -> Option<((f64, f64), u64)> {
+pub fn crossed_trail(trails: &HerdTrails, from: (f64, f64), to: (f64, f64), reach: f64) -> Option<((f64, f64), u64)> {
     let (mx, my) = ((from.0 + to.0) / 2.0, (from.1 + to.1) / 2.0);
     let half = ((to.0 - from.0).hypot(to.1 - from.1)) / 2.0;
     let mut best: Option<((f64, f64), u64)> = None;
@@ -925,10 +888,7 @@ pub fn crossed_trail(
         if (newest.0.0 - mx).hypot(newest.0.1 - my) > half + km_to_tiles(12.0) {
             continue;
         }
-        let crosses = t
-            .iter()
-            .zip(t.iter().skip(1))
-            .any(|(a, b)| segment_distance(from, to, a.0, b.0) <= reach);
+        let crosses = t.iter().zip(t.iter().skip(1)).any(|(a, b)| segment_distance(from, to, a.0, b.0) <= reach);
         if crosses && best.is_none_or(|(_, at)| newest.1 > at) {
             best = Some(newest);
         }
@@ -938,32 +898,18 @@ pub fn crossed_trail(
 
 /// Distance entre deux segments du plan.
 fn segment_distance(p1: (f64, f64), p2: (f64, f64), q1: (f64, f64), q2: (f64, f64)) -> f64 {
-    let cross = |o: (f64, f64), a: (f64, f64), b: (f64, f64)| {
-        (a.0 - o.0) * (b.1 - o.1) - (a.1 - o.1) * (b.0 - o.0)
-    };
-    let (d1, d2, d3, d4) = (
-        cross(q1, q2, p1),
-        cross(q1, q2, p2),
-        cross(p1, p2, q1),
-        cross(p1, p2, q2),
-    );
+    let cross = |o: (f64, f64), a: (f64, f64), b: (f64, f64)| (a.0 - o.0) * (b.1 - o.1) - (a.1 - o.1) * (b.0 - o.0);
+    let (d1, d2, d3, d4) = (cross(q1, q2, p1), cross(q1, q2, p2), cross(p1, p2, q1), cross(p1, p2, q2));
     if ((d1 > 0.0) != (d2 > 0.0)) && ((d3 > 0.0) != (d4 > 0.0)) {
         return 0.0;
     }
     let point_seg = |p: (f64, f64), a: (f64, f64), b: (f64, f64)| {
         let (abx, aby) = (b.0 - a.0, b.1 - a.1);
         let len2 = abx * abx + aby * aby;
-        let t = if len2 > 0.0 {
-            (((p.0 - a.0) * abx + (p.1 - a.1) * aby) / len2).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
+        let t = if len2 > 0.0 { (((p.0 - a.0) * abx + (p.1 - a.1) * aby) / len2).clamp(0.0, 1.0) } else { 0.0 };
         (p.0 - a.0 - t * abx).hypot(p.1 - a.1 - t * aby)
     };
-    point_seg(p1, q1, q2)
-        .min(point_seg(p2, q1, q2))
-        .min(point_seg(q1, p1, p2))
-        .min(point_seg(q2, p1, p2))
+    point_seg(p1, q1, q2).min(point_seg(p2, q1, q2)).min(point_seg(q1, p1, p2)).min(point_seg(q2, p1, p2))
 }
 
 /// Le système des troupeaux : fuite, pâture, migration, démographie.
@@ -1120,12 +1066,7 @@ pub fn update_herds(
                 herd.state = HerdState::Grazing;
                 let d = ((anchor.0 - pos.x).powi(2) + (anchor.1 - pos.y).powi(2)).sqrt();
                 if d > HERD_LEASH_TILES {
-                    try_move(
-                        world,
-                        pos,
-                        away_from(anchor, (pos.x, pos.y)),
-                        GRAZE_STEP_TILES,
-                    );
+                    try_move(world, pos, away_from(anchor, (pos.x, pos.y)), GRAZE_STEP_TILES);
                 } else {
                     let dx = target.0 as f64 + 0.5 - pos.x;
                     let dy = target.1 as f64 + 0.5 - pos.y;
@@ -1340,7 +1281,8 @@ pub const PACK_SENSE_RADIUS_TILES: f64 = km_to_tiles(2.0);
 /// *forme* de la courbe sur plusieurs ordres de grandeur, pas sa valeur en un
 /// point.
 #[cfg(feature = "fauna-stats")]
-pub const DENSITY_EDGES: [f32; 8] = [1.0, 10.0, 30.0, 100.0, 300.0, 1000.0, 3000.0, f32::INFINITY];
+pub const DENSITY_EDGES: [f32; 8] =
+    [1.0, 10.0, 30.0, 100.0, 300.0, 1000.0, 3000.0, f32::INFINITY];
 
 /// Télémétrie de la faune — **mesure seulement**, aucune rétroaction sur la
 /// simulation, donc aucun risque pour le déterminisme. Type vide hors de la
@@ -1392,16 +1334,8 @@ pub const HERD_CROWD_RADIUS_TILES: f64 = km_to_tiles(2.0);
 /// pratique à `HERD_MIN`). Échelonnées comme `DENSITY_EDGES`, décalées vers le
 /// haut : on cherche la forme sur plusieurs ordres de grandeur.
 #[cfg(feature = "fauna-stats")]
-pub const CROWD_EDGES: [f32; 8] = [
-    30.0,
-    100.0,
-    300.0,
-    1000.0,
-    3000.0,
-    10000.0,
-    30000.0,
-    f32::INFINITY,
-];
+pub const CROWD_EDGES: [f32; 8] =
+    [30.0, 100.0, 300.0, 1000.0, 3000.0, 10000.0, 30000.0, f32::INFINITY];
 
 /// Une classe de densité du recensement quotidien. Deux taux nets, et c'est
 /// leur écart qui compte : le **potentiel** ne voit que la satiété (le
@@ -1587,12 +1521,7 @@ impl FaunaStats {
         if day.saturating_sub(t.start_day) >= RANGE_WINDOW_DAYS {
             let net = (pos.0 - t.window_start.0).hypot(pos.1 - t.window_start.1);
             self.windows.push((t.path, net));
-            *t = Track {
-                window_start: pos,
-                last: pos,
-                path: 0.0,
-                start_day: day,
-            };
+            *t = Track { window_start: pos, last: pos, path: 0.0, start_day: day };
         }
     }
 
@@ -1685,11 +1614,7 @@ impl FaunaStats {
         f.ticks += 1;
         f.satiation_sum += f64::from(satiation);
         // Capacité nulle (océan, glacier) : pas de remplissage définissable.
-        let fill = if cap == 0 {
-            0.0
-        } else {
-            f64::from(found) / f64::from(cap)
-        };
+        let fill = if cap == 0 { 0.0 } else { f64::from(found) / f64::from(cap) };
         f.fill_sum += fill;
         let bin = ((satiation.clamp(0.0, 0.999) * 10.0) as usize).min(9);
         f.sat_hist[bin] += 1;
@@ -1798,10 +1723,7 @@ pub fn update_packs(
                 //   38 % de plus par prédateur qu'en simulation fine.
                 let taken = pack_kills(pack.population, herd.population);
                 pack.last_kills = taken;
-                kills.push(Kill {
-                    herd: herd.entity,
-                    head: taken,
-                });
+                kills.push(Kill { herd: herd.entity, head: taken });
             } else {
                 // Poursuite : la meute suit les troupeaux, donc elle suit
                 // aussi leurs migrations — sans qu'on l'ait écrit.
@@ -2046,8 +1968,7 @@ fn is_valid_pack_site(candidate: (f64, f64), tile: &crate::Tile, packs: &[(f64, 
     }
     !packs.iter().any(|&(px, py)| {
         let d2 = (px - candidate.0).powi(2) + (py - candidate.1).powi(2);
-        d2 < PREDATOR_IMMIGRATION_MIN_PACK_DISTANCE_TILES
-            * PREDATOR_IMMIGRATION_MIN_PACK_DISTANCE_TILES
+        d2 < PREDATOR_IMMIGRATION_MIN_PACK_DISTANCE_TILES * PREDATOR_IMMIGRATION_MIN_PACK_DISTANCE_TILES
     })
 }
 
@@ -2062,18 +1983,14 @@ pub fn daily_predator_immigration(
     seed: WorldSeed,
     time: SimTime,
 ) -> Option<(f64, f64)> {
-    let mut rng = Pcg32::new(
-        seed.derive(salt::PREDATOR_IMMIGRATION) ^ splitmix64(time.tick),
-        0,
-    );
+    let mut rng = Pcg32::new(seed.derive(salt::PREDATOR_IMMIGRATION) ^ splitmix64(time.tick), 0);
     if herds.is_empty() || rng.next_f32() >= PREDATOR_IMMIGRATION_CHANCE_PER_DAY {
         return None;
     }
     let anchor = herds[(rng.next_u32() as usize) % herds.len()];
     let angle = rng.next_f64() * std::f64::consts::TAU;
     let r = PREDATOR_IMMIGRATION_MIN_RADIUS_TILES
-        + rng.next_f64()
-            * (PREDATOR_IMMIGRATION_MAX_RADIUS_TILES - PREDATOR_IMMIGRATION_MIN_RADIUS_TILES);
+        + rng.next_f64() * (PREDATOR_IMMIGRATION_MAX_RADIUS_TILES - PREDATOR_IMMIGRATION_MIN_RADIUS_TILES);
     let candidate = (anchor.0 + angle.cos() * r, anchor.1 + angle.sin() * r);
     let tile = world.tile(candidate.0.floor() as i64, candidate.1.floor() as i64);
     is_valid_pack_site(candidate, &tile, packs).then_some(candidate)
@@ -2090,36 +2007,19 @@ mod tests {
     #[test]
     fn on_remarque_la_piste_qu_on_croise() {
         let mut trails: HerdTrails = std::collections::BTreeMap::new();
-        let trail: std::collections::VecDeque<_> = (0..10u64)
-            .map(|h| (((h * 40) as f64, 0.0), 100 + h))
-            .collect();
+        let trail: std::collections::VecDeque<_> = (0..10u64).map(|h| (((h * 40) as f64, 0.0), 100 + h)).collect();
         trails.insert(1, trail);
         let found = crossed_trail(&trails, (200.0, -500.0), (200.0, 500.0), TRAIL_READ_TILES);
-        assert_eq!(
-            found,
-            Some(((360.0, 0.0), 109)),
-            "la piste mène à son point le plus récent"
-        );
-        assert_eq!(
-            crossed_trail(&trails, (0.0, 50.0), (400.0, 50.0), TRAIL_READ_TILES),
-            None
-        );
+        assert_eq!(found, Some(((360.0, 0.0), 109)), "la piste mène à son point le plus récent");
+        assert_eq!(crossed_trail(&trails, (0.0, 50.0), (400.0, 50.0), TRAIL_READ_TILES), None);
         let mut fauna = hecs::World::new();
         lay_trails(&fauna, &mut trails, 109 + TRAIL_HOURS);
         assert!(trails.is_empty(), "un troupeau disparu n'a plus de piste");
-        fauna.spawn((
-            FaunaId(2),
-            Position { x: 0.0, y: 0.0 },
-            Herd::new(30.0, Species::Deer),
-        ));
+        fauna.spawn((FaunaId(2), Position { x: 0.0, y: 0.0 }, Herd::new(30.0, Species::Deer)));
         for h in 0..(TRAIL_HOURS + 5) {
             lay_trails(&fauna, &mut trails, h);
         }
-        assert_eq!(
-            trails[&2].len() as u64,
-            TRAIL_HOURS,
-            "les traces de plus de deux jours s'effacent"
-        );
+        assert_eq!(trails[&2].len() as u64, TRAIL_HOURS, "les traces de plus de deux jours s'effacent");
     }
 
     #[test]
@@ -2131,14 +2031,8 @@ mod tests {
             repu = herd_population_step(repu, 1.0);
             affame = herd_population_step(affame, 0.0);
         }
-        assert!(
-            repu > 33.0,
-            "un mois de pâture pleine doit faire croître : {repu:.1}"
-        );
-        assert!(
-            affame < 25.0,
-            "un mois sans herbe doit faire fondre : {affame:.1}"
-        );
+        assert!(repu > 33.0, "un mois de pâture pleine doit faire croître : {repu:.1}");
+        assert!(affame < 25.0, "un mois sans herbe doit faire fondre : {affame:.1}");
     }
 
     #[test]
@@ -2161,12 +2055,9 @@ mod tests {
         // herd-ticks : 100 % de déclin en prairie, 0 % en forêt, et pas un seul
         // déclin causé par le broutage. La satiété ne mesurait pas la pâture,
         // elle mesurait le biome.
-        for (nom, k) in [
-            ("steppe", 70u8),
-            ("savane", 90),
-            ("prairie", 110),
-            ("forêt tempérée", 210),
-        ] {
+        for (nom, k) in
+            [("steppe", 70u8), ("savane", 90), ("prairie", 110), ("forêt tempérée", 210)]
+        {
             let s = satiation_from_forage(k, k, 1.0);
             assert!(
                 s > HERB_SATIATION_EQUILIBRIUM,
@@ -2263,10 +2154,7 @@ mod tests {
             sim.step();
         }
         let meutes = sim.fauna.query::<&Pack>().iter().count();
-        assert!(
-            meutes >= 2,
-            "une meute nourrie doit se scinder, on en compte {meutes}"
-        );
+        assert!(meutes >= 2, "une meute nourrie doit se scinder, on en compte {meutes}");
     }
 
     #[test]
@@ -2276,10 +2164,7 @@ mod tests {
             let kills = pack_kills(pop, 1000.0); // gibier abondant
             pop = pack_population_step(pop, kills, 1.0);
         }
-        assert!(
-            pop > 5.0,
-            "avec du gibier à volonté, la meute croît : {pop:.1}"
-        );
+        assert!(pop > 5.0, "avec du gibier à volonté, la meute croît : {pop:.1}");
     }
 
     /// Chantier de dérive, C1 : **une meute ne croît pas plus vite qu'une
@@ -2348,8 +2233,7 @@ mod tests {
         assert!(nearest_threat((0.0, 0.0), &[(loin, 0.0)], FLEE_RADIUS_TILES).is_none());
         assert!(nearest_threat((0.0, 0.0), &[(10.0, 0.0)], FLEE_RADIUS_TILES).is_some());
         // La plus proche gagne.
-        let t =
-            nearest_threat((0.0, 0.0), &[(200.0, 0.0), (10.0, 0.0)], FLEE_RADIUS_TILES).unwrap();
+        let t = nearest_threat((0.0, 0.0), &[(200.0, 0.0), (10.0, 0.0)], FLEE_RADIUS_TILES).unwrap();
         assert_eq!(t, (10.0, 0.0));
     }
 
@@ -2360,22 +2244,10 @@ mod tests {
         // Biomes à candidat unique : le tirage est déterministe quel que soit
         // le RNG — c'est « le bon animal au bon endroit ».
         let mut rng = Pcg32::new(1, 0);
-        assert_eq!(
-            Species::herbivore_for_biome(Biome::Grassland, &mut rng),
-            Species::Aurochs
-        );
-        assert_eq!(
-            Species::herbivore_for_biome(Biome::Savanna, &mut rng),
-            Species::Gazelle
-        );
-        assert_eq!(
-            Species::herbivore_for_biome(Biome::Tundra, &mut rng),
-            Species::Reindeer
-        );
-        assert_eq!(
-            Species::herbivore_for_biome(Biome::TemperateForest, &mut rng),
-            Species::Deer
-        );
+        assert_eq!(Species::herbivore_for_biome(Biome::Grassland, &mut rng), Species::Aurochs);
+        assert_eq!(Species::herbivore_for_biome(Biome::Savanna, &mut rng), Species::Gazelle);
+        assert_eq!(Species::herbivore_for_biome(Biome::Tundra, &mut rng), Species::Reindeer);
+        assert_eq!(Species::herbivore_for_biome(Biome::TemperateForest, &mut rng), Species::Deer);
     }
 
     #[test]
@@ -2415,14 +2287,8 @@ mod tests {
         for r in 0..400i64 {
             let d = r * step;
             for &(x, y) in &[
-                (d, 0),
-                (-d, 0),
-                (0, d),
-                (0, -d),
-                (d, d),
-                (-d, d),
-                (d, -d),
-                (-d, -d),
+                (d, 0), (-d, 0), (0, d), (0, -d),
+                (d, d), (-d, d), (d, -d), (-d, -d),
             ] {
                 let p = (from.0 + x, from.1 + y);
                 let tile = world.tile(p.0, p.1);
@@ -2485,10 +2351,7 @@ mod tests {
                 break;
             }
         }
-        assert!(
-            found,
-            "aucune immigration en ~5,5 ans simulés sur une zone giboyeuse vide"
-        );
+        assert!(found, "aucune immigration en ~5,5 ans simulés sur une zone giboyeuse vide");
     }
 
     /// Le pendant du critère précédent : une zone déjà dense en troupeaux
@@ -2536,10 +2399,7 @@ mod tests {
         let land = find_lush(&mut world, (0, 0));
         let tile = world.tile(land.0, land.1);
         let candidate = (land.0 as f64 + 0.5, land.1 as f64 + 0.5);
-        assert!(
-            is_valid_pack_site(candidate, &tile, &[]),
-            "terre sans meute voisine : site valide"
-        );
+        assert!(is_valid_pack_site(candidate, &tile, &[]), "terre sans meute voisine : site valide");
     }
 
     #[test]
@@ -2553,11 +2413,7 @@ mod tests {
             "une meute à 10 tuiles doit invalider le site"
         );
         assert!(
-            is_valid_pack_site(
-                candidate,
-                &tile,
-                &[(candidate.0 + km_to_tiles(50.0), candidate.1)]
-            ),
+            is_valid_pack_site(candidate, &tile, &[(candidate.0 + km_to_tiles(50.0), candidate.1)]),
             "une meute à 50 km ne doit pas gêner"
         );
     }
@@ -2578,10 +2434,7 @@ mod tests {
                 break;
             }
         }
-        assert!(
-            found,
-            "un prédateur doit finir par réapparaître près d'un troupeau isolé"
-        );
+        assert!(found, "un prédateur doit finir par réapparaître près d'un troupeau isolé");
     }
 
     /// Le pendant : sans le moindre gibier, aucun prédateur n'immigre — un
@@ -2591,9 +2444,7 @@ mod tests {
         let mut world = World::new(WorldSeed(42), 16);
         for day in 0..500u64 {
             let time = SimTime { tick: day * 24 };
-            assert!(
-                daily_predator_immigration(&[], &[], &mut world, WorldSeed(42), time).is_none()
-            );
+            assert!(daily_predator_immigration(&[], &[], &mut world, WorldSeed(42), time).is_none());
         }
     }
 }
