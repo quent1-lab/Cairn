@@ -367,3 +367,20 @@ départ j135, `main` (MOR-4 + correctif) contre cueillette (idem).
 2. Cueillette contre `main`, apparié seed par seed (froid 7 lu à part) : mortalité 1-4 ans
    plus haute sur ≤ 4/8 runs si le sevrage a résorbé l'effet ; heures de soif saturée à ±30 %.
 Réfuterait 2 (et bloquerait le report) : mortalité 1-4 ans plus haute sur ≥ 6/8 runs.
+
+## MOR-4b — l'orphelin sevré est pris en charge (branche `exp/orphelins`, 2026-10-17)
+
+Décision de l'utilisateur : « dans la réalité, un orphelin est pris en charge par les
+autres même après le sevrage, jusqu'à ce qu'il soit autonome. » Débat, point 5.
+Changement : un orphelin de 6 à 36 mois sans nourrice peut être pris par **n'importe quel
+adulte** à portée de résidence, d'autant plus volontiers qu'il lui est apparenté (même tirage
+que l'allomaternage : parenté, puis bande 5 %/j, puis étranger 1 %/j) ; ce porteur
+(`Sim::carers`) le porte, le fait boire et le nourrit, **sans lait** (seules la mère et la
+nourrice allaitent). Les 3-13 ans orphelins ne suivent encore personne (jalon suivant).
+Test `un_orphelin_sevre_est_pris_en_charge_et_boit_avec_son_porteur`, vu rouge.
+Prédictions, acceptation 5 ans appariée contre `main` (MOR-4 + correctif de l'eau) :
+1. Morts de soif et de faim des 6-36 mois en baisse sur ≥ 5/8 runs ; part « sans mère » des
+   heures de soif saturée (banc `soif`) divisée par ≥ 2.
+2. Mortalité < 1 an inchangée (les < 6 mois orphelins restent sans lait) ; 1-4 ans en baisse.
+3. Porteurs : faim légèrement plus haute (ils nourrissent l'enfant).
+Réfuterait 1 : aucune baisse sur ≥ 5/8 (peu d'orphelins sevrés, ou recueil trop lent à 5 %/j).
