@@ -696,7 +696,7 @@ impl SocialGraph {
 
 /// Les liens de parenté directe comptent comme une rencontre à part : mère,
 /// père, ou fratrie (même mère ou même père connu).
-fn are_kin(a_id: AgentId, a: &Kinship, b_id: AgentId, b: &Kinship) -> bool {
+pub(crate) fn are_kin(a_id: AgentId, a: &Kinship, b_id: AgentId, b: &Kinship) -> bool {
     a.mother == Some(b_id)
         || a.father == Some(b_id)
         || b.mother == Some(a_id)

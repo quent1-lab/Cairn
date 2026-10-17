@@ -644,3 +644,27 @@ nés dans l'année).
 2. Affinité moyenne des non-parents ≥ 0,4 (le camp est fait de liens forts).
 Seuil : si les non-parents font ≥ 60 % des voisins, MOR-5c1 pondère la contagion par le lien
 (parents : plein ; autres : selon l'affinité) ; sinon la portée n'est pas en cause.
+
+### MOR-5c0 — mesuré (acceptation 1 an, 8 runs, 3de9a2b)
+À minuit, à 10 m : **7,6 voisins** par personne, dont **0,1 parent direct** ; affinité moyenne des
+autres **0,41** ; 1,07 voisin malade. Contrôle : morts de maladie identiques à MOR-5b.
+1. ≥ 8 voisins dont ≤ 3 parents : **tenue** à la marge (7,6 ; 0,1). 2. Affinité ≥ 0,4 : **tenue**.
+Régime : à 1 an, les fondateurs ne sont pas apparentés ; le foyer n'existe qu'entre une mère et
+son nourrisson. Seuil atteint (non-parents ~99 % des voisins) → MOR-5c1.
+Ordre de grandeur (calcul) : par épisode de 3-4 nuits, R ≈ 19 % × 7,6 ≈ 1,4 (digestive) et
+34 % × 7,6 ≈ 2,6 (respiratoire) — des chaînes qui s'entretiennent.
+
+## MOR-5c1 — la contagion suit le lien (2026-10-17)
+Changement (`disease::daily`) : par malade couché à 10 m, chance β × contact ; contact 1 pour
+le foyer (parents directs, fratrie, les deux parents d'un même enfant), l'affinité du lien pour
+les autres, 0 pour un inconnu. Test `la_contagion_de_nuit_suit_le_lien`, vu rouge (lien 0,5 :
+9,7 % par nuit au lieu de ~5 %). Les contacts du jour (travail, partage) ne sont pas encore
+simulés : jalon suivant possible si la mesure laisse un manque.
+Prédictions, acceptation 5 ans × 8 runs contre MOR-5a (même scène, 5 ans) — R passe à ~0,6
+(digestive) et ~1,1 (respiratoire) :
+1. Adultes 15-39 : diarrhées ≤ 3/an (6,5 ; eau ~1,7). Réfuterait : ≥ 4,5.
+2. Adultes : respiratoires 1,5-5/an (7,3) ; réfuterait ≥ 6.
+3. Maladie 15-39 ans : 53 → ≤ 25 ‰/an.
+4. < 1 an : épisodes en baisse de ≤ 50 % (le nourrisson reste au contact plein de sa mère).
+5. Mortalité 1-4 ans en baisse sur ≥ 6/8 runs ; mourir avant 15 ans < 69 %.
+Voisins à surveiller : population plus forte ⇒ faim, soif, camp (rien de prédit en chiffre).

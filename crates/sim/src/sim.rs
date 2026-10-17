@@ -3230,6 +3230,49 @@ mod tests {
     }
 
     #[test]
+    fn la_contagion_de_nuit_suit_le_lien() {
+        // MOR-5c1 : un malade couché à côté contamine son foyer à plein, les
+        // autres selon le lien qui les unit, un inconnu presque pas.
+        let taux = |lien: &str| -> f64 {
+            let (mut sim, home) = scenario_setup(42, 0, 0);
+            let (x, y) = (home.0 as f64 + 0.5, home.1 as f64 + 0.5);
+            let sick = sim.spawn_agent(x, y);
+            let other = if lien == "enfant" {
+                sim.spawn_child(x, y, Sex::Male, Traits::default(), Kinship { mother: Some(sick), father: None })
+            } else {
+                sim.spawn_agent(x, y)
+            };
+            if lien == "ami" {
+                sim.social.bonds.insert((sick.0.min(other.0), sick.0.max(other.0)), 0.5);
+            }
+            let mut infected = 0;
+            let nights = 2000;
+            for n in 0..nights {
+                sim.time.tick = (n + 1) * TICKS_PER_DAY;
+                for (_, (id, ill)) in sim.agents.query_mut::<(&AgentId, &mut Illness)>() {
+                    *ill = Illness::default();
+                    if *id == sick {
+                        ill.active[disease::Route::Lung as usize] =
+                            Some(disease::Infection { severity: 0.5, virulence: 0.0, contagion: false });
+                    }
+                }
+                disease::daily(&mut sim);
+                infected += sim
+                    .agents
+                    .query::<(&AgentId, &Illness)>()
+                    .iter()
+                    .filter(|(_, (id, ill))| **id == other && ill.is_sick(disease::Route::Lung))
+                    .count();
+            }
+            infected as f64 / nights as f64
+        };
+        let (enfant, ami, inconnu) = (taux("enfant"), taux("ami"), taux("inconnu"));
+        assert!((0.07..0.13).contains(&enfant), "le foyer à plein (10 %/nuit) : {enfant}");
+        assert!((0.03..0.07).contains(&ami), "un lien de 0,5 : moitié moins : {ami}");
+        assert!(inconnu < 0.01, "un inconnu presque pas : {inconnu}");
+    }
+
+    #[test]
     fn le_lait_ne_tarit_que_dans_une_famine_qui_dure() {
         let infant_thirst_after = |exhausted: bool| -> f32 {
             let (mut sim, home) = scenario_setup(42, 0, 0);

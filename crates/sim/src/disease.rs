@@ -27,7 +27,10 @@
 
 use cairn_core::{Pcg32, TICKS_PER_DAY, km_to_tiles, splitmix64};
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use crate::agent::{AgentId, Position};
+use crate::demography::Kinship;
 use crate::salt;
 use crate::sim::Sim;
 
@@ -72,7 +75,8 @@ const WATER_BACKGROUND_P: f64 = 0.002;
 const WATER_PER_HUMAN_P: f64 = 0.0002;
 pub const SOIL_RADIUS_TILES: f64 = km_to_tiles(0.1);
 /// Contagion de nuit : distance d'un dormeur à un malade, chance par nuit et
-/// par malade (voie digestive : mains, nourriture partagée).
+/// par malade **du foyer** (voie digestive : mains, nourriture partagée). Hors
+/// du foyer, la chance suit le lien (MOR-5c1, voir [`daily`]).
 const CONTACT_RADIUS_TILES: f64 = km_to_tiles(0.01);
 const GUT_CONTACT_P: f64 = 0.05;
 /// Respiratoire : la contagion par l'air porte plus loin dans le sommeil
@@ -196,31 +200,61 @@ fn gaussian(rng: &mut Pcg32) -> f32 {
 
 /// La contagion de la nuit, à minuit : chaque dormeur sain s'expose aux
 /// malades couchés près de lui, voie par voie (une plaie ne se transmet pas).
+///
+/// MOR-5c1 (2026-10-17) : la proximité du sommeil ne suffit pas, c'est le
+/// **contact** qui transmet — mains, nourriture, enfant porté. Le foyer
+/// (parents directs, et les deux parents d'un même enfant) y est exposé à
+/// plein ; les autres dormeurs à proportion de leur lien (`SocialGraph`), un
+/// inconnu presque pas. L'attaque secondaire réelle en foyer, 15-38 % par
+/// épisode, est l'ordre de `GUT_CONTACT_P` et `LUNG_CONTACT_P` sur 3-4 nuits.
 pub(crate) fn daily(sim: &mut Sim) {
     let tick = sim.time.tick;
     let seed = sim.world.seed();
+    let kinship: BTreeMap<u64, Kinship> =
+        sim.agents.query::<(&AgentId, &Kinship)>().iter().map(|(_, (id, k))| (id.0, *k)).collect();
+    // Les couples : les deux parents connus d'un même enfant.
+    let couples: BTreeSet<(u64, u64)> = kinship
+        .values()
+        .filter_map(|k| Some((k.mother?.0, k.father?.0)))
+        .map(|(a, b)| (a.min(b), a.max(b)))
+        .collect();
+    let household = |a: AgentId, b: AgentId| -> bool {
+        couples.contains(&(a.0.min(b.0), a.0.max(b.0)))
+            || match (kinship.get(&a.0), kinship.get(&b.0)) {
+                (Some(ka), Some(kb)) => crate::social::are_kin(a, ka, b, kb),
+                _ => false,
+            }
+    };
     for (route, beta) in [(Route::Gut, GUT_CONTACT_P), (Route::Lung, LUNG_CONTACT_P)] {
-        let sick: Vec<(f64, f64)> = sim
+        let sick: Vec<(AgentId, f64, f64)> = sim
             .agents
-            .query::<(&Position, &Illness)>()
+            .query::<(&AgentId, &Position, &Illness)>()
             .iter()
-            .filter(|(_, (_, ill))| ill.is_sick(route))
-            .map(|(_, (pos, _))| (pos.x, pos.y))
+            .filter(|(_, (_, _, ill))| ill.is_sick(route))
+            .map(|(_, (id, pos, _))| (*id, pos.x, pos.y))
             .collect();
         if sick.is_empty() {
             continue;
         }
         let r2 = CONTACT_RADIUS_TILES * CONTACT_RADIUS_TILES;
         let stream = seed.derive(salt::CONTAGION) ^ splitmix64(tick) ^ route as u64;
+        let social = &sim.social;
         for (_, (id, pos, ill)) in sim.agents.query_mut::<(&AgentId, &Position, &mut Illness)>() {
             if ill.is_sick(route) {
                 continue;
             }
-            let k = sick.iter().filter(|(x, y)| (pos.x - x).powi(2) + (pos.y - y).powi(2) <= r2).count();
-            if k == 0 {
+            let mut escape = 1.0;
+            for &(s, x, y) in &sick {
+                if (pos.x - x).powi(2) + (pos.y - y).powi(2) > r2 {
+                    continue;
+                }
+                let contact = if household(*id, s) { 1.0 } else { f64::from(social.affinity(*id, s)) };
+                escape *= 1.0 - beta * contact;
+            }
+            let p = 1.0 - escape;
+            if p <= 0.0 {
                 continue;
             }
-            let p = 1.0 - (1.0 - beta).powi(k as i32);
             let mut rng = Pcg32::new(stream, id.0);
             if rng.next_f64() < p && ill.infect(route, tick, &mut rng) {
                 if let Some(inf) = ill.active[route as usize].as_mut() {
