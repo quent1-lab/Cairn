@@ -180,7 +180,7 @@ Demande de l'utilisateur : chaque chantier a un code, chaque étape un jalon num
 
 ### 5.2 Ordre (révisé 2026-10-10)
 
-1. **MAR-6** en cours (2026-10-16) : ✔ MAR-6a0, ✔ MAR-6a ; **MAR-6c** la cueillette rapportée au camp (branche `exp/cueillette`, approuvée par l'utilisateur, non reportée : mortalité 1-4 ans en hausse par la seule voie du lait → **MOR-4 en amont**, à trancher) ; **MAR-6b** lever le camp (branches `exp/camp`, `exp/camp-jour` (a', a''), `exp/camp-huttes` (b)) : la règle de départ dérive (prises bosselées contre habitude lissée, aucune mémoire des lieux) — questions à l'utilisateur ; récit du gibier (`exp/raconter-seul`) après. Puis **MAR-8**, **MAR-7**, **CHA-3**, **MAR-5**, **MAR-3** ; **CHA-4** quand le gibier boira.
+1. **MAR-6** en cours (2026-10-16) : ✔ MAR-6a0, ✔ MAR-6a ; ✔ **MAR-6c** la cueillette rapportée au camp (sur `main` le 2026-10-17 ; marche −2 à −6 km/j, mortalité des petits sans direction commune sur 16 runs) ; **MAR-6b** lever le camp (branches `exp/camp`, `exp/camp-jour` (a', a''), `exp/camp-huttes` (b)) : la règle de départ dérive (prises bosselées contre habitude lissée, aucune mémoire des lieux) — questions à l'utilisateur ; récit du gibier (`exp/raconter-seul`) après. Puis **MAR-8**, **MAR-7**, **CHA-3**, **MAR-5**, **MAR-3** ; **CHA-4** quand le gibier boira.
 2. **ENE-4** — remesurer l'alimentation (D10) avec la dépense réelle.
 3. **MOR-4** sevrage, puis **MOR-5**, **MOR-6**, **MOR-7**.
 4. **ENE-5** si la mesure le demande ; **CUR** (lecture).

@@ -443,3 +443,16 @@ Prédictions, acceptation 5 ans (8 runs) contre `main` (MOR-4 + correctif) :
 3. Mortalité < 1 an et 1-4 ans en baisse sur ≥ 5/8 runs.
 4. Marche des femmes : +0 à +0,5 km/j (trajets d'eau en plus).
 Réfuterait 1 : ≥ 300 heures.
+
+### Cueillette + MOR-4 — quatre seeds de plus (11, 23, 99, 314 ; acceptation 5 ans, départ j135)
+
+| run | t11 | t23 | t99 | t314 | f11 | f23 | f99 | f314 |
+|---|---|---|---|---|---|---|---|---|
+| 1-4 ans `main` (‰/an) | 168 | 85 | 86 | 99 | 508 | 337 | — | 204 |
+| 1-4 ans cueillette | 302 | 24 | 150 | 132 | 244 | 81 | — | 91 |
+Agrégat 1-4 ans : `main` 218, cueillette **141** ‰ (première série : 144 et 213) ; mourir
+avant 15 ans 68 % contre 56 %. Sur les 15 runs comparables : en hausse 8, en baisse 6, égal 1
+— **sans direction commune** ; l'effet de la première série était du bruit. Marche en baisse
+sur 15/15 (−2 à −6 km/j). Seuil de blocage écrit (≥ 6/8 en hausse) non atteint dans aucune
+série : **cueillette rapportée reportée sur `main`** (décision de l'utilisateur du
+2026-10-16, protocole tenu : 5 ans, 16 runs).
