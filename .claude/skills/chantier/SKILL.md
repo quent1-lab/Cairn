@@ -5,6 +5,11 @@ description: La boucle de travail de Cairn pour tout chantier ou jalon (MAR-6b, 
 
 # Chantier — la boucle (CLAUDE.md, règles 1-10)
 
+**Mode léger** pour un changement local et réversible sans affirmation chiffrée (coquille,
+renommage, banc, doc) : test qui échoue, correction, test qui passe, commit. **Mode
+complet** (ci-dessous) pour tout ce qui touche un comportement, un effectif, une décision de
+modèle. Réflexion d'où viennent les ajouts : `~/claude-methode/REFLEXION.md`.
+
 Suivre les étapes **dans l'ordre**. Cocher en écrivant dans le fichier du chantier,
 `docs/domaines/<domaine>/chantiers/<CODE>.md` (skill `dossiers`) : ce fichier est la trace,
 pas la réponse. Les sorties brutes des bancs restent dans `out/`.
@@ -44,11 +49,19 @@ pas la réponse. Les sorties brutes des bancs restent dans `out/`.
 - **ce qui réfuterait** (une clause explicite) ;
 - le régime (saisons, scènes, seeds, horizon).
 
+## 4 bis. Pré-mortem (si la mesure dure plus de 30 min)
+Agent `contradicteur` sur la conception et les prédictions (skill `debat`) : le banc voit-il
+l'effet **dans ce régime et cet horizon** (une acceptation d'un an ne contient aucun enfant
+de plus de 6 mois) ? Les cas limites sont-ils traités (le premier jour à un nouveau camp,
+l'orphelin, l'eau non douce) ? Dix minutes contre des heures de runs.
+
 ## 5. Le test de reproduction rouge
 - Écrire le test qui doit échouer **sans** le changement. Le voir échouer : neutraliser
   le changement par une ligne marquée `// TEMP-ROUGE`, lancer le test ciblé, rétablir,
   vérifier `grep -c TEMP-ROUGE` = 0.
 - Un test qui passe avant le correctif ne prouve rien (règle 6).
+- Il **vise la grandeur prédite** (« l'enfant est nourri à sa faim », pas « sa faim baisse un
+  peu ») : le premier sevrage passait un test au seuil trop lâche.
 
 ## 6. Corriger — un changement, une chose
 - Une branche ou un commit par mécanisme. **Jamais empiler** deux expériences : chaque
@@ -65,7 +78,11 @@ pas la réponse. Les sorties brutes des bancs restent dans `out/`.
   comportement, 10 ans au banc `longue` pour les effectifs, acceptation 1 an après le
   chantier, 5 ans avant un report.
 - Une affirmation sur les effectifs ne compte que si elle va **dans le même sens sur
-  toutes les runs** (règle 7) ; sinon « sans direction commune ».
+  toutes les runs** (règle 7) ; sinon « sans direction commune ». Un **seuil de
+  décision** s'écrit avant ; ambigu → doubler les seeds avant de trancher (la cueillette :
+  « 7/8 » à 8 runs, sans direction à 16).
+- Chaque chiffre porte le **commit ou la variante** qui l'a produit ; un chiffre d'avant un
+  changement ne conclut pas après.
 
 ## 8. Valider et relever les voisins
 - Confronter chaque prédiction : tenu / réfuté / sens réfuté, avec les chiffres, dans un

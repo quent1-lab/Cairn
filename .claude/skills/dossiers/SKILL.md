@@ -20,6 +20,9 @@ Index : `docs/domaines/README.md`.
 | décrire ce que fait un module | `docs/CODE.md` (carte globale) et `<domaine>/CONTEXTE.md` § Modules |
 | garder une sortie brute de banc | `out/<chantier>/` (non suivi par git, jamais de conclusion) |
 
+**Un fait, un endroit** : ailleurs, un lien, pas une copie (la carte, les dossiers et
+CLAUDE.md finiraient par diverger).
+
 `docs/JOURNAL.md` et `docs/ETAT.md` sont des **archives** (avant le 2026-10-16) : on y
 cherche par `grep`, on n'y écrit plus.
 

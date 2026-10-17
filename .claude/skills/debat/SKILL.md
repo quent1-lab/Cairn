@@ -6,6 +6,8 @@ description: Faire débattre un chantier de Cairn par l'agent contradicteur (Opu
 # Débat — un regard neuf qui conteste
 
 ## Quand
+- **Pré-mortem** : avant une mesure de plus de 30 min ou un changement difficile à défaire —
+  « qu'est-ce qui ferait mentir cette mesure ou rater ce changement ? »
 - À la **fin d'un jalon mesuré**, avant la clôture (c'est l'étape « ce que j'ai pu
   manquer », règle 9.6, faite par un autre).
 - Après **deux prédictions réfutées de suite** sur le même chantier.
