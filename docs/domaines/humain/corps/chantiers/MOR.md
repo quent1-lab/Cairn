@@ -430,3 +430,16 @@ de lait), et le porteur boit selon **sa** soif, qui monte bien plus lentement qu
 enfant qui ne boit rien d'autre : entre deux gorgées, l'enfant sature. Avant, l'orphelin
 mourait vite ; porté, il souffre plus longtemps. Il manque ce que fait tout porteur réel :
 **boire aussi pour l'enfant qu'il porte** (MOR-4b', ci-dessous).
+
+## MOR-4b' — on boit aussi pour l'enfant qu'on porte (branche `exp/orphelins`, 2026-10-17)
+
+Changement : l'envie d'aller boire d'un porteur (mère, nourrice, porteur d'un orphelin sevré)
+suit la plus forte des deux soifs, la sienne et celle de l'enfant porté. Test
+`on_boit_aussi_pour_l_enfant_qu_on_porte`, vu rouge. Touche aussi les mères (leur enfant
+sevré tire une part de son eau du lait, le reste des gorgées de sa mère).
+Prédictions, acceptation 5 ans (8 runs) contre `main` (MOR-4 + correctif) :
+1. Heures-enfant en soif saturée (banc `soif`) ≤ 200 (`main` 348, MOR-4b 618).
+2. Morts de soif < 1 an et 1-4 ans : ≤ 8 chacune (14 et 16).
+3. Mortalité < 1 an et 1-4 ans en baisse sur ≥ 5/8 runs.
+4. Marche des femmes : +0 à +0,5 km/j (trajets d'eau en plus).
+Réfuterait 1 : ≥ 300 heures.
