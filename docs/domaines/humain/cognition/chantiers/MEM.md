@@ -76,3 +76,17 @@ Questions pour valider avant MEM-1 : (1) la maille de 2 km ; (2) une forme
 « passage = renfort selon l'impact, effacement vers un plancher qui monte avec les
 répétitions », à mesurer au banc plutôt qu'à chiffrer d'avance ; (3) le danger dans la
 même mémoire.
+
+## Décision de l'utilisateur (2026-10-17, soir)
+
+Validé : maille de 2 km ; forme « passage = renfort selon l'impact, effacement vers un
+plancher qui monte avec les répétitions », mesurée au banc ; le danger dans la même mémoire.
+« Il faudra chercher et sourcer ce qui pourrait être intéressant de mémoriser » : sourçage
+lancé (catégories de lieux, mémoire saisonnière, durée du souvenir, transmission, taille du
+territoire connu, refuges de disette) → `SOURCES.md` du domaine.
+
+**Ordre des jalons revu** (relecture des chantiers, 2026-10-17) : MEM-1 (carte vécue), puis
+**MEM-4 avant MEM-3** — les sources d'eau passent dans la même force du souvenir (oubli par
+l'usage, plus par la distance), ce qui touche la soif et les trajets d'eau (MAR-5) ; puis
+MEM-3 (les choix lisent la mémoire : retire l'omniscience de `brain` et de `camp`, donne enfin
+un gain à l'exploration — CUR), puis MEM-2 (ce qu'on se raconte).

@@ -487,3 +487,49 @@ heures), ce qui n'arrivait pas sur `main`. Hypothèses à instrumenter avant tou
 une mère qui porte aussi un orphelin ; un porteur désigné alors que la mère vit (relevé du
 porteur réel dans le banc `soif`) ; une mère qui part boire loin et s'arrête faute
 d'atteindre la source. Branche gardée, non reportée.
+
+## Décisions de l'utilisateur (2026-10-17, soir)
+
+- **MOR-5 d'abord** (la maladie trop létale, en amont de MOR-4c) : d'accord.
+- **Orphelins** : d'accord pour instrumenter les trois hypothèses de la soif à mère présente
+  (mère qui porte aussi un orphelin ; porteur désigné alors que la mère vit ; trajet d'eau
+  inabouti) avant toute correction. Branche `exp/orphelins` gardée.
+- **Mémoire** : forme validée (MEM.md) ; chercher et sourcer ce qu'il serait utile de retenir.
+
+## MOR-5 — la maladie trop létale (ouvert le 2026-10-17)
+
+**Référence** : Gurven et Kaplan 2007 (ci-dessus) — survie à 15 ans ~55-65 %, adultes
+15-40 ans ~1 %/an toutes causes, dont maladie ~70 % (~5-7 ‰). **Écart** : adultes 15-39 ans
+14 ‰/an de maladie seule (adf01e8) ; mourir avant 15 ans 58 % sur `main` (MOR-4), 72 % sous
+MOR-4c ; < 1 an 290 ‰ (réel ~200).
+
+**Lecture du code** (`disease.rs`, 19e74e0) : la létalité d'un épisode n'est écrite nulle
+part, elle vaut ≈ P(virulence > clairance × défense), virulence log-normale (médiane 0,165,
+σ 0,6), défense = maturité × expérience × (1 − 0,5 faim) × (1 − 0,3 froid). Ordres de
+grandeur qui en découlent (calcul, pas mesure) :
+| hôte | défense | létalité/épisode |
+|---|---|---|
+| adulte aguerri, nourri, au chaud | 0,99 | ~0,15 % |
+| même, faim 0,5 / faim 1 | 0,74 / 0,49 | ~0,6 % / ~3 % |
+| nouveau-né sans lait / allaité | 0,24 / 0,48 | ~27 % / ~4 % |
+| 1 an sevré, 1 épisode vécu | 0,37 | ~9 % |
+| 2 ans sevré, 3 épisodes | 0,55 | ~2 % |
+Trois défauts possibles, que les chiffres d'aujourd'hui ne départagent pas :
+- **H1 — trop d'épisodes** : l'eau souille à 0,2 % + 0,02 %/humain proche par gorgée (0,8 %
+  près d'un camp de 30), la contagion à 5-10 % par nuit et par malade à 20 m ; seule une
+  convalescence de 30 j borne la fréquence. **Le nombre d'épisodes par an n'est pas mesuré.**
+- **H2 — trop létal par épisode chez l'enfant** : l'hôte naïf part à 0,6 d'expérience et la
+  maturité à 0,4.
+- **H3 — la faim de l'heure, pas les réserves** : la défense lit `hunger` (qui monte en
+  quelques heures, retombe au repas) ; la malnutrition réelle est un état des réserves. Une
+  virulence fixée à l'infection, jugée heure par heure contre une défense qui oscille avec
+  les repas, tue sur un creux.
+
+**MOR-5a — instrumenter (observation seule)** : par classe d'âge et par voie, épisodes par
+personne-année, létalité observée par épisode, défense moyenne à l'infection et au décès ;
+deux compteurs qui doivent concorder : morts de maladie (cause de décès) et épisodes × létalité.
+Référence à sourcer avant la mesure (`sourceur`) : épisodes de diarrhée et d'infection
+respiratoire par an chez l'enfant et l'adulte sans assainissement, létalité par épisode.
+Prédictions (à figer une fois les références sourcées, avant le banc) et seuil de décision :
+si les épisodes adultes dépassent le double de la référence → l'exposition (H1) d'abord ; si
+leur nombre est réel et la létalité trop haute → la défense (H2, H3).

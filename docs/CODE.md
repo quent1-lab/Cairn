@@ -169,24 +169,34 @@ Demande de l'utilisateur : chaque chantier a un code, chaque étape un jalon num
 
 | Code | Chantier | Jalons (✔ fait · ▶ en cours · ○ à faire) | Détail |
 |---|---|---|---|
-| **MOR** | Mortalité de fond, causée | ✔ MOR-1 maladie digestive · ✔ MOR-2 respiratoire · ✔ MOR-3 plaies · ✔ MOR-4 sevrage (exclusif 6 mois, lait 70/55/40/20 %, eau bue avec la mère, repas donné à la faim, sevré à 3 ans ; 5 ans : niveau du témoin) · ○ MOR-5 relire la maladie des adultes (14-24 ‰ contre ~5-7 réels) et la défense sur les réserves (synergie faim-maladie invisible) · ○ MOR-6 accidents (chasse, chute) · ○ MOR-7 accouchement | `docs/domaines/humain/corps/chantiers/MOR.md` |
+| **MOR** | Mortalité de fond, causée | ✔ MOR-1 maladie digestive · ✔ MOR-2 respiratoire · ✔ MOR-3 plaies · ✔ MOR-4 sevrage (exclusif 6 mois, lait 70/55/40/20 %, eau bue avec la mère, repas donné à la faim, sevré à 3 ans ; 5 ans : niveau du témoin) · ? MOR-4b/4b' orphelins sevrés portés (`exp/orphelins`, pire : soif d'enfants à mère présente, à instrumenter) · ? MOR-4c anticorps selon la part du lait (`exp/anticorps`, 8/8 plus mortel, après MOR-5) · ▶ MOR-5 la maladie trop létale (adultes 14 ‰ contre ~5-7 ; mourir avant 15 ans 58 %) : MOR-5a instrumenter épisodes et létalité par âge, puis exposition (H1) ou défense (H2 enfant naïf, H3 faim de l'heure au lieu des réserves) · ○ MOR-6 accidents (chasse, chute) · ○ MOR-7 accouchement | `docs/domaines/humain/corps/chantiers/MOR.md` |
 | **ENE** | Bilan énergétique | ✔ ENE-1 dépense · ✔ ENE-2 réserves · ✔ ENE-3 lait selon les réserves · ○ ENE-4 remesurer D10 (banc `nourriture`) une fois la marche corrigée · ○ ENE-5 fécondité selon le bilan (Ellison), **seulement si la mesure le demande** (réfuté pour l'instant) | `docs/domaines/humain/corps/chantiers/ENE.md` |
 | **MAR** | La marche (33-40 km/j contre 5,8-11,4) | ✔ MAR-1 la lumière (soleil selon latitude, date, heure ; le sommeil la lit) · ✔ MAR-2 l'obscurité gêne la vue · ✔ MAR-4 la sortie de chasse (ouverte à tous, rentre avant la nuit ; gêne du nourrisson réfutée par les sources) — la marche reste à 8,9 h/j · ✔ MAR-6a0 registre des rendements · ✔ MAR-6a le choix lit le rendement appris (effet nul) · ? MAR-6b le camp suit le rendement (questions à l'utilisateur, 2026-10-10) · ○ MAR-7 l'effort à court terme (souffle, pauses dans la journée ; marcher ≠ courir — idée de l'utilisateur) · ○ MAR-8 la nuit dans le choix (le tirage au softmax juge des écarts absolus : une tâche que la vue rend presque vaine la nuit reste presque aussi probable que les autres ; hiver : ~0,85 h/j de marche de nuit pour errer, cueillir, explorer) · ○ MAR-3 soleil et ombre dans le ressenti · ○ MAR-5 les trajets d'eau (1,8 h/j) · plus tard : lune (affût), chaleur (coup de chaleur, sueur) | `docs/domaines/humain/deplacement/chantiers/MAR.md` |
 | **CHA** | La chasse comme les vrais chasseurs (soulevé par l'utilisateur, 2026-10-05) | ✔ CHA-1a fidélité au domaine vital (été : prises 1,4 → 3,6 %/jour-chasseur) · ✔ CHA-1b l'hiver, seul le renne migre (quartier d'hiver des cerfs migrants : non modélisé) · ✔ CHA-2 les traces (piste lisible 48 h, remarquée en la croisant de jour : prises hiver 2,02 → 2,15 %, été 3,64 → 3,92 %) · ✔ CHA-2b le pisteur s'arrête à la nuit et reprend au matin (décision de l'utilisateur, 2026-10-06 et 2026-10-09 (a') : la perte de prises, −9 à −12 %, est le vrai coût de la nuit ; voir dans le noir viendra des techniques ; « rejoindre de nuit un lieu connu » à reconsidérer) · ✔ CHA-2c le paysage de la peur (le test de surchasse, rouge depuis CHA-2, l'avait révélé : la zone ne se vidait que par la fuite devant la quête au hasard ; décision de l'utilisateur (a), 2026-10-09) · ? questions ouvertes des runs longues contre témoin (seed 42 froide, 10 ans) : la soif du témoin (23 morts contre 6 en départ d'hiver ; hypothèse non testée : il suivait au loin un gibier qui migrait) ; la population CHA partie en été baisse lentement après l'an 2 (73 → 47 ; 54 naissances, 67 morts, maladie en tête) · ○ CHA-3 les blessures (une flèche blesse plus qu'elle ne tue ; la bête blessée se piste le lendemain) · ○ CHA-4 l'affût au point d'eau (quand le gibier boira) | `docs/domaines/humain/deplacement/chantiers/MAR.md` (sources) |
+| **MEM** | La mémoire des lieux (décision de l'utilisateur, 2026-10-16 ; forme validée 2026-10-17) | ○ MEM-1 la carte vécue (maille 2 km : dernier passage, rendu, eau, danger, force du souvenir) · ○ MEM-4 l'oubli par l'usage, sources d'eau comprises · ○ MEM-3 les choix lisent la mémoire, plus le monde · ○ MEM-2 ce qu'on se raconte | `docs/domaines/humain/cognition/chantiers/MEM.md` |
 | **CUR** | La curiosité n'élargit qu'à peine le territoire connu (critère BRIEF « les curieux explorent plus loin, mesurablement ») | ○ lire pourquoi : test sur 4 seeds, curieux/ternes 1,03-1,30 (1,12 en tout) ; banc d'acceptation, r curiosité ↔ territoire de −0,35 à +0,37 selon le run — déjà avant MAR | test `les_curieux_explorent_plus_loin` |
 | **BAN** | Bandes sans limite de taille | ○ (ligne « Bandes » ci-dessous) | — |
 | **D13** | Violence | ▶ prototype R1 en attente de décision | ligne D13 |
 | **D2**, **D9**, **D7**, **PERF**, **D1/D3**, **D6/D5/D8** | voir le tableau ci-dessous | — | — |
 
-### 5.2 Ordre (révisé 2026-10-10)
+### 5.2 Ordre (révisé 2026-10-17)
 
-1. **MAR-6** en cours (2026-10-16) : ✔ MAR-6a0, ✔ MAR-6a ; ✔ **MAR-6c** la cueillette rapportée au camp (sur `main` le 2026-10-17 ; marche −2 à −6 km/j, mortalité des petits sans direction commune sur 16 runs) ; **MAR-6b** lever le camp (branches `exp/camp`, `exp/camp-jour` (a', a''), `exp/camp-huttes` (b)) : la règle de départ dérive (prises bosselées contre habitude lissée, aucune mémoire des lieux) — questions à l'utilisateur ; récit du gibier (`exp/raconter-seul`) après. Puis **MAR-8**, **MAR-7**, **CHA-3**, **MAR-5**, **MAR-3** ; **CHA-4** quand le gibier boira.
-2. **ENE-4** — remesurer l'alimentation (D10) avec la dépense réelle.
-3. **MOR-4** sevrage, puis **MOR-5**, **MOR-6**, **MOR-7**.
-4. **ENE-5** si la mesure le demande ; **CUR** (lecture).
-5. **BAN** — taille des bandes.
-6. **D13** — violence (prototype R1).
-7. **D2**, **D9** ; **D7** avant la phase 6 ; **PERF** ; **D1/D3** bloqués (500 ans).
+Relecture du 2026-10-17 (demande de l'utilisateur : « vérifier qu'un chantier prévu ne résout pas un problème vu ») : quatre chantiers prévus touchent des problèmes ouverts ailleurs.
+- **MOR-5** (maladie) est en amont de toute la mortalité mesurée : MOR-4c (8/8 plus mortel), la baisse lente des runs CHA d'été (« maladie en tête »), une part des morts 1-4 ans de MAR-6c. Chaque mesure de mortalité d'avant MOR-5 lit une maladie trop létale.
+- **MEM-4** (les sources oubliées par l'usage, plus par la distance : `memory::MAX_KNOWN_SPRINGS` = 16, les plus proches) touche **MAR-5** (l'eau, 1,9 h/j, premier poste de marche depuis MAR-6c), la soif du témoin CHA (23 morts, hypothèse : il suivait un gibier au loin) et une des hypothèses de la soif à mère présente (trajet d'eau inabouti).
+- **MEM-3** (les choix lisent la mémoire) retire deux omnisciences (`brain::edible_share` sur les mailles voisines jamais vues ; la destination du camp de MAR-6b) et donne pour la première fois un **gain** à l'exploration : aujourd'hui explorer ne sert à rien de ce qu'on apprend (score 0,15 × curiosité), ce qui peut suffire à expliquer **CUR**. MEM-3 est aussi le préalable de **MAR-6b** et de **BAN** (une bande se scinde quand le pays qu'elle connaît ne la nourrit plus).
+- **MEM-2** (les lieux se racontent) touche **D2** (des survivants sans clan qui ne savent où aller) — à vérifier, pas acquis.
+
+1. **MOR-5** — MOR-5a instrumenter, puis la correction que la mesure désigne ; puis reprendre **MOR-4c** (`exp/anticorps`).
+2. **Orphelins** (`exp/orphelins`) — instrumenter la soif à mère présente (banc `soif`), puis décider de MOR-4b/4b'.
+3. **MEM-1**, **MEM-4**, **MEM-3**, **MEM-2** ; remesurer **MAR-5** et **CUR** après MEM-4 et MEM-3 avant de leur ouvrir un chantier propre.
+4. **MAR-6b** lever le camp, sur la mémoire ; récit du gibier (`exp/raconter-seul`) après.
+5. **MAR-8**, **MAR-7**, **CHA-3**, **MAR-5** (s'il reste un écart), **MAR-3** ; **CHA-4** quand le gibier boira.
+6. **ENE-4** — remesurer l'alimentation (D10) une fois marche et eau corrigées.
+7. **MOR-6**, **MOR-7** ; **ENE-5** si la mesure le demande.
+8. **BAN** — taille des bandes (après MEM-3 et MAR-6b).
+9. **D13** — violence (prototype R1).
+10. **D2** (remesurer après MEM-2), **D9** ; **D7** avant la phase 6 ; **PERF** ; **D1/D3** bloqués (500 ans).
 
 ### 5.3 Tableau historique
 
