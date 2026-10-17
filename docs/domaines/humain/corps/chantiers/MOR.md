@@ -415,3 +415,18 @@ Prédictions, acceptation 5 ans (8 runs) contre `main` (MOR-4 + correctif) :
 2. Mortalité 1-4 ans en hausse sur ≥ 5/8 runs.
 Réfuterait 1 : maladie des 1-4 ans ≤ 40 (le plancher ne pesait pas sur cet âge).
 L'aménorrhée (étape 2) viendra seule, après.
+
+### MOR-4b — mesuré (acceptation 5 ans, 8 runs ; banc `soif` 3 ans) : **pire**
+
+| | `main` | MOR-4b |
+|---|---|---|
+| heures-enfant en soif saturée (3 ans) | 348 | **618** |
+| mortalité < 1 an ; 1-4 ans (‰/an) | 290 ; 144 | **346** ; 142 |
+| morts de soif < 1 an ; 1-4 ans | 14 ; 16 | **20** ; 16 |
+| 1-4 ans par run (t42, t7, t1337, t2024, f42, f7, f1337, f2024) | 45, 188, 128, 161, 240, 202, 64, 154 | 45, 63, 128, 161, 144, 346, 159, 109 |
+1. Soif et faim des 6-36 mois en baisse sur ≥ 5/8 : **réfuté** (soif en hausse).
+Lecture : l'orphelin sevré n'a **plus d'eau du tout** hors des gorgées de son porteur (pas
+de lait), et le porteur boit selon **sa** soif, qui monte bien plus lentement que celle d'un
+enfant qui ne boit rien d'autre : entre deux gorgées, l'enfant sature. Avant, l'orphelin
+mourait vite ; porté, il souffre plus longtemps. Il manque ce que fait tout porteur réel :
+**boire aussi pour l'enfant qu'il porte** (MOR-4b', ci-dessous).
