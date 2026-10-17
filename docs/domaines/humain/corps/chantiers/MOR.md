@@ -593,3 +593,27 @@ Acceptation **1 an** × 8 runs (régime : adultes seulement, ~13 épisodes/an d�
 Si 1 tient : la contagion est un **cercle qui s'entretient** (le malade d'hier infecte qui
 guérira demain) — le défaut est dans la contagion (portée, durée de la contagiosité,
 contagiosité égale du premier au dernier jour), à lire avant de choisir.
+
+### MOR-5b — mesuré (acceptation 1 an, 8 runs, e46cd5a)
+Contrôle : seed 42 identique à la fumée de MOR-5a (morts de maladie 1 et 6) — l'instrument
+ne touche pas la simulation.
+| âge | voie | épisodes/p-an | part venue d'un malade | hors contagion /p-an |
+|---|---|---|---|---|
+| < 1 | dig. ; resp. | 6,4 ; 9,1 | 100 % ; 97 % | ~0 ; 0,3 |
+| 15-39 | dig. ; resp. | 5,4 ; 6,6 | **69 % ; 94 %** | 1,7 (eau) ; 0,4 (portage) |
+| 40-59 | dig. ; resp. | 6,2 ; 6,8 | 71 % ; 91 % | 1,8 ; 0,6 |
+1. Contagion ≥ 70 % sur les deux voies : **tenue** (respiratoire 94 % ; digestive 69 %, à la
+   limite ; réfutation à ≤ 40 % loin). 2. Portage 1-2 par an : **réfuté vers le bas** (0,4).
+**Lecture** : l'eau seule donne ~1,7 diarrhée par adulte et par an — dans l'ordre réel (~2-3) ;
+le portage reste rare. **L'excès est la contagion** : ~4 diarrhées et ~6 infections
+respiratoires de plus par an, et la quasi-totalité chez les nourrissons. Dans le code, chaque
+malade, **quelle que soit sa gravité** (de 0,1 au début à 0,01 en guérison), infecte chaque
+nuit 5 % (dig.) ou 10 % (resp.) de ses voisins à 10 m. Un épisode dure ~3-4 jours : un voisin
+a ~19 % (dig.) et ~34 % (resp.) de chances d'être infecté **par épisode**, et tout un camp
+dort à moins de 10 m ; après 30 j de convalescence on retombe sous l'onde suivante.
+Trois mécanismes possibles, non départagés : la contagiosité ne suit pas la gravité ; la
+portée ne distingue pas le foyer (même hutte) du camp ; l'immunité de 30 j est la même pour
+tous les germes d'une voie (une voie = un seul germe, alors que le réel en fait circuler
+plusieurs, chacun immunisant plus longtemps). Référence à sourcer : taux d'attaque secondaire
+en foyer (diarrhée, infection respiratoire) et durée de l'immunité après un épisode.
+Question à l'utilisateur avant de corriger : laquelle de ces pistes correspond à sa vision.
