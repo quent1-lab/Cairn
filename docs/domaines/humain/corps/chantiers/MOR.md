@@ -552,3 +552,31 @@ maladie de la table, 4 et 3. Un seul tirage, pas une mesure ; il montre déjà d
 1-4 ans (les fondateurs sont adultes) : la prédiction 3 demande l'horizon de 5 ans.
 Mesure lancée (2026-10-17, 19 h 23 Paris) : acceptation 5 ans × 8 runs, 1 fil,
 `out/bin/mor5a/acceptation` → `out/mor5/acceptation_mor5a_5ans.txt` (~2-3 h estimées).
+
+### MOR-5a — mesuré (acceptation 5 ans, 8 runs, départ j135, `out/bin/mor5a`, d13238c)
+Régime : 5 ans, 4 seeds × 2 scènes ; **aucun 5-14 ans** (les fondateurs sont adultes, les
+premiers nés ont < 5 ans) ; adultes 1 668 années-personnes, enfants 547.
+| âge | épisodes/p-an (dig. ; resp.) | létalité/épisode (dig. ; resp.) | défense ; faim à l'infection | maladie ‰/an |
+|---|---|---|---|---|
+| < 1 | 6,8 ; 7,7 | 2,0 % ; 1,3 % | 0,36 ; 0,03 | 231 |
+| 1-4 | 6,7 ; 7,5 | 0,8 % ; 1,0 % | 0,61 ; 0,15 | 127 |
+| 15-39 | 6,5 ; 7,3 | 0,3 % ; 0,4 % | 0,85 ; 0,30 | **53** |
+| 40-59 | 6,7 ; 7,4 | 0,3 % ; 0,3 % | 0,85 ; 0,30 | 43 |
+Mourir avant 15 ans : 69 %. Malades : enfants 20-24 % du temps, adultes 12-16 %.
+1. Létalité adulte ≥ 0,5 % : **ni tenue ni réfutée** (0,3-0,4 % ; au-dessus du calcul nourri,
+   0,15 %, sous le seuil). 2. Épisodes adultes ≥ 3/an : **tenue, et de loin** (~14/an, contre
+   ~2-3 réels pour la seule diarrhée). 3. Létalité 1-4 ans ≥ 3 % : **réfutée** (0,8-1,0 %,
+   sous les ~2,4 % d'une diarrhée sans soins). 4. Concordance : **exacte** (48, 43, 79, 8 des
+   deux côtés).
+**Lecture** : ce n'est pas la létalité par épisode qui est trop forte, c'est **le nombre
+d'épisodes** — ~7 par voie et par an **à tout âge**, ce qui est presque le plafond que permet
+la convalescence de 30 j (≈ 9-10 par voie et par an) : l'exposition sature, chacun se
+réinfecte dès que sa voie se rouvre. Seuil de décision écrit : **H1 (l'exposition) d'abord**.
+H2 réfutée pour l'instant ; H3 non jugée (la défense a peu de marge à perdre quand on tombe
+malade 14 fois par an).
+**Ce que j'ai pu manquer** : l'âge 5-14 n'est pas vu ; la létalité par épisode des enfants
+paraît basse parce que les plus faibles meurent aux premiers épisodes (sélection) ; la source
+de chaque infection (eau, contagion, portage réveillé par le froid) n'est pas mesurée — c'est
+elle qui dira quelle exposition sature.
+**Suite, MOR-5b** : instrumenter la source de chaque infection, puis corriger l'exposition
+qui sature, une à la fois.
