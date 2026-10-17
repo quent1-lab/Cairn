@@ -43,3 +43,36 @@ Questions de fonctionnement :
    (Les chasseurs-cueilleurs connaissent les ressources saisonnières de leur pays sur des
    années ; faut-il retenir **par saison** ?)
 3. MEM-1 et MEM-2 avant de reprendre MAR-6b, puis la cueillette rapportée (MAR-6c) ?
+
+## Dimensionnement et forme (proposition, 2026-10-17, après sourçage)
+
+Décision de l'utilisateur : maille « à dimensionner pour être utile sans trop de
+stockage » ; mémoire non binaire — fréquence, impact et intérêt d'un lieu en font durer le
+souvenir, parfois à vie (camp, chasse, eau, cueillette, danger).
+
+**Maille : 2 km** (celle des plantes et des domaines du gibier). Un territoire hadza
+(~3 600-4 000 km²) fait ~1 000 mailles ; aché (~20 000 km²) ~5 000. À ~32 octets par lieu
+retenu, 5 000 lieux = 160 Ko par personne, 16 Mo pour 100 personnes — supportable (une run
+de 10 ans occupe ~1,1 Go). En cellules de 512 m, ×16 : trop. Les cellules de 512 m visitées
+(`Memory::known`, 4 096 au plus) restent pour l'exploration fine.
+
+**Ce qu'on retient d'un lieu** : la date du dernier passage ; ce qu'il a rendu, par activité
+(cueillir, chasser) ; l'eau qu'on y a bue ; le danger qu'on y a vécu (blessure, mort d'un
+proche, meute) ; et une **force du souvenir**.
+
+**La force du souvenir** (forme non sourcée en chiffres, sens sourcé) : chaque passage
+l'augmente d'autant plus que le lieu a compté (impact : kcal obtenues, soif étanchée,
+blessure ; intérêt : rareté de ce qu'il offre). Elle s'efface vite puis lentement, vers un
+**plancher qui monte avec les répétitions** : la rétention d'itinéraires reste à ~72-75 %
+au bout de 6-12 mois (Nottingham, VR), et les Inuit gardent trois générations de caribou en
+mémoire orale. Un lieu vu une fois s'oublie ; un lieu fréquenté ou marquant se garde à vie.
+On oublie le lieu quand sa force tombe sous un seuil, ou quand la mémoire est pleine
+(le plus faible part le premier : par l'usage, plus par la distance).
+
+**Ce qui se raconte** (MEM-2) : les lieux forts, avec leur âge — la carte d'une bande devient
+commune sans être totale (transmission par récits et chants, aborigènes).
+
+Questions pour valider avant MEM-1 : (1) la maille de 2 km ; (2) une forme
+« passage = renfort selon l'impact, effacement vers un plancher qui monte avec les
+répétitions », à mesurer au banc plutôt qu'à chiffrer d'avance ; (3) le danger dans la
+même mémoire.
