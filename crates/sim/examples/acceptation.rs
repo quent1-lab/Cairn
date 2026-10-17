@@ -113,6 +113,14 @@ struct Report {
     died_sick: [[u64; disease::ROUTES]; AGE_CLASSES.len()],
     // MOR-5b : parmi les infections commencées, celles venues d'un malade.
     onsets_contagion: [[u64; disease::ROUTES]; AGE_CLASSES.len()],
+    // MOR-5c : à minuit (l'heure de la contagion), voisins à la portée de
+    // contagion : nuits-personnes, voisins, dont parents directs, affinité
+    // sommée des autres, voisins malades.
+    nights: u64,
+    near: u64,
+    near_kin: u64,
+    near_affinity: f64,
+    near_sick: u64,
     // Énergie, par classe (femmes adultes, hommes adultes, < 3 ans, 3-13 ans) :
     // kcal dépensées, métabolisme de base cumulé, heures vécues, heures de marche.
     burn: [f64; 4],
@@ -252,6 +260,8 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
         .collect();
     let mut seen_births = 0usize;
     let mut prev_hunger: BTreeMap<u64, f32> = BTreeMap::new();
+    // Portée de la contagion de nuit (`disease`, 10 m).
+    let contact_radius = km_to_tiles(0.01);
     // MOR-5a : classe d'âge et gravité de chaque infection en cours, à l'heure d'avant.
     let mut prev_ill: BTreeMap<u64, (usize, [Option<f32>; disease::ROUTES])> = BTreeMap::new();
     let total_days = years * 360;
@@ -499,6 +509,36 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
         for (_, demo) in sim.agents.query::<&cairn_sim::Demographics>().iter() {
             r.person_days[age_class(demo.age_years(sim.time.tick))] += 1;
         }
+        {
+            let people: Vec<(AgentId, (f64, f64), cairn_sim::demography::Kinship, bool)> = sim
+                .agents
+                .query::<(&AgentId, &cairn_sim::Position, &cairn_sim::demography::Kinship, &cairn_sim::Illness)>()
+                .iter()
+                .map(|(_, (id, p, k, ill))| (*id, (p.x, p.y), *k, ill.active.iter().any(Option::is_some)))
+                .collect();
+            let r2 = contact_radius * contact_radius;
+            for (i, (a, pa, ka, _)) in people.iter().enumerate() {
+                r.nights += 1;
+                for (j, (b, pb, kb, sick)) in people.iter().enumerate() {
+                    if i == j || (pa.0 - pb.0).powi(2) + (pa.1 - pb.1).powi(2) > r2 {
+                        continue;
+                    }
+                    r.near += 1;
+                    r.near_sick += u64::from(*sick);
+                    let kin = ka.mother == Some(*b)
+                        || ka.father == Some(*b)
+                        || kb.mother == Some(*a)
+                        || kb.father == Some(*a)
+                        || (ka.mother.is_some() && ka.mother == kb.mother)
+                        || (ka.father.is_some() && ka.father == kb.father);
+                    if kin {
+                        r.near_kin += 1;
+                    } else {
+                        r.near_affinity += f64::from(sim.social.affinity(*a, *b));
+                    }
+                }
+            }
+        }
         r.clan_sizes.extend(sim.clans.iter().map(|c| c.members.len()));
         // Tensions entre clans, une fois par jour.
         for i in 0..sim.clans.len() {
@@ -631,6 +671,19 @@ fn print_episodes(rs: &[Report]) {
         let disease_deaths: usize = rs.iter().map(|r| r.deaths_by_age[k][5]).sum();
         println!("{name:<8}{:<14}{:>34}", "", format!("morts de maladie (table) : {disease_deaths}"));
     }
+    let nights: u64 = rs.iter().map(|r| r.nights).sum();
+    let near: u64 = rs.iter().map(|r| r.near).sum();
+    let kin: u64 = rs.iter().map(|r| r.near_kin).sum();
+    let aff: f64 = rs.iter().map(|r| r.near_affinity).sum();
+    let sick: u64 = rs.iter().map(|r| r.near_sick).sum();
+    let per = |x: f64| if nights == 0 { 0.0 } else { x / nights as f64 };
+    println!(
+        "À minuit, à 10 m : {:.1} voisins par personne, dont {:.1} parents directs ; affinité moyenne des autres {:.2} ; {:.2} voisins malades",
+        per(near as f64),
+        per(kin as f64),
+        if near > kin { aff / (near - kin) as f64 } else { 0.0 },
+        per(sick as f64),
+    );
 }
 
 fn print_table(rs: &[Report], years: u64) {

@@ -617,3 +617,30 @@ tous les germes d'une voie (une voie = un seul germe, alors que le réel en fait
 plusieurs, chacun immunisant plus longtemps). Référence à sourcer : taux d'attaque secondaire
 en foyer (diarrhée, infection respiratoire) et durée de l'immunité après un épisode.
 Question à l'utilisateur avant de corriger : laquelle de ces pistes correspond à sa vision.
+
+## Décisions de l'utilisateur sur MOR-5c (2026-10-17, nuit)
+1. Contagiosité selon la gravité : « je crois que la contagion est plus forte au pic de la
+   maladie et diminue avec » — à vérifier (sourcer la courbe d'excrétion).
+2. Foyer et camp : « oui et non : le foyer est plus touché, le camp moins ; mais les
+   relations sociales et le travail sont vecteurs aussi » — à sourcer.
+3. Plusieurs germes par voie : « bonne idée ».
+Validé, ordre proposé (2, 1, 3), un changement à la fois, chacun mesuré.
+
+**Ce que disent les sources** (`SOURCES.md`, contagion) : l'attaque secondaire **par épisode en
+foyer** est de 15-33 % (diarrhée, par germe), 10-38 % (grippe) — l'ordre de ce que le code
+donne (19 % ; 34 %), mais le code l'applique à **tout dormeur à 10 m**, pas au seul foyer ;
+hors foyer, la grippe montre qu'une communauté peut peser autant que le foyer (contacts de
+travail et de loisir ~37 % des contacts quotidiens, POLYMOD). Piste 1 (l'utilisateur) :
+**vraie pour la grippe** (pic aux jours 1-2), **fausse pour la diarrhée** (norovirus, Shigella :
+excrétion de 2 à 6 semaines, souvent maximale après les symptômes). Piste 3 appuyée : immunité
+de 4-8 ans par génotype de norovirus, ~160 rhinovirus, 6 germes principaux de la diarrhée.
+
+### MOR-5c0 — qui dort à portée de contagion (instrument, prédictions avant le banc)
+À minuit, pour chacun : voisins à 10 m, dont parents directs (mère, père, fratrie), affinité
+moyenne des autres, voisins malades. Acceptation 1 an × 8 runs (régime : adultes, enfants
+nés dans l'année).
+1. ≥ 8 voisins à 10 m par personne, dont ≤ 3 parents : la contagion « de foyer » touche le
+   camp entier. Réfuterait : ≤ 3 voisins (alors c'est la probabilité par paire, pas le cercle).
+2. Affinité moyenne des non-parents ≥ 0,4 (le camp est fait de liens forts).
+Seuil : si les non-parents font ≥ 60 % des voisins, MOR-5c1 pondère la contagion par le lien
+(parents : plein ; autres : selon l'affinité) ; sinon la portée n'est pas en cause.
