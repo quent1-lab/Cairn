@@ -38,6 +38,8 @@ Workspace cible (BRIEF §8) : `crates/{core, worldgen, sim, protocol, server, cl
 
 ## Environnement
 
+- **Au démarrage de la machine** (2026-10-17) : le service utilisateur `~/.config/systemd/user/claude-tmux.service` ouvre une session tmux `claude` dans `~/Cairn` et y lance `claude remote-control` (la fenêtre garde un `bash` si claude s'arrête). Le *linger* est activé (`loginctl enable-linger sumer`) : le service part sans connexion. `OOMPolicy=continue` : un banc tué pour manque de mémoire n'emporte pas la session. Commandes : `systemctl --user status claude-tmux`, `systemctl --user start claude-tmux` (si la session a été fermée), `tmux attach -t claude`. Si une session `claude` existe déjà, le service échoue sans rien casser.
+
 **Le développement a déménagé sur le serveur de déploiement lui-même (2026-09-14).** Ubuntu 24.04, `x86_64-unknown-linux-gnu`, Rust 1.98.1, édition 2024. `gcc`, `git`, `curl`, `docker` présents ; `sqlite3` (CLI) et `nginx` absents.
 
 - **La machine de dev *est* la cible du BRIEF §8.3** : 2 vCPU, 2,9 Go de RAM, 37 Go libres — « 2 vCPU / 2 Go, un VPS à 5 €/mois ». Le critère « le tout tient dans 2 vCPU / 2 Go » ne se simulera pas : il se vérifiera en tournant. Corollaire de méthode : **une compilation et une suite de tests coûtent bien plus cher ici** (workspace ≈ 2 min en debug, `cairn-sim` ≈ 3 min 20 en release) — grouper les vérifications, préférer les tests ciblés.

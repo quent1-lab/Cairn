@@ -18,3 +18,7 @@ décisions de l'utilisateur. Lu dans le code, tenu à jour à chaque jalon.
 
 ## Décisions de l'utilisateur
 (datées, les plus récentes en bas)
+- 2026-10-17 — **MEM** : la maille est à dimensionner pour être utile sans trop de
+  stockage. La mémoire n'est pas binaire : selon la fréquence, l'impact et l'intérêt d'un
+  lieu, on le retient plus ou moins longtemps, voire à vie (le camp, la chasse, l'eau, la
+  cueillette, un endroit dangereux…). À sourcer : comment un humain se souvient des lieux.
