@@ -94,6 +94,9 @@ pub struct Infection {
     pub severity: f32,
     /// Croissance du pathogène, par jour.
     pub virulence: f32,
+    /// Venue d'un malade (contagion de nuit) plutôt que de l'eau, du portage
+    /// ou d'une plaie : un relevé pour les bancs, sans effet sur la lutte.
+    pub contagion: bool,
 }
 
 /// L'état infectieux d'un humain.
@@ -127,7 +130,7 @@ impl Illness {
             return false;
         }
         let virulence = VIRULENCE_MEDIAN * (VIRULENCE_SIGMA * gaussian(rng)).exp();
-        self.active[r] = Some(Infection { severity: ONSET_SEVERITY, virulence });
+        self.active[r] = Some(Infection { severity: ONSET_SEVERITY, virulence, contagion: false });
         true
     }
 
@@ -219,8 +222,10 @@ pub(crate) fn daily(sim: &mut Sim) {
             }
             let p = 1.0 - (1.0 - beta).powi(k as i32);
             let mut rng = Pcg32::new(stream, id.0);
-            if rng.next_f64() < p {
-                ill.infect(route, tick, &mut rng);
+            if rng.next_f64() < p && ill.infect(route, tick, &mut rng) {
+                if let Some(inf) = ill.active[route as usize].as_mut() {
+                    inf.contagion = true;
+                }
             }
         }
     }

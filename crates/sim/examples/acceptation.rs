@@ -111,6 +111,8 @@ struct Report {
     onset_hunger: [[f64; disease::ROUTES]; AGE_CLASSES.len()],
     fatal: [[u64; disease::ROUTES]; AGE_CLASSES.len()],
     died_sick: [[u64; disease::ROUTES]; AGE_CLASSES.len()],
+    // MOR-5b : parmi les infections commencées, celles venues d'un malade.
+    onsets_contagion: [[u64; disease::ROUTES]; AGE_CLASSES.len()],
     // Énergie, par classe (femmes adultes, hommes adultes, < 3 ans, 3-13 ans) :
     // kcal dépensées, métabolisme de base cumulé, heures vécues, heures de marche.
     burn: [f64; 4],
@@ -447,6 +449,7 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                                 * disease::experience(ill.episodes[route]),
                         );
                         r.onset_hunger[a][route] += f64::from(phys.hunger);
+                        r.onsets_contagion[a][route] += u64::from(inf.contagion);
                     }
                 }
                 if active.iter().any(Option::is_some) {
@@ -602,8 +605,8 @@ fn print_episodes(rs: &[Report]) {
     const ROUTE_NAMES: [&str; disease::ROUTES] = ["digestive", "respiratoire", "plaie"];
     println!("\nÉpisodes de maladie, {} runs réunis (défense hors anticorps du lait)", rs.len());
     println!(
-        "{:<8}{:<14}{:>9}{:>9}{:>8}{:>10}{:>9}{:>7}{:>10}",
-        "âge", "voie", "épisodes", "/p-an", "morts", "létalité", "défense", "faim", "(toutes)"
+        "{:<8}{:<14}{:>9}{:>9}{:>8}{:>10}{:>9}{:>7}{:>10}{:>11}",
+        "âge", "voie", "épisodes", "/p-an", "morts", "létalité", "défense", "faim", "(toutes)", "contagion"
     );
     for (k, (_, name)) in AGE_CLASSES.iter().enumerate() {
         let years = rs.iter().map(|r| r.person_days[k]).sum::<u64>() as f64 / 360.0;
@@ -616,12 +619,13 @@ fn print_episodes(rs: &[Report]) {
             }
             let mean = |f: &dyn Fn(&Report) -> f64| if n == 0 { 0.0 } else { rs.iter().map(f).sum::<f64>() / n as f64 };
             println!(
-                "{name:<8}{rname:<14}{n:>9}{:>9.2}{fatal:>8}{:>9.2} %{:>9.2}{:>7.2}{:>10}",
+                "{name:<8}{rname:<14}{n:>9}{:>9.2}{fatal:>8}{:>9.2} %{:>9.2}{:>7.2}{:>10}{:>10.0} %",
                 if years > 0.0 { n as f64 / years } else { 0.0 },
                 if n == 0 { 0.0 } else { 100.0 * fatal as f64 / n as f64 },
                 mean(&|r| r.onset_defense[k][route]),
                 mean(&|r| r.onset_hunger[k][route]),
                 format!("({died})"),
+                if n == 0 { 0.0 } else { 100.0 * rs.iter().map(|r| r.onsets_contagion[k][route]).sum::<u64>() as f64 / n as f64 },
             );
         }
         let disease_deaths: usize = rs.iter().map(|r| r.deaths_by_age[k][5]).sum();

@@ -580,3 +580,16 @@ de chaque infection (eau, contagion, portage réveillé par le froid) n'est pas 
 elle qui dira quelle exposition sature.
 **Suite, MOR-5b** : instrumenter la source de chaque infection, puis corriger l'exposition
 qui sature, une à la fois.
+
+### MOR-5b — d'où viennent les infections (instrument, prédictions avant le banc)
+Relevé : chaque infection note si elle vient d'un malade (contagion de nuit, à 10 m) ; la
+digestive sinon vient de l'eau, la respiratoire du portage réveillé par le froid. Sans effet
+sur la simulation (même tirage) : contrôle, la seed 42 à 1 an doit redonner la fumée de MOR-5a.
+Acceptation **1 an** × 8 runs (régime : adultes seulement, ~13 épisodes/an déjà à 1 an).
+1. Contagion ≥ 70 % des épisodes, sur les deux voies : 2 à 4 malades à 10 m chaque nuit
+   dans un camp de 30 (12-16 % du temps malade) font ~10-20 % de chances par nuit, de quoi se
+   réinfecter quelques jours après la convalescence. Réfuterait : ≤ 40 %.
+2. Respiratoire hors contagion ≈ 1-2 par an (portage : 1/an au chaud, 5/an transi).
+Si 1 tient : la contagion est un **cercle qui s'entretient** (le malade d'hier infecte qui
+guérira demain) — le défaut est dans la contagion (portée, durée de la contagiosité,
+contagiosité égale du premier au dernier jour), à lire avant de choisir.
