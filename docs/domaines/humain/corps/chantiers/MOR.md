@@ -544,3 +544,11 @@ Prédictions, acceptation 1 an × 8 runs (instrument seul, rien ne change) :
 Seuil de décision :
 si les épisodes adultes dépassent le double de la référence → l'exposition (H1) d'abord ; si
 leur nombre est réel et la létalité trop haute → la défense (H2, H3).
+
+### MOR-5a — essai de fumée (1 an, seed 42, 2 scènes ; instrument de 2 commits après caba2fa) : l'instrument tient
+Concordance : infections closes par une mort de maladie 4 (< 1 an) et 3 (15-39) = morts de
+maladie de la table, 4 et 3. Un seul tirage, pas une mesure ; il montre déjà des adultes à
+~13 épisodes/an (digestive ~6, respiratoire ~7, contre ~2-3 réels). À 1 an, aucun enfant de
+1-4 ans (les fondateurs sont adultes) : la prédiction 3 demande l'horizon de 5 ans.
+Mesure lancée (2026-10-17, 19 h 23 Paris) : acceptation 5 ans × 8 runs, 1 fil,
+`out/bin/mor5a/acceptation` → `out/mor5/acceptation_mor5a_5ans.txt` (~2-3 h estimées).
