@@ -402,3 +402,16 @@ mais l'agrégat monte (144 → 213 ‰ ; morts 1-4 ans 55 → 72, dont froid 2 �
 maladie 37 → 43 ; mourir avant 15 ans 58 → 69 %). Marche −4 à −6 km/j et faim des mères en
 baisse sur 8/8. **Sans direction commune, et pas assez de puissance** (débat, point 3) :
 quatre seeds de plus (11, 23, 99, 314) avant de trancher.
+
+## MOR-4c, étape 1 — les anticorps suivent la part du lait (branche `exp/anticorps`, 2026-10-17)
+
+Décision de l'utilisateur (« bonne idée ») ; débat, point 6. Changement : le plancher
+immunitaire de l'allaité (0,8) n'est plus tout ou rien ; la maturité le rejoint **au prorata
+de la part du lait** (1 à moins de 6 mois, 0,2 la troisième année). Test
+`les_anticorps_du_lait_suivent_sa_part`, vu rouge. Forme non sourcée (linéaire) ; sens
+sourcé : l'allaitement partiel protège moins que l'exclusif (à chiffrer par `sourceur`).
+Prédictions, acceptation 5 ans (8 runs) contre `main` (MOR-4 + correctif) :
+1. Morts de maladie des 1-4 ans en hausse (37 → 42-60) ; des moins de 1 an de 0 à +20 %.
+2. Mortalité 1-4 ans en hausse sur ≥ 5/8 runs.
+Réfuterait 1 : maladie des 1-4 ans ≤ 40 (le plancher ne pesait pas sur cet âge).
+L'aménorrhée (étape 2) viendra seule, après.
