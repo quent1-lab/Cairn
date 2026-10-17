@@ -668,3 +668,31 @@ Prédictions, acceptation 5 ans × 8 runs contre MOR-5a (même scène, 5 ans) �
 4. < 1 an : épisodes en baisse de ≤ 50 % (le nourrisson reste au contact plein de sa mère).
 5. Mortalité 1-4 ans en baisse sur ≥ 6/8 runs ; mourir avant 15 ans < 69 %.
 Voisins à surveiller : population plus forte ⇒ faim, soif, camp (rien de prédit en chiffre).
+
+### MOR-5c1 — mesuré (acceptation 5 ans, 8 runs, 8f8d855) contre MOR-5a
+| | MOR-5a | MOR-5c1 |
+|---|---|---|
+| adultes 15-39 : diarrhées ; respiratoires /an | 6,5 ; 7,3 | **4,8 ; 4,6** |
+| part venue d'un malade (dig. ; resp.), adultes | 69 % ; 94 % (1 an) | 49 % ; 86 % |
+| < 1 an : épisodes /an | 14,5 | 7,5 |
+| maladie 15-39 ans (‰/an) | 53 | **24** |
+| mortalité < 1 an ; 1-4 ans (‰/an) | 317 ; 213 | 249 ; **77** |
+| 1-4 ans par run | 100, 105, 128, 358, 197, 556, 220, 172 | 19, 85, 56, 221, 118, 121, 40, 29 (**8/8 en baisse**) |
+| mourir avant 15 ans | 69 % | **43 %** (réel ~40 %) |
+| morts de maladie ; de soif (8 runs) | 178 ; 44 | 113 ; 21 |
+| population finale (8 runs) | — | 54-100 (départ 40 / 60) |
+1. Diarrhées adultes ≤ 3/an : **réfutée** (4,8 ; seuil de réfutation 4,5). La contagion n'en fait
+   plus que la moitié ; l'eau, elle, monte (~1,7 → ~2,4/an : des camps plus peuplés autour des
+   sources, 12,1 voisins à 10 m contre 7,6 à 1 an).
+2. Respiratoires 1,5-5/an : **tenue** (4,6), mais 86 % viennent encore d'un malade.
+3. Maladie 15-39 ≤ 25 ‰ : **tenue** (24). 4. < 1 an, baisse ≤ 50 % : **tenue** (−48 %).
+5. 1-4 ans en baisse sur ≥ 6/8 : **tenue (8/8)** ; mourir avant 15 ans 43 %.
+Reste : la maladie adulte à ~24 ‰ contre ~5-7 réels, faite pour moitié de respiratoire
+contagieux. Violence en hausse (9 → 16 morts adultes) — plus de monde ; non lu.
+**Ce que j'ai pu manquer** : l'affinité sert ici d'intensité de contact, alors qu'elle naît des
+rencontres (ce n'est pas la même grandeur : deux chasseurs qui chassent ensemble ont un lien
+fort et un contact de jour qui n'est pas simulé) ; les 5-14 ans restent hors de vue ; la hausse
+des diarrhées d'eau vient peut-être de la seule taille des camps (non séparée).
+**Suite, MOR-5c2** (piste 1 de l'utilisateur, appuyée pour la seule voie respiratoire) : la
+contagiosité respiratoire suit la charge (gravité) ; la digestive non (excrétion de semaines,
+maximale après les symptômes).
