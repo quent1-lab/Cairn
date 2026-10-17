@@ -23,8 +23,13 @@ pub fn start_on_day(sim: &mut Sim, day_of_year: u64) {
 /// Cherche un foyer tempéré (prairie ou forêt tempérée, climat doux, une
 /// source à portée) en spirale depuis `around`.
 pub fn find_home(sim: &mut Sim, around: (i64, i64)) -> (i64, i64) {
-    find_home_where(sim, around, 6.0..=18.0, &[Biome::Grassland, Biome::TemperateForest])
-        .unwrap_or(around)
+    find_home_where(
+        sim,
+        around,
+        6.0..=18.0,
+        &[Biome::Grassland, Biome::TemperateForest],
+    )
+    .unwrap_or(around)
 }
 
 /// Cherche un foyer répondant à un climat (fourchette de température moyenne

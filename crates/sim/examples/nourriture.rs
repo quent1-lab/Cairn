@@ -19,7 +19,10 @@ use std::collections::BTreeMap;
 
 use cairn_core::{TICKS_PER_DAY, WorldSeed, km_to_tiles};
 use cairn_sim::demography::{self, Demographics, Kinship, Sex};
-use cairn_sim::{AgentId, Behavior, DeathCause, Knowledge, Memory, Physiology, Position, Sim, fauna, food_stats, scenario};
+use cairn_sim::{
+    AgentId, Behavior, DeathCause, Knowledge, Memory, Physiology, Position, Sim, fauna, food_stats,
+    scenario,
+};
 use cairn_worldgen::Biome;
 
 /// Maille de comptage : celle de la faune (`fauna::range_zone`), 2 km.
@@ -33,7 +36,9 @@ fn main() {
     let capacity: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(16384);
     let cold = scene == "froid";
     let n_agents: usize =
-        args.next().and_then(|s| s.parse().ok()).unwrap_or(if cold { 60 } else { 40 });
+        args.next()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(if cold { 60 } else { 40 });
     #[allow(non_snake_case)]
     let PERIOD_DAYS: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(90);
     let start_day: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(0);
@@ -72,10 +77,30 @@ fn main() {
     println!(
         "{:>5} {:>4} {:>4} {:>4} {:>13} {:>15} | {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} {:>5} | \
          {:>6} {:>5} {:>5} | {:>5} {:>4} {:>6} {:>7} | {:>7} {:>5} {:>5}",
-        "jour", "pop", "nés", "morts", "faim/soif/aut", "faim moy/p90/max",
-        "ceuil", "chsM", "chsP", "perdu", "stock", "chept", "lait", "part",
-        "bio/h/j", "court", "tue/j",
-        "zones", "max", "h/km²", "h/km²z", "gibier", "tps", "cons%",
+        "jour",
+        "pop",
+        "nés",
+        "morts",
+        "faim/soif/aut",
+        "faim moy/p90/max",
+        "ceuil",
+        "chsM",
+        "chsP",
+        "perdu",
+        "stock",
+        "chept",
+        "lait",
+        "part",
+        "bio/h/j",
+        "court",
+        "tue/j",
+        "zones",
+        "max",
+        "h/km²",
+        "h/km²z",
+        "gibier",
+        "tps",
+        "cons%",
     );
 
     let total_days = years * 360;
@@ -90,7 +115,8 @@ fn main() {
     // Les éloignés (à plus de 10 km du point médian de la population), heure
     // par heure : ce qu'ils font, s'ils sont d'un clan, leur soif.
     let mut far_tasks: BTreeMap<String, u64> = BTreeMap::new();
-    let (mut far_hours, mut far_clan_hours, mut far_thirsty_hours, mut all_hours) = (0u64, 0u64, 0u64, 0u64);
+    let (mut far_hours, mut far_clan_hours, mut far_thirsty_hours, mut all_hours) =
+        (0u64, 0u64, 0u64, 0u64);
     let mut first_clan_day: Option<u64> = None;
     // D11 — la soif : le dernier état connu de chaque assoiffé (soif >= 0,95),
     // pour décrire ceux qui en meurent (l'agent mort n'est plus interrogeable).
@@ -142,7 +168,14 @@ fn main() {
             let mut to_inspect: Vec<AgentId> = Vec::new();
             for (_, (id, pos, phys, behavior, mem, demo)) in sim
                 .agents
-                .query::<(&AgentId, &Position, &Physiology, &Behavior, &Memory, &Demographics)>()
+                .query::<(
+                    &AgentId,
+                    &Position,
+                    &Physiology,
+                    &Behavior,
+                    &Memory,
+                    &Demographics,
+                )>()
                 .iter()
             {
                 ages.insert(id.0, demo.age_years(tick_now));
@@ -153,7 +186,11 @@ fn main() {
                     let tr = traces.entry(id.0).or_default();
                     let (tk, dist) = behavior.task.map_or(("—".to_string(), -1.0), |t| {
                         (
-                            format!("{:?}", t.kind).split('(').next().unwrap_or("").to_string(),
+                            format!("{:?}", t.kind)
+                                .split('(')
+                                .next()
+                                .unwrap_or("")
+                                .to_string(),
                             (t.target.0 as f64 - pos.x).hypot(t.target.1 as f64 - pos.y) * 2.0,
                         )
                     });
@@ -163,7 +200,10 @@ fn main() {
                         let d = dx.hypot(dy).max(1.0);
                         (0..(d / 8.0) as i64).any(|k| {
                             let f = k as f64 * 8.0 / d;
-                            sim.world.worldgen().elevation((pos.x + dx * f) as i64, (pos.y + dy * f) as i64) <= 0.0
+                            sim.world
+                                .worldgen()
+                                .elevation((pos.x + dx * f) as i64, (pos.y + dy * f) as i64)
+                                <= 0.0
                         })
                     });
                     // La grille de navigation de l'A* (cellules de 16 tuiles, jugées
@@ -175,7 +215,10 @@ fn main() {
                     let land_cells = (-1..=1)
                         .flat_map(|dy| (-1..=1).map(move |dx| (dx, dy)))
                         .filter(|&(dx, dy)| {
-                            let (cx, cy) = ((cell + dx) * stride + stride / 2, (celly + dy) * stride + stride / 2);
+                            let (cx, cy) = (
+                                (cell + dx) * stride + stride / 2,
+                                (celly + dy) * stride + stride / 2,
+                            );
                             sim.world.worldgen().elevation(cx, cy) > 0.0
                         })
                         .count();
@@ -194,12 +237,25 @@ fn main() {
                 }
                 if phys.thirst >= 0.95 {
                     let task = behavior.task.map_or("—".to_string(), |t| {
-                        format!("{:?}", t.kind).split('(').next().unwrap_or("").to_string()
+                        format!("{:?}", t.kind)
+                            .split('(')
+                            .next()
+                            .unwrap_or("")
+                            .to_string()
                     });
                     let known = mem.nearest_known_spring((pos.x, pos.y)).map(|s| {
                         cairn_core::tiles_to_km((s.0 as f64 - pos.x).hypot(s.1 as f64 - pos.y))
                     });
-                    parched.insert(id.0, (task, known, demo.age_years(tick_now), (pos.x, pos.y), phys.hunger));
+                    parched.insert(
+                        id.0,
+                        (
+                            task,
+                            known,
+                            demo.age_years(tick_now),
+                            (pos.x, pos.y),
+                            phys.hunger,
+                        ),
+                    );
                     parched_clan.insert(id.0, in_clan_now.get(&id.0).copied().unwrap_or(false));
                 }
             }
@@ -211,7 +267,14 @@ fn main() {
                     let top: Vec<String> = m
                         .iter()
                         .take(3)
-                        .map(|c| format!("{:?} {:.2}", c.kind, c.score).split('(').next().unwrap_or("").to_string() + &format!(" {:.2}", c.score))
+                        .map(|c| {
+                            format!("{:?} {:.2}", c.kind, c.score)
+                                .split('(')
+                                .next()
+                                .unwrap_or("")
+                                .to_string()
+                                + &format!(" {:.2}", c.score)
+                        })
                         .collect();
                     // L'A* depuis l'agent vers la cible de son meilleur candidat.
                     let pos = sim
@@ -223,9 +286,16 @@ fn main() {
                     let astar = match (pos, m.first()) {
                         (Some(from), Some(best)) => {
                             let wg = sim.world.worldgen();
-                            match cairn_sim::pathfind::astar(from, best.target, |x, y| wg.elevation(x, y) > 0.0, cairn_sim::pathfind::NODE_BUDGET) {
+                            match cairn_sim::pathfind::astar(
+                                from,
+                                best.target,
+                                |x, y| wg.elevation(x, y) > 0.0,
+                                cairn_sim::pathfind::NODE_BUDGET,
+                            ) {
                                 None => "A* : aucun".to_string(),
-                                Some(p) if p.last() == Some(&best.target) => format!("A* : complet ({} étapes)", p.len()),
+                                Some(p) if p.last() == Some(&best.target) => {
+                                    format!("A* : complet ({} étapes)", p.len())
+                                }
                                 Some(p) => format!("A* : partiel ({} étapes)", p.len()),
                             }
                         }
@@ -245,7 +315,9 @@ fn main() {
                     a if a < 50.0 => "adulte",
                     _ => "âgé",
                 };
-                *deaths_by_age.entry((class, format!("{:?}", d.cause))).or_insert(0) += 1;
+                *deaths_by_age
+                    .entry((class, format!("{:?}", d.cause)))
+                    .or_insert(0) += 1;
             }
             for d in &sim.deaths[seen_deaths_t..] {
                 if d.cause == DeathCause::Dehydration && traces_printed < 3 {
@@ -272,9 +344,9 @@ fn main() {
                 }
             }
             seen_deaths_t = sim.deaths.len();
-                // Les dissolutions de l'heure, lues contre les clans de l'heure d'avant
-                // (la détection tombe à minuit : on regarde où étaient les membres à
-                // ce moment-là, pas 24 h plus tard).
+            // Les dissolutions de l'heure, lues contre les clans de l'heure d'avant
+            // (la détection tombe à minuit : on regarde où étaient les membres à
+            // ce moment-là, pas 24 h plus tard).
             {
                 let residence = cairn_sim::social::RESIDENCE_RADIUS_TILES;
                 for e in &sim.clan_events[seen_clan_events..] {
@@ -288,7 +360,8 @@ fn main() {
                                     .iter()
                                     .filter(|m| {
                                         recently_dissolved.iter().any(|(t, ms)| {
-                                            e.tick.saturating_sub(*t) <= TICKS_PER_DAY && ms.contains(&m.0)
+                                            e.tick.saturating_sub(*t) <= TICKS_PER_DAY
+                                                && ms.contains(&m.0)
                                         })
                                     })
                                     .count() as f64;
@@ -298,19 +371,30 @@ fn main() {
                         }
                         cairn_sim::ClanEventKind::Dissolved => {
                             churn.1 += 1;
-                            if let Some((_, _, members)) = prev_clans.iter().find(|c| c.0 == e.clan.0) {
+                            if let Some((_, _, members)) =
+                                prev_clans.iter().find(|c| c.0 == e.clan.0)
+                            {
                                 recently_dissolved.push((e.tick, members.clone()));
                             }
-                            if let Some((_, home, members)) = prev_clans.iter().find(|c| c.0 == e.clan.0) {
-                                for (_, (id, pos, behavior)) in
-                                    sim.agents.query::<(&AgentId, &Position, &Behavior)>().iter()
+                            if let Some((_, home, members)) =
+                                prev_clans.iter().find(|c| c.0 == e.clan.0)
+                            {
+                                for (_, (id, pos, behavior)) in sim
+                                    .agents
+                                    .query::<(&AgentId, &Position, &Behavior)>()
+                                    .iter()
                                 {
                                     if members.contains(&id.0) {
-                                        let out = (pos.x - home.0).hypot(pos.y - home.1) > residence;
+                                        let out =
+                                            (pos.x - home.0).hypot(pos.y - home.1) > residence;
                                         if out {
                                             churn.2 += 1;
                                             let k = behavior.task.map_or("—".to_string(), |t| {
-                                                format!("{:?}", t.kind).split('(').next().unwrap_or("").to_string()
+                                                format!("{:?}", t.kind)
+                                                    .split('(')
+                                                    .next()
+                                                    .unwrap_or("")
+                                                    .to_string()
                                             });
                                             *absent_tasks.entry(k).or_insert(0) += 1;
                                         }
@@ -331,8 +415,18 @@ fn main() {
             }
 
             {
-                let mut xs: Vec<f64> = sim.agents.query::<&Position>().iter().map(|(_, p)| p.x).collect();
-                let mut ys: Vec<f64> = sim.agents.query::<&Position>().iter().map(|(_, p)| p.y).collect();
+                let mut xs: Vec<f64> = sim
+                    .agents
+                    .query::<&Position>()
+                    .iter()
+                    .map(|(_, p)| p.x)
+                    .collect();
+                let mut ys: Vec<f64> = sim
+                    .agents
+                    .query::<&Position>()
+                    .iter()
+                    .map(|(_, p)| p.y)
+                    .collect();
                 xs.sort_by(f64::total_cmp);
                 ys.sort_by(f64::total_cmp);
                 if !xs.is_empty() {
@@ -340,7 +434,12 @@ fn main() {
                     let far = cairn_core::km_to_tiles(10.0);
                     for (_, (pos, phys, behavior, clan)) in sim
                         .agents
-                        .query::<(&Position, &Physiology, &Behavior, &cairn_sim::ClanMembership)>()
+                        .query::<(
+                            &Position,
+                            &Physiology,
+                            &Behavior,
+                            &cairn_sim::ClanMembership,
+                        )>()
                         .iter()
                     {
                         all_hours += 1;
@@ -354,7 +453,11 @@ fn main() {
                             cairn_sim::Activity::Walking => format!(
                                 "Marche→{}",
                                 behavior.task.map_or("?".to_string(), |t| {
-                                    format!("{:?}", t.kind).split('(').next().unwrap_or("").to_string()
+                                    format!("{:?}", t.kind)
+                                        .split('(')
+                                        .next()
+                                        .unwrap_or("")
+                                        .to_string()
                                 })
                             ),
                             a => format!("{a:?}"),
@@ -373,7 +476,11 @@ fn main() {
                         cairn_sim::Activity::Walking => format!(
                             "Marche→{}",
                             behavior.task.map_or("?".to_string(), |t| {
-                                format!("{:?}", t.kind).split('(').next().unwrap_or("").to_string()
+                                format!("{:?}", t.kind)
+                                    .split('(')
+                                    .next()
+                                    .unwrap_or("")
+                                    .to_string()
                             })
                         ),
                         a => format!("{a:?}"),
@@ -424,8 +531,10 @@ fn main() {
             let tick_now = sim.time.tick;
             let mut nursing: std::collections::BTreeSet<u64> = Default::default();
             let mut males: Vec<(f64, f64)> = Vec::new();
-            for (_, (pos, phys, demo, kin)) in
-                sim.agents.query::<(&Position, &Physiology, &Demographics, &Kinship)>().iter()
+            for (_, (pos, phys, demo, kin)) in sim
+                .agents
+                .query::<(&Position, &Physiology, &Demographics, &Kinship)>()
+                .iter()
             {
                 if demo.is_infant(tick_now)
                     && let Some(m) = kin.mother
@@ -440,8 +549,10 @@ fn main() {
                 }
             }
             let r2 = demography::MATE_RADIUS_TILES * demography::MATE_RADIUS_TILES;
-            for (_, (id, pos, phys, demo)) in
-                sim.agents.query::<(&AgentId, &Position, &Physiology, &Demographics)>().iter()
+            for (_, (id, pos, phys, demo)) in sim
+                .agents
+                .query::<(&AgentId, &Position, &Physiology, &Demographics)>()
+                .iter()
             {
                 if demo.sex != Sex::Female
                     || !demography::FEMALE_FERTILE_YEARS.contains(&demo.age_years(tick_now))
@@ -458,7 +569,10 @@ fn main() {
                     "faim"
                 } else if phys.thirst >= 0.9 {
                     "soif"
-                } else if !males.iter().any(|m| (m.0 - pos.x).powi(2) + (m.1 - pos.y).powi(2) <= r2) {
+                } else if !males
+                    .iter()
+                    .any(|m| (m.0 - pos.x).powi(2) + (m.1 - pos.y).powi(2) <= r2)
+                {
                     "sans homme à 400 m"
                 } else {
                     "féconde"
@@ -517,11 +631,15 @@ fn main() {
         }
         let dist_km = cairn_core::tiles_to_km(dist / n as f64);
         let tick = sim.time.tick;
-        let (busiest, busiest_n) =
-            zones.iter().max_by_key(|(_, c)| **c).map(|(z, c)| (*z, *c)).unwrap_or(((0, 0), 0));
+        let (busiest, busiest_n) = zones
+            .iter()
+            .max_by_key(|(_, c)| **c)
+            .map(|(z, c)| (*z, *c))
+            .unwrap_or(((0, 0), 0));
         let side = fauna::RANGE_ZONE_TILES;
         let center = |z: (i64, i64)| ((z.0 as f64 + 0.5) * side, (z.1 as f64 + 0.5) * side);
-        let busy_kcal = sim.world.edible_kcal_peek(center(busiest), tick) / f64::from(busiest_n.max(1));
+        let busy_kcal =
+            sim.world.edible_kcal_peek(center(busiest), tick) / f64::from(busiest_n.max(1));
         let mut best_kcal = 0.0f64;
         for dz in -3..=3i64 {
             for dx in -3..=3i64 {
@@ -531,15 +649,20 @@ fn main() {
             }
         }
         let tasks_total: u64 = hungry_tasks.values().sum();
-        let mut tasks: Vec<(u64, String)> = hungry_tasks.iter().map(|(k, v)| (*v, k.clone())).collect();
+        let mut tasks: Vec<(u64, String)> =
+            hungry_tasks.iter().map(|(k, v)| (*v, k.clone())).collect();
         tasks.sort_by(|a, b| b.0.cmp(&a.0));
         let tasks_txt: Vec<String> = tasks
             .iter()
             .take(7)
             .map(|(v, k)| format!("{k} {:.0}%", 100.0 * *v as f64 / tasks_total.max(1) as f64))
             .collect();
-        let pct_of = |k: &str| 100.0 * *hungry_tasks.get(k).unwrap_or(&0) as f64 / tasks_total.max(1) as f64;
-        let (track_pct, hunt_pct) = (pct_of("Marche→Track"), pct_of("Hunting") + pct_of("Marche→Hunt"));
+        let pct_of =
+            |k: &str| 100.0 * *hungry_tasks.get(k).unwrap_or(&0) as f64 / tasks_total.max(1) as f64;
+        let (track_pct, hunt_pct) = (
+            pct_of("Marche→Track"),
+            pct_of("Hunting") + pct_of("Marche→Hunt"),
+        );
         let remembering = sim
             .agents
             .query::<&cairn_sim::Memory>()
@@ -548,7 +671,8 @@ fn main() {
             .count();
         hungry_tasks.clear();
         {
-            let mut ft: Vec<(u64, String)> = far_tasks.iter().map(|(k, v)| (*v, k.clone())).collect();
+            let mut ft: Vec<(u64, String)> =
+                far_tasks.iter().map(|(k, v)| (*v, k.clone())).collect();
             ft.sort_by(|a, b| b.0.cmp(&a.0));
             let txt: Vec<String> = ft
                 .iter()
@@ -574,15 +698,34 @@ fn main() {
             "{:>5} {:>4} {:>4} {:>4} {:>4}/{:>3}/{:>4} {:>5.2}/{:>4.2}/{:>4.2} | \
              {:>5.1} {:>5.1} {:>5.1} {:>5.1} {:>5.1} {:>5.1} {:>5.1} {:>5.1} | \
              {:>6.1} {:>4.0}% {:>5.2} | {:>5} {:>4} {:>6.2} {:>7.2} | {:>7.0} {:>5.1} {:>5.1}",
-            day0 + day, pop, births, d_starv + d_thirst + d_other, d_starv, d_thirst, d_other,
-            mean, p90, max,
-            pct(fed[0]), pct(fed[1]), pct(fed[2]), pct(fed[3]), pct(fed[4]), pct(fed[5]),
-            pct(fed[6]), pct(fed[7]),
+            day0 + day,
+            pop,
+            births,
+            d_starv + d_thirst + d_other,
+            d_starv,
+            d_thirst,
+            d_other,
+            mean,
+            p90,
+            max,
+            pct(fed[0]),
+            pct(fed[1]),
+            pct(fed[2]),
+            pct(fed[3]),
+            pct(fed[4]),
+            pct(fed[5]),
+            pct(fed[6]),
+            pct(fed[7]),
             ev[0] as f64 / hd,
             100.0 * ev[2] as f64 / (ev[1].max(1)) as f64,
             ev[3] as f64 / PERIOD_DAYS as f64,
-            zones.len(), zmax, dens, dens_max,
-            sim.fauna_census().0, tps, 100.0 * f64::from(preserving) / n as f64,
+            zones.len(),
+            zmax,
+            dens,
+            dens_max,
+            sim.fauna_census().0,
+            tps,
+            100.0 * f64::from(preserving) / n as f64,
         );
         let in_clan = sim
             .agents
@@ -601,8 +744,10 @@ fn main() {
             if total > 0 {
                 let mut v: Vec<(u64, &str)> = gates.iter().map(|(k, n)| (*n, *k)).collect();
                 v.sort_by(|a, b| b.0.cmp(&a.0));
-                let txt: Vec<String> =
-                    v.iter().map(|(n, k)| format!("{k} {:.0}%", 100.0 * *n as f64 / total as f64)).collect();
+                let txt: Vec<String> = v
+                    .iter()
+                    .map(|(n, k)| format!("{k} {:.0}%", 100.0 * *n as f64 / total as f64))
+                    .collect();
                 let open = *gates.get("féconde").unwrap_or(&0) as f64;
                 println!(
                     "      natalité : {total} jours-femme féconde — {} ; conceptions attendues {:.1}, naissances {births}",
@@ -630,7 +775,12 @@ fn main() {
             {
                 let (mut raids, mut killed, mut mutual) = (0u32, 0usize, 0u32);
                 for e in &sim.chronicle[seen_events..] {
-                    if let cairn_sim::EventKind::Raid { casualties, mutual: m, .. } = e.kind {
+                    if let cairn_sim::EventKind::Raid {
+                        casualties,
+                        mutual: m,
+                        ..
+                    } = e.kind
+                    {
                         raids += 1;
                         killed += casualties;
                         mutual += u32::from(m);
@@ -650,8 +800,10 @@ fn main() {
                 pairs = (0, 0, 0, 0, 0.0);
             }
             if !deaths_by_age.is_empty() {
-                let txt: Vec<String> =
-                    deaths_by_age.iter().map(|((c, cause), n)| format!("{c} {cause} {n}")).collect();
+                let txt: Vec<String> = deaths_by_age
+                    .iter()
+                    .map(|((c, cause), n)| format!("{c} {cause} {n}"))
+                    .collect();
                 println!("      morts par âge : {}", txt.join(", "));
                 deaths_by_age.clear();
             }
@@ -659,7 +811,10 @@ fn main() {
                 let mut known: Vec<f64> = thirst_deaths.iter().filter_map(|t| t.1).collect();
                 known.sort_by(f64::total_cmp);
                 let never = thirst_deaths.iter().filter(|t| t.1.is_none()).count();
-                let kids = thirst_deaths.iter().filter(|t| t.2 >= 0.0 && t.2 < 14.0).count();
+                let kids = thirst_deaths
+                    .iter()
+                    .filter(|t| t.2 >= 0.0 && t.2 < 14.0)
+                    .count();
                 let mut tasks: BTreeMap<&str, u32> = BTreeMap::new();
                 for t in &thirst_deaths {
                     *tasks.entry(t.0.as_str()).or_insert(0) += 1;
@@ -670,12 +825,16 @@ fn main() {
                     .sum::<f64>()
                     / thirst_deaths.len() as f64;
                 let starving = thirst_deaths.iter().filter(|t| t.4 >= 0.99).count();
-                println!("      soif : dont {starving} mourants qui avaient aussi faim à 1,0 (affamés comptés « soif ») ; en clan {thirst_in_clan}, hors clan {thirst_alone}");
+                println!(
+                    "      soif : dont {starving} mourants qui avaient aussi faim à 1,0 (affamés comptés « soif ») ; en clan {thirst_in_clan}, hors clan {thirst_alone}"
+                );
                 (thirst_in_clan, thirst_alone) = (0, 0);
                 println!(
                     "      soif : {} morts — source connue la plus proche : médiane {}, aucune connue {} ; enfants {} ; humidité moyenne {:.2} ; tâches {:?}",
                     thirst_deaths.len(),
-                    known.get(known.len() / 2).map_or("—".to_string(), |k| format!("{k:.1} km")),
+                    known
+                        .get(known.len() / 2)
+                        .map_or("—".to_string(), |k| format!("{k:.1} km")),
                     never,
                     kids,
                     hum,
@@ -687,11 +846,19 @@ fn main() {
         if pop > 0 {
             println!(
                 "      mangé : {:.2} point de faim par personne et par jour (besoin 0,50) — cueillette {:.2}, chasse {:.2}, porté {:.2}, part {:.2}, stock {:.2}, lait {:.2}",
-                total / hd, fed[0] / hd, fed[1] / hd, fed[8] / hd, fed[7] / hd, fed[4] / hd, fed[6] / hd
+                total / hd,
+                fed[0] / hd,
+                fed[1] / hd,
+                fed[8] / hd,
+                fed[7] / hd,
+                fed[4] / hd,
+                fed[6] / hd
             );
             println!(
                 "      chasse : {} h de chasse, {} h à portée, {} prises — {:.1} % des heures à portée, {:.3} prise par heure de chasse",
-                ev[4], ev[5], ev[3],
+                ev[4],
+                ev[5],
+                ev[3],
                 100.0 * ev[5] as f64 / ev[4].max(1) as f64,
                 ev[3] as f64 / ev[4].max(1) as f64
             );

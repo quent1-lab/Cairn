@@ -530,6 +530,17 @@ personne-année, létalité observée par épisode, défense moyenne à l'infect
 deux compteurs qui doivent concorder : morts de maladie (cause de décès) et épisodes × létalité.
 Référence à sourcer avant la mesure (`sourceur`) : épisodes de diarrhée et d'infection
 respiratoire par an chez l'enfant et l'adulte sans assainissement, létalité par épisode.
-Prédictions (à figer une fois les références sourcées, avant le banc) et seuil de décision :
+Références sourcées (`SOURCES.md`, 2026-10-17) : diarrhée < 5 ans 3-8 épisodes/an (pic
+6-11 mois), adulte ~2-3/an ; respiratoire basse 0,2-4/an chez l'enfant ; létalité d'une
+diarrhée sans réhydratation ~2,4 % (enfants) ; non allaité ×10 (partiel ×4,6) ; la
+malnutrition pèse surtout **légère à modérée**, sans seuil (Pelletier) — appuie H3.
+Prédictions, acceptation 1 an × 8 runs (instrument seul, rien ne change) :
+1. Adultes 15-39 : létalité par épisode ≥ 0,5 % (le calcul donne 0,15 % nourri) — la faim
+   de l'heure tue sur un creux. Réfuterait : ≤ 0,2 %.
+2. Épisodes adultes (toutes voies) ≥ 3/an — exposition trop forte. Réfuterait : ≤ 2/an.
+3. Enfants 1-4 ans : létalité ≥ 3 % (réel ~2,4 % sans soins, diarrhée).
+4. Concordance : infections closes par une mort de maladie = morts de maladie de la table
+   à ±5 %.
+Seuil de décision :
 si les épisodes adultes dépassent le double de la référence → l'exposition (H1) d'abord ; si
 leur nombre est réel et la létalité trop haute → la défense (H2, H3).

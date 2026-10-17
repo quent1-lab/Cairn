@@ -26,8 +26,9 @@ fn main() {
     let seed: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(42);
     let years: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(50);
     let sample_days: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(1).max(1);
-    let out_path: String =
-        args.next().unwrap_or_else(|| format!("out/chronicle_{seed}.csv"));
+    let out_path: String = args
+        .next()
+        .unwrap_or_else(|| format!("out/chronicle_{seed}.csv"));
     let capacity: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(16384);
     let n_agents: usize = args.next().and_then(|s| s.parse().ok()).unwrap_or(40);
     // Jour de départ (7ᵉ argument, défaut 135 : l'été) — voir `etincelle` : une
@@ -38,8 +39,10 @@ fn main() {
     //   client (`scenario`), plus quelques meutes de prédateurs. —
     let mut sim = Sim::new(WorldSeed(seed), capacity);
     scenario::start_on_day(&mut sim, start_day);
-    let seed_point =
-        (cairn_core::km_to_tiles(1500.0) as i64, cairn_core::km_to_tiles(2100.0) as i64);
+    let seed_point = (
+        cairn_core::km_to_tiles(1500.0) as i64,
+        cairn_core::km_to_tiles(2100.0) as i64,
+    );
     let home = scenario::find_home(&mut sim, seed_point);
     let placed = scenario::populate(&mut sim, home, n_agents, 2);
     for i in 0..4i64 {
@@ -104,7 +107,11 @@ fn main() {
             );
         }
     }
-    eprintln!("Terminé : {} lignes, {:.0}s.", HEADER.len(), started.elapsed().as_secs_f64());
+    eprintln!(
+        "Terminé : {} lignes, {:.0}s.",
+        HEADER.len(),
+        started.elapsed().as_secs_f64()
+    );
 }
 
 /// Compteurs cumulés tenus à jour incrémentalement (on ne relit que la queue
@@ -163,36 +170,96 @@ impl Cumulative {
 
 /// L'ordre des colonnes — HEADER et `sample_row` doivent rester alignés.
 const HEADER: &[&str] = &[
-    "day", "year", "day_of_year", "felt_temp_c",
+    "day",
+    "year",
+    "day_of_year",
+    "felt_temp_c",
     // démographie
-    "pop", "infants", "children", "adults", "females", "males", "pregnant",
-    "births_cum", "deaths_cum", "deaths_starvation", "deaths_dehydration",
-    "deaths_hypothermia", "deaths_oldage", "deaths_predation", "deaths_violence",
-    "deaths_disease", "deaths_lightning", "mean_age_y", "max_age_y",
+    "pop",
+    "infants",
+    "children",
+    "adults",
+    "females",
+    "males",
+    "pregnant",
+    "births_cum",
+    "deaths_cum",
+    "deaths_starvation",
+    "deaths_dehydration",
+    "deaths_hypothermia",
+    "deaths_oldage",
+    "deaths_predation",
+    "deaths_violence",
+    "deaths_disease",
+    "deaths_lightning",
+    "mean_age_y",
+    "max_age_y",
     // physiologie (moyennes + pires cas)
-    "mean_health", "min_health", "distress", "mean_hunger", "max_hunger",
-    "mean_thirst", "max_thirst", "mean_fatigue", "mean_cold", "max_cold",
+    "mean_health",
+    "min_health",
+    "distress",
+    "mean_hunger",
+    "max_hunger",
+    "mean_thirst",
+    "max_thirst",
+    "mean_fatigue",
+    "mean_cold",
+    "max_cold",
     // génétique (dérive des traits) + culture (compétences)
-    "trait_strength", "trait_endurance", "trait_dexterity", "trait_curiosity",
-    "trait_sociability", "trait_aggression", "skill_foraging", "skill_hunting",
-    "skill_oratory", "known_springs", "known_cells",
+    "trait_strength",
+    "trait_endurance",
+    "trait_dexterity",
+    "trait_curiosity",
+    "trait_sociability",
+    "trait_aggression",
+    "skill_foraging",
+    "skill_hunting",
+    "skill_oratory",
+    "known_springs",
+    "known_cells",
     // faune
-    "game_head", "herds", "predators", "packs", "hunted_cum",
+    "game_head",
+    "herds",
+    "predators",
+    "packs",
+    "hunted_cum",
     // clans
-    "clans", "clan_members", "unaffiliated", "clan_size_min", "clan_size_max",
-    "clan_size_mean", "clan_stock_total", "clan_stock_mean", "clans_formed_cum",
-    "clans_dissolved_cum", "clans_desiring",
+    "clans",
+    "clan_members",
+    "unaffiliated",
+    "clan_size_min",
+    "clan_size_max",
+    "clan_size_mean",
+    "clan_stock_total",
+    "clan_stock_mean",
+    "clans_formed_cum",
+    "clans_dissolved_cum",
+    "clans_desiring",
     // tensions
-    "tension_max", "tension_mean", "tense_pairs",
+    "tension_max",
+    "tension_mean",
+    "tense_pairs",
     // structures
-    "structures", "huts", "granaries", "palisades",
+    "structures",
+    "huts",
+    "granaries",
+    "palisades",
     // dispersion / migration
-    "spread_w_km", "spread_h_km", "spread_max_km", "spread_mean_km",
-    "centroid_x", "centroid_y",
+    "spread_w_km",
+    "spread_h_km",
+    "spread_max_km",
+    "spread_mean_km",
+    "centroid_x",
+    "centroid_y",
     // monde / perf
-    "chunks_generated", "chunks_loaded", "chunks_dirty", "tps",
+    "chunks_generated",
+    "chunks_loaded",
+    "chunks_dirty",
+    "tps",
     // diagnostic dispersion / chef (ancrage aux structures)
-    "inter_clan_km", "chief_score_max", "chief_huts",
+    "inter_clan_km",
+    "chief_score_max",
+    "chief_huts",
 ];
 
 fn sample_row(sim: &mut Sim, acc: &Cumulative, tps: f64) -> Vec<String> {
@@ -214,15 +281,18 @@ fn sample_row(sim: &mut Sim, acc: &Cumulative, tps: f64) -> Vec<String> {
     let mut affiliated = 0u32;
     let mut positions: Vec<(f64, f64)> = Vec::new();
 
-    for (_, (pos, phys, demo, tr, sk, mem, cm)) in sim.agents.query::<(
-        &Position,
-        &Physiology,
-        &Demographics,
-        &Traits,
-        &Skills,
-        &Memory,
-        &ClanMembership,
-    )>().iter()
+    for (_, (pos, phys, demo, tr, sk, mem, cm)) in sim
+        .agents
+        .query::<(
+            &Position,
+            &Physiology,
+            &Demographics,
+            &Traits,
+            &Skills,
+            &Memory,
+            &ClanMembership,
+        )>()
+        .iter()
     {
         positions.push((pos.x, pos.y));
         if demo.is_infant(tick) {
@@ -326,8 +396,16 @@ fn sample_row(sim: &mut Sim, acc: &Cumulative, tps: f64) -> Vec<String> {
     if n_clans == 0 {
         cmin = 0;
     }
-    let clan_size_mean = if n_clans == 0 { 0.0 } else { clan_members as f64 / n_clans as f64 };
-    let stock_mean = if n_clans == 0 { 0.0 } else { stock_total / n_clans as f32 };
+    let clan_size_mean = if n_clans == 0 {
+        0.0
+    } else {
+        clan_members as f64 / n_clans as f64
+    };
+    let stock_mean = if n_clans == 0 {
+        0.0
+    } else {
+        stock_total / n_clans as f32
+    };
 
     // — Tensions inter-clans. —
     let (mut tmax, mut tsum, mut tense_pairs) = (0.0f32, 0.0f64, 0u32);
@@ -366,8 +444,10 @@ fn sample_row(sim: &mut Sim, acc: &Cumulative, tps: f64) -> Vec<String> {
     // — Score du chef le plus établi (oratoire × prestige) : pour calibrer le
     //   seuil de la future hutte du chef. —
     let mut score: std::collections::BTreeMap<u64, f32> = std::collections::BTreeMap::new();
-    for (_, (id, sk, pr)) in
-        sim.agents.query::<(&cairn_sim::AgentId, &Skills, &cairn_sim::agent::Prestige)>().iter()
+    for (_, (id, sk, pr)) in sim
+        .agents
+        .query::<(&cairn_sim::AgentId, &Skills, &cairn_sim::agent::Prestige)>()
+        .iter()
     {
         score.insert(id.0, sk.oratory * pr.0);
     }
@@ -461,4 +541,3 @@ fn sample_row(sim: &mut Sim, acc: &Cumulative, tps: f64) -> Vec<String> {
         chief_huts.to_string(),
     ]
 }
-

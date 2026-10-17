@@ -90,3 +90,12 @@ territoire connu, refuges de disette) → `SOURCES.md` du domaine.
 l'usage, plus par la distance), ce qui touche la soif et les trajets d'eau (MAR-5) ; puis
 MEM-3 (les choix lisent la mémoire : retire l'omniscience de `brain` et de `camp`, donne enfin
 un gain à l'exploration — CUR), puis MEM-2 (ce qu'on se raconte).
+
+**Ce que le sourçage apporte (2026-10-17)** : on retient des **ressources par espèce et par
+saison** (centaines d'espèces connues ; saisons nommées d'après ce qui est mûr), des
+**toponymes** par centaines sur des territoires de 10³-10⁵ km² (même ordre que ~1 000-5 000
+mailles de 2 km), et la connaissance s'étend avec l'âge et diffère selon le sexe (les hommes
+parcourent ~4 fois plus). Rien de chiffré sur la durée du souvenir d'un lieu ni sur des
+lieux-refuges : la forme validée reste à mesurer, pas à régler. Conséquence pour MEM-1 :
+retenir le rendu **par saison** (la maille qui rend en été n'est pas celle de l'hiver) est
+appuyé par les calendriers ; à proposer comme variante, pas d'emblée.

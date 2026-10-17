@@ -91,7 +91,11 @@ pub(crate) fn daily(sim: &mut Sim) {
             // plus du gibier, c'est un cheptel. Un fait qui fait date, et qu'on
             // ne peut lire que du dedans (le seuil ne se franchit qu'une fois).
             if before < DOMESTICATED_THRESHOLD && herd.tameness >= DOMESTICATED_THRESHOLD {
-                tamed.push(((here.0.floor() as i64, here.1.floor() as i64), clan, herd.species));
+                tamed.push((
+                    (here.0.floor() as i64, here.1.floor() as i64),
+                    clan,
+                    herd.species,
+                ));
             }
         } else {
             herd.tameness = (herd.tameness - FERAL_RATE).max(0.0);
@@ -119,7 +123,8 @@ mod tests {
     use cairn_core::WorldSeed;
 
     fn spawn_herd(sim: &mut Sim, species: Species, x: f64, y: f64) -> hecs::Entity {
-        sim.fauna.spawn((FaunaId(1), Position { x, y }, Herd::new(20.0, species)))
+        sim.fauna
+            .spawn((FaunaId(1), Position { x, y }, Herd::new(20.0, species)))
     }
 
     /// L'aurochs gardé près d'un foyer et protégé s'apprivoise et s'ancre ; loin
@@ -146,9 +151,23 @@ mod tests {
         }
 
         let tam = |sim: &mut Sim, e| sim.fauna.query_one_mut::<&Herd>(e).unwrap().tameness;
-        assert!(tam(&mut sim, near) > DOMESTICATED_THRESHOLD, "l'aurochs gardé s'apprivoise");
-        assert!(sim.fauna.query_one_mut::<&Herd>(near).unwrap().anchor.is_some(), "le cheptel est ancré");
-        assert_eq!(tam(&mut sim, far), 0.0, "l'aurochs loin de tout reste sauvage");
+        assert!(
+            tam(&mut sim, near) > DOMESTICATED_THRESHOLD,
+            "l'aurochs gardé s'apprivoise"
+        );
+        assert!(
+            sim.fauna
+                .query_one_mut::<&Herd>(near)
+                .unwrap()
+                .anchor
+                .is_some(),
+            "le cheptel est ancré"
+        );
+        assert_eq!(
+            tam(&mut sim, far),
+            0.0,
+            "l'aurochs loin de tout reste sauvage"
+        );
         assert_eq!(tam(&mut sim, wild), 0.0, "un cerf ne s'apprivoise pas");
     }
 
@@ -170,7 +189,11 @@ mod tests {
         });
         let cheptel = spawn_herd(&mut sim, Species::Aurochs, 100.0, 0.0);
         // Une meute nombreuse tout près : le troupeau est harcelé.
-        sim.fauna.spawn((FaunaId(2), Position { x: 150.0, y: 0.0 }, Pack::new(30.0, Species::Wolf)));
+        sim.fauna.spawn((
+            FaunaId(2),
+            Position { x: 150.0, y: 0.0 },
+            Pack::new(30.0, Species::Wolf),
+        ));
 
         for _ in 0..40 {
             daily(&mut sim);

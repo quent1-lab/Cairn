@@ -46,7 +46,10 @@ pub const BLOCKED_SPRING_TICKS: u64 = 2 * cairn_core::TICKS_PER_DAY;
 
 /// La cellule de mémoire couvrant une tuile.
 pub fn cell_of(tile: (i64, i64)) -> (i64, i64) {
-    (tile.0.div_euclid(MEMORY_CELL_TILES), tile.1.div_euclid(MEMORY_CELL_TILES))
+    (
+        tile.0.div_euclid(MEMORY_CELL_TILES),
+        tile.1.div_euclid(MEMORY_CELL_TILES),
+    )
 }
 
 /// La carte mentale d'un agent. Composant à allocations (contrairement à
@@ -113,8 +116,7 @@ impl Memory {
     pub fn nearest_known_spring(&self, from: (f64, f64)) -> Option<(i64, i64)> {
         let mut best: Option<(f64, (i64, i64))> = None;
         for &s in &self.springs {
-            let d2 =
-                (s.0 as f64 + 0.5 - from.0).powi(2) + (s.1 as f64 + 0.5 - from.1).powi(2);
+            let d2 = (s.0 as f64 + 0.5 - from.0).powi(2) + (s.1 as f64 + 0.5 - from.1).powi(2);
             if best.is_none_or(|(bd, _)| d2 < bd) {
                 best = Some((d2, s));
             }
@@ -134,7 +136,9 @@ impl Memory {
 
     /// `spring` est-elle mise de côté au tick `tick` ?
     pub fn is_blocked(&self, spring: (i64, i64), tick: u64) -> bool {
-        self.blocked.iter().any(|(s, until)| *s == spring && tick < *until)
+        self.blocked
+            .iter()
+            .any(|(s, until)| *s == spring && tick < *until)
     }
 
     /// La source connue la plus proche qui n'est pas mise de côté.
@@ -144,8 +148,7 @@ impl Memory {
             if self.is_blocked(s, tick) {
                 continue;
             }
-            let d2 =
-                (s.0 as f64 + 0.5 - from.0).powi(2) + (s.1 as f64 + 0.5 - from.1).powi(2);
+            let d2 = (s.0 as f64 + 0.5 - from.0).powi(2) + (s.1 as f64 + 0.5 - from.1).powi(2);
             if best.is_none_or(|(bd, _)| d2 < bd) {
                 best = Some((d2, s));
             }
@@ -175,7 +178,12 @@ pub(crate) fn exchange_knowledge(sim: &mut Sim) {
     }
     let mut views: Vec<View> = sim
         .agents
-        .query::<(&crate::agent::AgentId, &crate::agent::Position, &Memory, &Yields)>()
+        .query::<(
+            &crate::agent::AgentId,
+            &crate::agent::Position,
+            &Memory,
+            &Yields,
+        )>()
         .iter()
         .map(|(entity, (id, pos, mem, yields))| View {
             entity,

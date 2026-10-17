@@ -226,9 +226,9 @@ impl Sim {
             | Intervention::Rain { pos }
             | Intervention::Drought { pos }
             | Intervention::Sign { pos } => pos,
-            Intervention::Revelation { agent } => {
-                self.agent_position(agent).ok_or(DivineError::NoSuchTarget)?
-            }
+            Intervention::Revelation { agent } => self
+                .agent_position(agent)
+                .ok_or(DivineError::NoSuchTarget)?,
         };
 
         let outcome = match intervention {
@@ -245,11 +245,19 @@ impl Sim {
                     pos: (pos.0 as f64 + 0.5, pos.1 as f64 + 0.5),
                     since: self.time.tick,
                 });
-                Outcome { ignited: false, killed: 0, touched: 0 }
+                Outcome {
+                    ignited: false,
+                    killed: 0,
+                    touched: 0,
+                }
             }
             Intervention::Revelation { agent } => {
                 let understood = crate::tech::reveal(self, agent).is_some();
-                Outcome { ignited: false, killed: 0, touched: usize::from(understood) }
+                Outcome {
+                    ignited: false,
+                    killed: 0,
+                    touched: usize::from(understood),
+                }
             }
         };
 
@@ -272,8 +280,18 @@ impl Sim {
             }
         }
 
-        self.miracles.push(Miracle { tick: self.time.tick, intervention, outcome });
-        self.record(pos, EventKind::Miracle { intervention, outcome });
+        self.miracles.push(Miracle {
+            tick: self.time.tick,
+            intervention,
+            outcome,
+        });
+        self.record(
+            pos,
+            EventKind::Miracle {
+                intervention,
+                outcome,
+            },
+        );
         Ok(outcome)
     }
 
@@ -292,7 +310,11 @@ impl Sim {
     /// si quelqu'un l'a voulu — toute la matière du culte est là.
     fn summon_weather(&mut self, pos: (i64, i64), kind: WeatherKind) -> Outcome {
         crate::weather::start(self, (pos.0 as f64 + 0.5, pos.1 as f64 + 0.5), kind);
-        Outcome { ignited: false, killed: 0, touched: 0 }
+        Outcome {
+            ignited: false,
+            killed: 0,
+            touched: 0,
+        }
     }
 
     /// Rend (ou retire) de la santé alentour. `delta` positif bénit, négatif
@@ -313,7 +335,11 @@ impl Sim {
                 touched += 1;
             }
         }
-        Outcome { ignited: false, killed, touched }
+        Outcome {
+            ignited: false,
+            killed,
+            touched,
+        }
     }
 
     /// La foudre : un feu si le sol s'y prête, des morts si quelqu'un était là.
@@ -326,8 +352,9 @@ impl Sim {
         // Qui se tenait sous le coup. On relève d'abord (l'itération emprunte
         // l'ECS), on retire ensuite — même patron que les morts ordinaires.
         let mut killed = 0usize;
-        for (_, (agent_pos, phys, demo)) in
-            self.agents.query_mut::<(&Position, &mut Physiology, &Demographics)>()
+        for (_, (agent_pos, phys, demo)) in self
+            .agents
+            .query_mut::<(&Position, &mut Physiology, &Demographics)>()
         {
             let d = (agent_pos.x - point.0).hypot(agent_pos.y - point.1);
             if d <= LIGHTNING_LETHAL_TILES && !phys.is_dead() {
@@ -341,7 +368,11 @@ impl Sim {
             }
         }
         // La foudre ne « touche » personne : elle tue, ou elle passe.
-        Outcome { ignited, killed, touched: 0 }
+        Outcome {
+            ignited,
+            killed,
+            touched: 0,
+        }
     }
 
     /// Distance (en tuiles) à laquelle la foudre est mortelle — le client s'en
@@ -391,10 +422,15 @@ mod tests {
         let dessous = sim.spawn_agent(fx as f64 + 0.5, fy as f64 + 0.5);
         let a_l_ecart = sim.spawn_agent(fx as f64 + 500.0, fy as f64 + 0.5);
 
-        let outcome = sim.invoke(Intervention::Lightning { pos: (fx, fy) }).unwrap();
+        let outcome = sim
+            .invoke(Intervention::Lightning { pos: (fx, fy) })
+            .unwrap();
 
         assert!(outcome.ignited, "une savane sèche doit s'embraser");
-        assert_eq!(outcome.killed, 1, "seul celui qui était dessous doit mourir");
+        assert_eq!(
+            outcome.killed, 1,
+            "seul celui qui était dessous doit mourir"
+        );
         assert!(!sim.fires.is_empty(), "le feu doit exister dans le monde");
 
         let dead = |id| {
@@ -454,7 +490,10 @@ mod tests {
         };
 
         let (proche, loin, out) = effet(Intervention::Fertility { pos: (0, 0) }, 0.4);
-        assert!(proche > 0.4, "la grâce relève celui qui est là ({proche:.2})");
+        assert!(
+            proche > 0.4,
+            "la grâce relève celui qui est là ({proche:.2})"
+        );
         assert_eq!(loin, 0.4, "elle ne porte pas au-delà de son rayon");
         assert_eq!((out.touched, out.killed), (1, 0));
 
@@ -503,7 +542,15 @@ mod tests {
         for (_, phys) in sim.agents.query_mut::<&mut Physiology>() {
             phys.health = 0.35; // trop faible pour concevoir
         }
-        let sante = |sim: &Sim| sim.agents.query::<&Physiology>().iter().next().unwrap().1.health;
+        let sante = |sim: &Sim| {
+            sim.agents
+                .query::<&Physiology>()
+                .iter()
+                .next()
+                .unwrap()
+                .1
+                .health
+        };
         assert!(sante(&sim) < FECONDABLE, "au départ, le corps ne suit pas");
 
         sim.invoke(Intervention::Fertility { pos: (0, 0) }).unwrap();
@@ -529,7 +576,9 @@ mod tests {
         };
         let mut sim = Sim::new(WorldSeed(42), 256);
         sim.allow_weather = false; // aucun ciel parasite : on ne veut que le nôtre
-        let Some(site) = find_flammable(&mut sim) else { return };
+        let Some(site) = find_flammable(&mut sim) else {
+            return;
+        };
 
         // Sans intervention, ce sol prend feu.
         assert!(brulant(&mut sim, site), "le site de référence doit brûler");
@@ -545,15 +594,17 @@ mod tests {
         // Et sur un sol trop humide pour brûler, la sécheresse ouvre la voie.
         let mut sec = Sim::new(WorldSeed(42), 256);
         sec.allow_weather = false;
-        let humide = (0..600i64)
-            .map(|r| (r * 300, 0i64))
-            .find(|&(x, y)| {
-                let t = sec.world.tile(x, y);
-                t.is_walkable() && t.biomass >= 60 && t.humidity > 120 && t.temperature >= 5.0
-            });
+        let humide = (0..600i64).map(|r| (r * 300, 0i64)).find(|&(x, y)| {
+            let t = sec.world.tile(x, y);
+            t.is_walkable() && t.biomass >= 60 && t.humidity > 120 && t.temperature >= 5.0
+        });
         let Some(site_humide) = humide else { return };
-        assert!(!brulant(&mut sec, site_humide), "un sol détrempé ne prend pas");
-        sec.invoke(Intervention::Drought { pos: site_humide }).unwrap();
+        assert!(
+            !brulant(&mut sec, site_humide),
+            "un sol détrempé ne prend pas"
+        );
+        sec.invoke(Intervention::Drought { pos: site_humide })
+            .unwrap();
         assert!(
             brulant(&mut sec, site_humide),
             "la sécheresse doit rendre inflammable ce qui ne l'était pas"
@@ -569,13 +620,20 @@ mod tests {
         let mut sim = Sim::new(WorldSeed(1), 64);
         sim.allow_weather = false;
         sim.invoke(Intervention::Rain { pos: (0, 0) }).unwrap();
-        assert_eq!(sim.weather.len(), 1, "elle produit une cellule météo ordinaire");
+        assert_eq!(
+            sim.weather.len(),
+            1,
+            "elle produit une cellule météo ordinaire"
+        );
         assert_eq!(sim.weather[0].kind, crate::weather::WeatherKind::Rain);
         // Et elle se dissipe comme n'importe quelle autre : rien ne la distingue.
         for _ in 0..20 {
             crate::weather::daily(&mut sim);
         }
-        assert!(sim.weather.is_empty(), "même une averse voulue finit par passer");
+        assert!(
+            sim.weather.is_empty(),
+            "même une averse voulue finit par passer"
+        );
     }
 
     /// **La révélation ne crée rien.** Elle fait comprendre ce qu'on avait sous
@@ -615,10 +673,16 @@ mod tests {
         };
 
         let (_, rien) = inspire(false);
-        assert!(!rien, "sans avoir rien vu, l'inspiré ne comprend pas le feu");
+        assert!(
+            !rien,
+            "sans avoir rien vu, l'inspiré ne comprend pas le feu"
+        );
 
         let (avec, su) = inspire(true);
-        assert!(su, "avec le silex et le bois sous les yeux, il comprend le feu");
+        assert!(
+            su,
+            "avec le silex et le bois sous les yeux, il comprend le feu"
+        );
         assert_eq!(avec.touched, 1, "un témoin : lui-même");
     }
 
@@ -633,7 +697,10 @@ mod tests {
             sim.invoke(Intervention::Revelation { agent: fantome }),
             Err(DivineError::NoSuchTarget)
         );
-        assert!(sim.miracles.is_empty(), "un geste sans cible n'entre pas au journal");
+        assert!(
+            sim.miracles.is_empty(),
+            "un geste sans cible n'entre pas au journal"
+        );
     }
 
     /// Une révélation produit **deux faits** : le geste du ciel, et la
@@ -654,14 +721,22 @@ mod tests {
         sim.invoke(Intervention::Revelation { agent }).unwrap();
 
         assert!(
-            sim.chronicle.iter().any(|e| matches!(e.kind, EventKind::Miracle { .. })),
+            sim.chronicle
+                .iter()
+                .any(|e| matches!(e.kind, EventKind::Miracle { .. })),
             "le geste du ciel fait date"
         );
         assert!(
-            sim.chronicle.iter().any(|e| matches!(e.kind, EventKind::TechDiscovered { .. })),
+            sim.chronicle
+                .iter()
+                .any(|e| matches!(e.kind, EventKind::TechDiscovered { .. })),
             "et la découverte aussi, séparément"
         );
-        assert_eq!(sim.tech_events.len(), 1, "elle compte comme une vraie découverte");
+        assert_eq!(
+            sim.tech_events.len(),
+            1,
+            "elle compte comme une vraie découverte"
+        );
     }
 
     /// **L'arbitrage central de la Foi (§6.1).** Un dieu se juge à ses effets,
@@ -671,7 +746,11 @@ mod tests {
     fn seuls_les_gestes_qui_se_voient_font_des_croyants() {
         use crate::faith::Faith;
         let croyants = |sim: &Sim| {
-            sim.agents.query::<&Faith>().iter().filter(|(_, f)| f.believes()).count()
+            sim.agents
+                .query::<&Faith>()
+                .iter()
+                .filter(|(_, f)| f.believes())
+                .count()
         };
 
         // Une grâce qui relève quelqu'un : on y croit.
@@ -686,8 +765,13 @@ mod tests {
         // La même grâce sur une lande déserte : rien ne s'est produit.
         let mut vide = Sim::new(WorldSeed(5), 64);
         vide.spawn_agent(10_000.0, 0.0); // trop loin pour être touché
-        vide.invoke(Intervention::Fertility { pos: (0, 0) }).unwrap();
-        assert_eq!(croyants(&vide), 0, "un geste sans effet ne convainc personne");
+        vide.invoke(Intervention::Fertility { pos: (0, 0) })
+            .unwrap();
+        assert_eq!(
+            croyants(&vide),
+            0,
+            "un geste sans effet ne convainc personne"
+        );
 
         // Et la pluie sur un peuple qui n'a besoin de rien : il pleut, voilà tout.
         let mut ciel = Sim::new(WorldSeed(5), 64);
@@ -697,7 +781,11 @@ mod tests {
             phys.thirst = 0.1; // il ne manque de rien
         }
         ciel.invoke(Intervention::Rain { pos: (0, 0) }).unwrap();
-        assert_eq!(croyants(&ciel), 0, "sur un homme comblé, une averse n'est que la météo");
+        assert_eq!(
+            croyants(&ciel),
+            0,
+            "sur un homme comblé, une averse n'est que la météo"
+        );
     }
 
     /// **La nuance qui distingue une averse d'une réponse.** Ce n'est pas le
@@ -725,9 +813,15 @@ mod tests {
                 .map(|(_, (_, f))| *f)
                 .unwrap()
         };
-        assert!(foi(assoiffe).believes(), "celui qui mourait de soif y voit une réponse");
+        assert!(
+            foi(assoiffe).believes(),
+            "celui qui mourait de soif y voit une réponse"
+        );
         assert_eq!(foi(assoiffe).boons, 1, "et il la porte au crédit du ciel");
-        assert!(!foi(repu).believes(), "son voisin, lui, a seulement vu qu'il pleuvait");
+        assert!(
+            !foi(repu).believes(),
+            "son voisin, lui, a seulement vu qu'il pleuvait"
+        );
 
         // Et le châtiment se lit pareil : la sécheresse ne frappe que qui a faim.
         let mut sec = Sim::new(WorldSeed(5), 64);
@@ -754,11 +848,14 @@ mod tests {
     fn le_ciel_est_cru_qu_il_donne_ou_qu_il_frappe() {
         use crate::faith::Faith;
         let mut sim = Sim::new(WorldSeed(42), 256);
-        let Some((fx, fy)) = find_flammable(&mut sim) else { return };
+        let Some((fx, fy)) = find_flammable(&mut sim) else {
+            return;
+        };
         sim.spawn_agent(fx as f64 + 0.5, fy as f64 + 0.5); // sous le coup
         sim.spawn_agent(fx as f64 + 200.0, fy as f64); // à l'écart, mais il voit
 
-        sim.invoke(Intervention::Lightning { pos: (fx, fy) }).unwrap();
+        sim.invoke(Intervention::Lightning { pos: (fx, fy) })
+            .unwrap();
 
         // Le mort ne croit plus rien ; le survivant, lui, a vu le ciel tuer.
         let temoin = sim
@@ -784,9 +881,14 @@ mod tests {
 
         assert_eq!(sim.miracles.len(), 1);
         assert_eq!(sim.miracles[0].tick, 1234, "le miracle est daté");
-        assert_eq!(sim.miracles[0].intervention, Intervention::Lightning { pos });
+        assert_eq!(
+            sim.miracles[0].intervention,
+            Intervention::Lightning { pos }
+        );
         assert!(
-            sim.chronicle.iter().any(|e| matches!(e.kind, EventKind::Miracle { .. })),
+            sim.chronicle
+                .iter()
+                .any(|e| matches!(e.kind, EventKind::Miracle { .. })),
             "un miracle fait toujours date"
         );
     }

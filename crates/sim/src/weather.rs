@@ -80,7 +80,12 @@ pub struct WeatherCell {
 /// Déclenche une cellule. **Le seul chemin**, quelle que soit la cause — la
 /// météo naturelle et la divinité passent tous deux par ici.
 pub(crate) fn start(sim: &mut Sim, pos: (f64, f64), kind: WeatherKind) {
-    sim.weather.push(WeatherCell { pos, radius: WEATHER_RADIUS_TILES, kind, age_days: 0 });
+    sim.weather.push(WeatherCell {
+        pos,
+        radius: WEATHER_RADIUS_TILES,
+        kind,
+        age_days: 0,
+    });
 }
 
 /// Le décalage d'humidité en un point, dans `[-1, 1]` : `+1` sous le cœur d'une
@@ -127,8 +132,12 @@ fn try_form(sim: &mut Sim) {
     if rng.next_f64() >= WEATHER_CHANCE_PER_DAY {
         return;
     }
-    let anchors: Vec<(f64, f64)> =
-        sim.agents.query::<&Position>().iter().map(|(_, p)| (p.x, p.y)).collect();
+    let anchors: Vec<(f64, f64)> = sim
+        .agents
+        .query::<&Position>()
+        .iter()
+        .map(|(_, p)| (p.x, p.y))
+        .collect();
     if anchors.is_empty() {
         return;
     }
@@ -141,7 +150,11 @@ fn try_form(sim: &mut Sim) {
     // L'humidité du lieu donne la probabilité qu'il pleuve plutôt qu'il sèche.
     let tile = sim.world.tile(pos.0.floor() as i64, pos.1.floor() as i64);
     let wetness = f64::from(tile.humidity) / 255.0;
-    let kind = if rng.next_f64() < wetness { WeatherKind::Rain } else { WeatherKind::Drought };
+    let kind = if rng.next_f64() < wetness {
+        WeatherKind::Rain
+    } else {
+        WeatherKind::Drought
+    };
     start(sim, pos, kind);
 }
 
@@ -151,16 +164,28 @@ mod tests {
     use cairn_core::WorldSeed;
 
     fn cell(kind: WeatherKind, x: f64) -> WeatherCell {
-        WeatherCell { pos: (x, 0.0), radius: WEATHER_RADIUS_TILES, kind, age_days: 0 }
+        WeatherCell {
+            pos: (x, 0.0),
+            radius: WEATHER_RADIUS_TILES,
+            kind,
+            age_days: 0,
+        }
     }
 
     #[test]
     fn le_decalage_est_maximal_au_centre_et_nul_au_loin() {
         let cells = vec![cell(WeatherKind::Rain, 0.0)];
-        assert!((shift_at((0.0, 0.0), &cells) - 1.0).abs() < 1e-5, "plein centre : +1");
+        assert!(
+            (shift_at((0.0, 0.0), &cells) - 1.0).abs() < 1e-5,
+            "plein centre : +1"
+        );
         let bord = shift_at((WEATHER_RADIUS_TILES * 0.5, 0.0), &cells);
         assert!((bord - 0.5).abs() < 0.01, "mi-rayon : ~0,5 ({bord:.3})");
-        assert_eq!(shift_at((WEATHER_RADIUS_TILES + 1.0, 0.0), &cells), 0.0, "au-delà : rien");
+        assert_eq!(
+            shift_at((WEATHER_RADIUS_TILES + 1.0, 0.0), &cells),
+            0.0,
+            "au-delà : rien"
+        );
     }
 
     /// Les signes sont opposés, et deux cellules contraires se neutralisent —
@@ -170,7 +195,10 @@ mod tests {
     fn pluie_et_secheresse_sont_de_signes_opposes_et_se_compensent() {
         assert!(shift_at((0.0, 0.0), &[cell(WeatherKind::Rain, 0.0)]) > 0.0);
         assert!(shift_at((0.0, 0.0), &[cell(WeatherKind::Drought, 0.0)]) < 0.0);
-        let opposees = vec![cell(WeatherKind::Rain, 0.0), cell(WeatherKind::Drought, 0.0)];
+        let opposees = vec![
+            cell(WeatherKind::Rain, 0.0),
+            cell(WeatherKind::Drought, 0.0),
+        ];
         assert_eq!(shift_at((0.0, 0.0), &opposees), 0.0, "elles s'annulent");
     }
 

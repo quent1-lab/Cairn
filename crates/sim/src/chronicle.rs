@@ -93,19 +93,39 @@ pub enum EventKind {
     /// Un clan a été absorbé par un autre : ses gens vivent, sous une autre
     /// bannière. À ne pas confondre avec une fin — c'en était pourtant une
     /// dans le modèle avant qu'on sache les distinguer.
-    ClanMerged { clan: ClanId, into: ClanId, members: usize },
+    ClanMerged {
+        clan: ClanId,
+        into: ClanId,
+        members: usize,
+    },
     /// Un insight : quelqu'un a compris quelque chose (`tech::insight`).
-    TechDiscovered { tech: TechId, agent: AgentId, sex: Sex, clan: Option<ClanId> },
+    TechDiscovered {
+        tech: TechId,
+        agent: AgentId,
+        sex: Sex,
+        clan: Option<ClanId>,
+    },
     /// Le dernier porteur d'un savoir s'est éteint sans l'avoir transmis
     /// (`tech::forget`) — « l'humanité peut régresser » (§5.4).
     TechForgotten { tech: TechId },
     /// Un raid a eu lieu : la tension entre voisins s'est dénouée dans le sang
     /// (`combat::resolve_clashes`). `mutual` distingue la razzia subie de la
     /// mêlée où les deux camps ont frappé — voir [`record_raid`].
-    Raid { attacker: ClanId, defender: ClanId, casualties: usize, plunder: f32, mutual: bool },
+    Raid {
+        attacker: ClanId,
+        defender: ClanId,
+        casualties: usize,
+        plunder: f32,
+        mutual: bool,
+    },
     /// Le chef d'un clan est mort. Un fait notable en soi : c'est une
     /// succession (`social::elect_chiefs` désignera un autre dès demain).
-    ChiefFallen { clan: ClanId, agent: AgentId, sex: Sex, cause: DeathCause },
+    ChiefFallen {
+        clan: ClanId,
+        agent: AgentId,
+        sex: Sex,
+        cause: DeathCause,
+    },
     /// Un peuple vient de voir le feu **pour la première fois** (`fire::daily`).
     ///
     /// Ce n'est pas la combustion qui fait date, c'est le témoignage : dans une
@@ -118,14 +138,26 @@ pub enum EventKind {
     FireWitnessed { clan: ClanId },
     /// Un clan dépêche un envoyé chercher l'étain au loin (`commerce::dispatch`)
     /// : le voyage sans lequel il n'y a jamais de bronze.
-    ExpeditionDeparted { clan: ClanId, agent: AgentId, sex: Sex, distance_km: f32 },
+    ExpeditionDeparted {
+        clan: ClanId,
+        agent: AgentId,
+        sex: Sex,
+        distance_km: f32,
+    },
     /// L'envoyé est rentré, l'étain avec lui.
-    ExpeditionReturned { clan: ClanId, agent: AgentId, sex: Sex },
+    ExpeditionReturned {
+        clan: ClanId,
+        agent: AgentId,
+        sex: Sex,
+    },
     /// **Le joueur est intervenu** (§6.2). Le fait porte l'intention et
     /// l'issue : c'est de leur écart que naîtra la théologie d'un peuple
     /// (§6.3) — un dieu qui frappe et n'allume rien n'est pas le même qu'un dieu
     /// qui embrase.
-    Miracle { intervention: crate::divine::Intervention, outcome: crate::divine::Outcome },
+    Miracle {
+        intervention: crate::divine::Intervention,
+        outcome: crate::divine::Outcome,
+    },
     /// Un troupeau a fini par s'apprivoiser : le premier cheptel d'un clan
     /// (`pastoral::daily`).
     Domesticated { clan: ClanId, species: Species },
@@ -182,7 +214,16 @@ pub(crate) fn record_raid(
             return;
         }
     }
-    sim.record(pos, EventKind::Raid { attacker, defender, casualties, plunder, mutual: false });
+    sim.record(
+        pos,
+        EventKind::Raid {
+            attacker,
+            defender,
+            casualties,
+            plunder,
+            mutual: false,
+        },
+    );
 }
 
 /// Rédige un fait en français, en une seule ligne : « *An 3, hiver — …* ».
@@ -228,19 +269,39 @@ pub fn tell_parts(
                 )
             }
         }
-        EventKind::ClanMerged { clan: c, into, members } => format!(
+        EventKind::ClanMerged {
+            clan: c,
+            into,
+            members,
+        } => format!(
             "les {} rejoignent les {} — ils sont {members} à passer sous leur bannière.",
             clan(c),
             clan(into)
         ),
-        EventKind::TechDiscovered { tech: t, agent, sex, clan: c } => match c {
-            Some(c) => format!("{}, des {}, découvre {}.", who(agent, sex), clan(c), tech(t)),
+        EventKind::TechDiscovered {
+            tech: t,
+            agent,
+            sex,
+            clan: c,
+        } => match c {
+            Some(c) => format!(
+                "{}, des {}, découvre {}.",
+                who(agent, sex),
+                clan(c),
+                tech(t)
+            ),
             None => format!("{}, sans clan, découvre {}.", who(agent, sex), tech(t)),
         },
         // « oublier » est transitif direct : la phrase reste juste quel que soit
         // le genre du savoir perdu, là où « ne sait plus faire… » boiterait.
         EventKind::TechForgotten { tech: t } => format!("le monde oublie {}.", tech(t)),
-        EventKind::Raid { attacker, defender, casualties, plunder, mutual } => {
+        EventKind::Raid {
+            attacker,
+            defender,
+            casualties,
+            plunder,
+            mutual,
+        } => {
             let bilan = match casualties {
                 0 => "Nul n'y laisse la vie".to_string(),
                 1 => "Un mort".to_string(),
@@ -248,8 +309,17 @@ pub fn tell_parts(
             };
             let (assaut, butin) = if mutual {
                 (
-                    format!("les {} et les {} s'affrontent", clan(attacker), clan(defender)),
-                    if plunder > 0.0 { " Des vivres changent de mains." } else { "" }.to_string(),
+                    format!(
+                        "les {} et les {} s'affrontent",
+                        clan(attacker),
+                        clan(defender)
+                    ),
+                    if plunder > 0.0 {
+                        " Des vivres changent de mains."
+                    } else {
+                        ""
+                    }
+                    .to_string(),
                 )
             } else {
                 (
@@ -263,21 +333,38 @@ pub fn tell_parts(
             };
             format!("{assaut}. {bilan}.{butin}")
         }
-        EventKind::ChiefFallen { clan: c, agent, sex, cause } => format!(
+        EventKind::ChiefFallen {
+            clan: c,
+            agent,
+            sex,
+            cause,
+        } => format!(
             "{}, qui menait les {}, meurt {}.",
             who(agent, sex),
             clan(c),
             death_circumstance(cause)
         ),
         EventKind::FireWitnessed { clan: c } => {
-            format!("un feu court sur la plaine : les {} voient le feu.", clan(c))
+            format!(
+                "un feu court sur la plaine : les {} voient le feu.",
+                clan(c)
+            )
         }
-        EventKind::ExpeditionDeparted { clan: c, agent, sex, distance_km } => format!(
+        EventKind::ExpeditionDeparted {
+            clan: c,
+            agent,
+            sex,
+            distance_km,
+        } => format!(
             "{} quitte les {} pour chercher l'étain, à {distance_km:.0} km de là.",
             who(agent, sex),
             clan(c)
         ),
-        EventKind::ExpeditionReturned { clan: c, agent, sex } => format!(
+        EventKind::ExpeditionReturned {
+            clan: c,
+            agent,
+            sex,
+        } => format!(
             "{} revient chez les {}, l'étain avec {}.",
             who(agent, sex),
             clan(c),
@@ -287,9 +374,16 @@ pub fn tell_parts(
         // qu'un témoin aurait vu. C'est de cette matière-là que les peuples
         // tireront leur théologie (§6.3) — et un dieu se juge à ses effets, pas
         // à ses intentions.
-        EventKind::Miracle { intervention, outcome } => match intervention {
+        EventKind::Miracle {
+            intervention,
+            outcome,
+        } => match intervention {
             crate::divine::Intervention::Lightning { .. } => {
-                let feu = if outcome.ignited { " La brousse s'embrase." } else { "" };
+                let feu = if outcome.ignited {
+                    " La brousse s'embrase."
+                } else {
+                    ""
+                };
                 let morts = match outcome.killed {
                     0 => String::new(),
                     1 => " Un homme tombe, foudroyé.".to_string(),
@@ -405,7 +499,10 @@ mod tests {
     #[test]
     fn le_recit_nomme_au_lieu_de_numeroter() {
         let (sim, seed) = scribe();
-        let fire = sim.tech_tree.id_of("fire_mastery").expect("le feu est dans l'arbre");
+        let fire = sim
+            .tech_tree
+            .id_of("fire_mastery")
+            .expect("le feu est dans l'arbre");
         let event = Event {
             tick: 3 * TICKS_PER_YEAR,
             pos: (0, 0),
@@ -440,7 +537,11 @@ mod tests {
             };
             let line = tell(&e, seed, &sim.tech_tree, &sim.climate);
             let narrated = tech.narrated();
-            assert!(line.contains(&narrated), "{} doit se raconter : {line}", tech.name);
+            assert!(
+                line.contains(&narrated),
+                "{} doit se raconter : {line}",
+                tech.name
+            );
             assert!(
                 !narrated.starts_with(|c: char| c.is_uppercase()),
                 "une majuscule en plein milieu de phrase : « {narrated} » ({})",
@@ -471,11 +572,21 @@ mod tests {
         assert!(raid(0, 0.0, false).contains("Nul n'y laisse la vie"));
         assert!(raid(1, 0.0, false).contains("Un mort"));
         assert!(raid(12, 0.0, false).contains("12 morts"));
-        assert!(!raid(3, 0.0, false).contains("emportent"), "sans butin, on n'en parle pas");
-        assert!(raid(3, 2.5, false).contains("emportent"), "avec butin, on le dit");
+        assert!(
+            !raid(3, 0.0, false).contains("emportent"),
+            "sans butin, on n'en parle pas"
+        );
+        assert!(
+            raid(3, 2.5, false).contains("emportent"),
+            "avec butin, on le dit"
+        );
         // Une razzia subie et une mêlée ne se racontent pas de la même façon.
         assert!(raid(3, 0.0, false).contains("tombent sur"));
-        assert!(raid(3, 0.0, true).contains("s'affrontent"), "{}", raid(3, 0.0, true));
+        assert!(
+            raid(3, 0.0, true).contains("s'affrontent"),
+            "{}",
+            raid(3, 0.0, true)
+        );
         assert!(
             raid(3, 2.5, true).contains("changent de mains"),
             "dans une mêlée, le butin n'a pas de vainqueur désigné"
@@ -513,7 +624,11 @@ mod tests {
         // La riposte du camp d'en face, le même jour : c'est le **même**
         // affrontement — il bascule en mêlée au lieu de faire un second fait.
         record_raid(&mut sim, (0, 0), b, a, 2, 0.0);
-        assert_eq!(sim.chronicle.len(), 1, "un coup rendu ne fait pas un second récit");
+        assert_eq!(
+            sim.chronicle.len(),
+            1,
+            "un coup rendu ne fait pas un second récit"
+        );
         assert_eq!(
             sim.chronicle[0].kind,
             EventKind::Raid {
@@ -533,7 +648,11 @@ mod tests {
 
         // Mais un affrontement avec un **tiers** reste bien distinct.
         record_raid(&mut sim, (0, 0), a, ClanId(3), 1, 0.0);
-        assert_eq!(sim.chronicle.len(), 3, "une autre guerre est une autre histoire");
+        assert_eq!(
+            sim.chronicle.len(),
+            3,
+            "une autre guerre est une autre histoire"
+        );
     }
 
     /// Un fait situé sous les tropiques n'invente pas de saison ; le même fait
@@ -550,7 +669,11 @@ mod tests {
             tell(&e, seed, &sim.tech_tree, &sim.climate)
         };
         let tempere = (cairn_worldgen::DEFAULT_PLANET_PERIOD / 4.0) as i64;
-        assert!(at(0).starts_with("An 1 — "), "sous les tropiques, pas de saison : {}", at(0));
+        assert!(
+            at(0).starts_with("An 1 — "),
+            "sous les tropiques, pas de saison : {}",
+            at(0)
+        );
         assert!(at(tempere).starts_with("An 1, hiver —"), "{}", at(tempere));
     }
 }

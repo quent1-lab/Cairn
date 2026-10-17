@@ -96,10 +96,7 @@ impl ClanPressure {
     /// (froid *et* faim pèsent plus que l'un seul) sans jamais dépasser 1.
     /// C'est le facteur `pression` de la formule d'insight (§5.2).
     pub fn total(self) -> f32 {
-        1.0 - (1.0 - self.famine)
-            * (1.0 - self.cold)
-            * (1.0 - self.threat)
-            * (1.0 - self.crowding)
+        1.0 - (1.0 - self.famine) * (1.0 - self.cold) * (1.0 - self.threat) * (1.0 - self.crowding)
     }
 }
 
@@ -186,10 +183,17 @@ mod tests {
     fn la_pression_totale_compose_sans_depasser_un() {
         let zero = ClanPressure::default();
         assert_eq!(zero.total(), 0.0);
-        let plein = ClanPressure { cold: 1.0, ..Default::default() };
+        let plein = ClanPressure {
+            cold: 1.0,
+            ..Default::default()
+        };
         assert_eq!(plein.total(), 1.0);
         // Deux stress modérés composent : plus que l'un seul, jamais > 1.
-        let deux = ClanPressure { famine: 0.5, cold: 0.5, ..Default::default() };
+        let deux = ClanPressure {
+            famine: 0.5,
+            cold: 0.5,
+            ..Default::default()
+        };
         assert!(deux.total() > 0.5 && deux.total() <= 1.0);
         assert!((deux.total() - 0.75).abs() < 1e-6); // 1 - 0,5×0,5
     }
@@ -203,7 +207,10 @@ mod tests {
             for _ in 0..8 {
                 sim.spawn_agent(0.0, 0.0);
             }
-            for (_, (m, phys)) in sim.agents.query_mut::<(&mut ClanMembership, &mut Physiology)>() {
+            for (_, (m, phys)) in sim
+                .agents
+                .query_mut::<(&mut ClanMembership, &mut Physiology)>()
+            {
                 m.0 = Some(ClanId(1));
                 phys.hunger = 0.95;
                 phys.cold = 0.0;
@@ -212,14 +219,21 @@ mod tests {
             measure(&mut sim);
             sim.clan_pressure[&ClanId(1)]
         };
-        assert!(affame.famine > 0.8, "famine attendue haute ({})", affame.famine);
+        assert!(
+            affame.famine > 0.8,
+            "famine attendue haute ({})",
+            affame.famine
+        );
 
         let repu = {
             let mut sim = Sim::new(WorldSeed(1), 64);
             for _ in 0..8 {
                 sim.spawn_agent(0.0, 0.0);
             }
-            for (_, (m, phys)) in sim.agents.query_mut::<(&mut ClanMembership, &mut Physiology)>() {
+            for (_, (m, phys)) in sim
+                .agents
+                .query_mut::<(&mut ClanMembership, &mut Physiology)>()
+            {
                 m.0 = Some(ClanId(1));
                 phys.hunger = 0.3; // sous FED_HUNGER
                 phys.cold = 0.0;
@@ -228,7 +242,10 @@ mod tests {
             measure(&mut sim);
             sim.clan_pressure[&ClanId(1)]
         };
-        assert_eq!(repu.famine, 0.0, "un clan repu ne subit aucune pression de famine");
+        assert_eq!(
+            repu.famine, 0.0,
+            "un clan repu ne subit aucune pression de famine"
+        );
     }
 
     /// Le froid moyen des membres et la surpopulation se mesurent ; la menace
@@ -239,7 +256,10 @@ mod tests {
         for _ in 0..20 {
             sim.spawn_agent(0.0, 0.0);
         }
-        for (_, (m, phys)) in sim.agents.query_mut::<(&mut ClanMembership, &mut Physiology)>() {
+        for (_, (m, phys)) in sim
+            .agents
+            .query_mut::<(&mut ClanMembership, &mut Physiology)>()
+        {
             m.0 = Some(ClanId(1));
             phys.hunger = 0.0;
             phys.cold = 0.6;
@@ -250,8 +270,14 @@ mod tests {
         measure(&mut sim);
         let p = sim.clan_pressure[&ClanId(1)];
         assert!((p.cold - 0.6).abs() < 1e-6, "froid moyen des membres");
-        assert!((p.threat - 0.4).abs() < 1e-6, "menace reprise de la tension");
-        assert!((p.crowding - 20.0 / CROWDING_SCALE).abs() < 1e-6, "surpopulation ∝ effectif");
+        assert!(
+            (p.threat - 0.4).abs() < 1e-6,
+            "menace reprise de la tension"
+        );
+        assert!(
+            (p.crowding - 20.0 / CROWDING_SCALE).abs() < 1e-6,
+            "surpopulation ∝ effectif"
+        );
         assert_eq!(p.famine, 0.0);
     }
 
@@ -276,7 +302,10 @@ mod tests {
         for _ in 0..8 {
             sim.spawn_agent(0.0, 0.0);
         }
-        for (_, (m, phys)) in sim.agents.query_mut::<(&mut ClanMembership, &mut Physiology)>() {
+        for (_, (m, phys)) in sim
+            .agents
+            .query_mut::<(&mut ClanMembership, &mut Physiology)>()
+        {
             m.0 = Some(ClanId(1));
             phys.cold = 0.8;
             phys.hunger = 0.0;
@@ -293,7 +322,10 @@ mod tests {
         }
         measure(&mut sim);
         let after = sim.clan_pressure[&ClanId(1)].cold;
-        assert!(after > 0.0 && after < peak, "la mémoire subsiste mais décroît ({after})");
+        assert!(
+            after > 0.0 && after < peak,
+            "la mémoire subsiste mais décroît ({after})"
+        );
         assert!(
             (after - 0.8 * (1.0 - PRESSURE_DECAY)).abs() < 1e-4,
             "décroissance d'exactement un cran de PRESSURE_DECAY"

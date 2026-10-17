@@ -91,7 +91,14 @@ impl Climate {
     /// 24 si le soleil ne se couche pas.
     pub fn daylight_left_hours(&self, y: i64, time: SimTime) -> f32 {
         (0..24u64)
-            .position(|h| self.light(y, SimTime { tick: time.tick + h }) < 0.5)
+            .position(|h| {
+                self.light(
+                    y,
+                    SimTime {
+                        tick: time.tick + h,
+                    },
+                ) < 0.5
+            })
             .map_or(24.0, |h| h as f32)
     }
 
@@ -147,7 +154,9 @@ pub fn declination_deg(time: SimTime) -> f64 {
 pub fn sun_elevation_deg(lat_deg: f64, time: SimTime) -> f64 {
     let (phi, delta) = (lat_deg.to_radians(), declination_deg(time).to_radians());
     let omega = (15.0 * (time.hour_of_day() as f64 + 0.5 - 12.0)).to_radians();
-    (phi.sin() * delta.sin() + phi.cos() * delta.cos() * omega.cos()).asin().to_degrees()
+    (phi.sin() * delta.sin() + phi.cos() * delta.cos() * omega.cos())
+        .asin()
+        .to_degrees()
 }
 
 /// Lumière pour l'œil selon la hauteur du soleil : nulle sous le crépuscule
@@ -203,7 +212,16 @@ mod tests {
 
     /// Heures de jour (soleil au-dessus de l'horizon) d'un jour donné.
     fn day_hours(lat_deg: f64, day: u64) -> usize {
-        (0..24).filter(|h| sun_elevation_deg(lat_deg, SimTime { tick: day * cairn_core::TICKS_PER_DAY + h }) > 0.0).count()
+        (0..24)
+            .filter(|h| {
+                sun_elevation_deg(
+                    lat_deg,
+                    SimTime {
+                        tick: day * cairn_core::TICKS_PER_DAY + h,
+                    },
+                ) > 0.0
+            })
+            .count()
     }
 
     /// La durée du jour suit la latitude et la saison, comme sur Terre : 12 h
@@ -237,7 +255,13 @@ mod tests {
         // Mi-latitude de la bande « nord » : y = période/4.
         let y = (cairn_worldgen::DEFAULT_PLANET_PERIOD / 4.0) as i64;
         let hiver = climate.daily_mean(&tile, y, SimTime { tick: 0 });
-        let ete = climate.daily_mean(&tile, y, SimTime { tick: TICKS_PER_YEAR / 2 });
+        let ete = climate.daily_mean(
+            &tile,
+            y,
+            SimTime {
+                tick: TICKS_PER_YEAR / 2,
+            },
+        );
         assert!(
             ete > hiver + 10.0,
             "été {ete:.1} °C vs hiver {hiver:.1} °C : saisons trop plates"
@@ -251,7 +275,10 @@ mod tests {
         let t = SimTime { tick: 0 };
         let nord = climate.seasonal_offset(period / 4, t);
         let sud = climate.seasonal_offset(-period / 4, t);
-        assert!(nord < -5.0, "bande nord en hiver à phase 0 (offset {nord:.1})");
+        assert!(
+            nord < -5.0,
+            "bande nord en hiver à phase 0 (offset {nord:.1})"
+        );
         assert!(sud > 5.0, "bande sud en été à phase 0 (offset {sud:.1})");
     }
 
@@ -279,11 +306,21 @@ mod tests {
         let t0 = SimTime { tick: 0 };
         assert_eq!(climate.season(nord, t0), Some(Season::Winter));
         assert_eq!(climate.season(sud, t0), Some(Season::Summer));
-        let t_mi = SimTime { tick: TICKS_PER_YEAR / 2 };
+        let t_mi = SimTime {
+            tick: TICKS_PER_YEAR / 2,
+        };
         assert_eq!(climate.season(nord, t_mi), Some(Season::Summer));
         assert_eq!(climate.season(sud, t_mi), Some(Season::Winter));
         // Le quart d'année après le solstice d'hiver : le printemps du nord.
-        assert_eq!(climate.season(nord, SimTime { tick: TICKS_PER_YEAR / 4 }), Some(Season::Spring));
+        assert_eq!(
+            climate.season(
+                nord,
+                SimTime {
+                    tick: TICKS_PER_YEAR / 4
+                }
+            ),
+            Some(Season::Spring)
+        );
         // À l'équateur, on ne nomme rien.
         assert_eq!(climate.season(0, t0), None);
     }
@@ -318,7 +355,9 @@ mod tests {
         let mut min = f64::INFINITY;
         let mut sous_zero = 0;
         for jour in 0..360u64 {
-            let t = SimTime { tick: jour * cairn_core::TICKS_PER_DAY };
+            let t = SimTime {
+                tick: jour * cairn_core::TICKS_PER_DAY,
+            };
             let felt = sim.climate.instant(&tile, home.1, t);
             min = min.min(felt);
             if felt < crate::agent::COLD_THRESHOLD_C {
@@ -327,7 +366,9 @@ mod tests {
         }
         println!(
             "foyer etincelle ({}, {}) — ressenti minimal {min:.2} °C, {sous_zero} jours sous {} °C sur 360",
-            home.0, home.1, crate::agent::COLD_THRESHOLD_C
+            home.0,
+            home.1,
+            crate::agent::COLD_THRESHOLD_C
         );
         assert!(
             sous_zero > 0,

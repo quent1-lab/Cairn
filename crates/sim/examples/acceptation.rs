@@ -26,6 +26,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use cairn_core::{TICKS_PER_DAY, WorldSeed, km_to_tiles};
 use cairn_sim::demography::Traits;
+use cairn_sim::disease;
 use cairn_sim::tech::TechEventKind;
 use cairn_sim::{
     Activity, AgentId, Behavior, ClanEventKind, ClanMembership, Memory, Physiology, Sim, TaskKind,
@@ -101,6 +102,15 @@ struct Report {
     disease_hungry: usize,
     sick_h: [u64; 2],
     lived_h: [u64; 2],
+    // MOR-5a : par classe d'âge et par voie, infections commencées, défense
+    // à l'infection (hors anticorps du lait, que la physiologie consomme dans
+    // l'heure) et faim, infections closes par la mort de l'hôte de maladie,
+    // et toutes causes (deuxième compteur).
+    onsets: [[u64; disease::ROUTES]; AGE_CLASSES.len()],
+    onset_defense: [[f64; disease::ROUTES]; AGE_CLASSES.len()],
+    onset_hunger: [[f64; disease::ROUTES]; AGE_CLASSES.len()],
+    fatal: [[u64; disease::ROUTES]; AGE_CLASSES.len()],
+    died_sick: [[u64; disease::ROUTES]; AGE_CLASSES.len()],
     // Énergie, par classe (femmes adultes, hommes adultes, < 3 ans, 3-13 ans) :
     // kcal dépensées, métabolisme de base cumulé, heures vécues, heures de marche.
     burn: [f64; 4],
@@ -120,14 +130,25 @@ fn energy_class(demo: &cairn_sim::Demographics, tick: u64) -> usize {
 }
 
 /// Classes d'âge du tableau de mortalité : bornes inférieures, en années.
-const AGE_CLASSES: [(f64, &str); 6] =
-    [(0.0, "<1"), (1.0, "1-4"), (5.0, "5-14"), (15.0, "15-39"), (40.0, "40-59"), (60.0, "60+")];
+const AGE_CLASSES: [(f64, &str); 6] = [
+    (0.0, "<1"),
+    (1.0, "1-4"),
+    (5.0, "5-14"),
+    (15.0, "15-39"),
+    (40.0, "40-59"),
+    (60.0, "60+"),
+];
 
 fn age_class(age_years: f64) -> usize {
-    AGE_CLASSES.iter().rposition(|(lo, _)| age_years >= *lo).unwrap_or(0)
+    AGE_CLASSES
+        .iter()
+        .rposition(|(lo, _)| age_years >= *lo)
+        .unwrap_or(0)
 }
 
-const CAUSES: [&str; 8] = ["faim", "soif", "froid", "âge", "préd", "mal", "viol", "foud"];
+const CAUSES: [&str; 8] = [
+    "faim", "soif", "froid", "âge", "préd", "mal", "viol", "foud",
+];
 
 fn cause_index(c: cairn_sim::DeathCause) -> usize {
     use cairn_sim::DeathCause::*;
@@ -168,12 +189,20 @@ fn main() {
     let results = std::sync::Mutex::new(Vec::new());
     std::thread::scope(|scope| {
         for _ in 0..threads {
-            scope.spawn(|| loop {
-                let job = queue.lock().unwrap().pop();
-                let Some((idx, (seed, cold))) = job else { break };
-                let report = run(seed, cold, years, start_day);
-                eprintln!("  fini : {} ({:.0} s)", report.label, started.elapsed().as_secs_f64());
-                results.lock().unwrap().push((idx, report));
+            scope.spawn(|| {
+                loop {
+                    let job = queue.lock().unwrap().pop();
+                    let Some((idx, (seed, cold))) = job else {
+                        break;
+                    };
+                    let report = run(seed, cold, years, start_day);
+                    eprintln!(
+                        "  fini : {} ({:.0} s)",
+                        report.label,
+                        started.elapsed().as_secs_f64()
+                    );
+                    results.lock().unwrap().push((idx, report));
+                }
             });
         }
     });
@@ -240,6 +269,8 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
         .collect();
     let mut seen_births = 0usize;
     let mut prev_hunger: BTreeMap<u64, f32> = BTreeMap::new();
+    // MOR-5a : classe d'âge et gravité de chaque infection en cours, à l'heure d'avant.
+    let mut prev_ill: BTreeMap<u64, (usize, [Option<f32>; disease::ROUTES])> = BTreeMap::new();
     let total_days = years * 360;
     let mut year_started = std::time::Instant::now();
     for day in 1..=total_days {
@@ -251,7 +282,8 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                     behavior.activity == Activity::Walking
                         && behavior.task.is_some_and(|t| kinds.contains(&t.kind))
                 };
-                let drinking = behavior.activity == Activity::Drinking || walking_to(&[TaskKind::Drink]);
+                let drinking =
+                    behavior.activity == Activity::Drinking || walking_to(&[TaskKind::Drink]);
                 let eating = matches!(behavior.activity, Activity::Eating | Activity::Hunting)
                     || walking_to(&[
                         TaskKind::Forage,
@@ -260,7 +292,8 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                         TaskKind::SeekGame,
                         TaskKind::EatFromStock,
                     ]);
-                let sheltering = behavior.activity == Activity::Sheltering || walking_to(&[TaskKind::Shelter]);
+                let sheltering =
+                    behavior.activity == Activity::Sheltering || walking_to(&[TaskKind::Shelter]);
                 if phys.thirst < 0.3 && phys.hunger < 0.3 && phys.cold < 0.1 {
                     r.calm_h += 1;
                     r.calm_drink += u64::from(drinking);
@@ -289,7 +322,8 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                 }
                 if phys.cold > 0.5 {
                     r.cold_h += 1;
-                    if behavior.activity == Activity::Sheltering || walking_to(&[TaskKind::Shelter]) {
+                    if behavior.activity == Activity::Sheltering || walking_to(&[TaskKind::Shelter])
+                    {
                         r.cold_ok += 1;
                     }
                 }
@@ -303,9 +337,25 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                     let age = (d.tick as i64 - b) as f64 / cairn_core::TICKS_PER_YEAR as f64;
                     r.deaths_by_age[age_class(age)][cause_index(d.cause)] += 1;
                 }
+                if let Some((k, active)) = prev_ill.get(&d.agent.0) {
+                    let mut worst: Option<(usize, f32)> = None;
+                    for (route, sev) in active.iter().enumerate() {
+                        let Some(sev) = *sev else { continue };
+                        r.died_sick[*k][route] += 1;
+                        if worst.is_none_or(|(_, w)| sev > w) {
+                            worst = Some((route, sev));
+                        }
+                    }
+                    if d.cause == cairn_sim::DeathCause::Disease
+                        && let Some((route, _)) = worst
+                    {
+                        r.fatal[*k][route] += 1;
+                    }
+                }
                 if d.cause == cairn_sim::DeathCause::Disease {
                     r.disease_deaths += 1;
-                    r.disease_hungry += usize::from(prev_hunger.get(&d.agent.0).is_some_and(|&h| h > 0.7));
+                    r.disease_hungry +=
+                        usize::from(prev_hunger.get(&d.agent.0).is_some_and(|&h| h > 0.7));
                 }
                 if d.cause == cairn_sim::DeathCause::Dehydration {
                     r.thirst_deaths += 1;
@@ -330,7 +380,12 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                 .collect();
             parched = sim
                 .agents
-                .query::<(&AgentId, &Physiology, &cairn_sim::Demographics, &cairn_sim::Kinship)>()
+                .query::<(
+                    &AgentId,
+                    &Physiology,
+                    &cairn_sim::Demographics,
+                    &cairn_sim::Kinship,
+                )>()
                 .iter()
                 .filter(|(_, (_, p, _, _))| p.thirst >= 0.99)
                 .map(|(_, (id, p, demo, kin))| {
@@ -360,7 +415,8 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                             let parent_alive = prev.iter().any(|(pid, members, _)| {
                                 alive_clans.contains(pid)
                                     && *pid != e.clan.0
-                                    && c.members.iter().filter(|m| members.contains(&m.0)).count() * 2
+                                    && c.members.iter().filter(|m| members.contains(&m.0)).count()
+                                        * 2
                                         > c.members.len()
                             });
                             if parent_alive {
@@ -370,7 +426,8 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                     }
                     ClanEventKind::Merged { .. } => r.merges += 1,
                     ClanEventKind::Dissolved => {
-                        if let Some((_, members, hunger)) = prev.iter().find(|(pid, ..)| *pid == e.clan.0)
+                        if let Some((_, members, hunger)) =
+                            prev.iter().find(|(pid, ..)| *pid == e.clan.0)
                             && *hunger > 0.6
                         {
                             r.hunger_collapses += 1;
@@ -386,8 +443,10 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                 .iter()
                 .map(|(_, (id, p))| (id.0, p.hunger))
                 .collect();
-            for (_, (demo, phys, behavior)) in
-                sim.agents.query::<(&cairn_sim::Demographics, &Physiology, &Behavior)>().iter()
+            for (_, (demo, phys, behavior)) in sim
+                .agents
+                .query::<(&cairn_sim::Demographics, &Physiology, &Behavior)>()
+                .iter()
             {
                 let tick = sim.time.tick;
                 let c = energy_class(demo, tick);
@@ -397,11 +456,43 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                 r.hours[c] += 1;
                 r.walk_h[c] += u64::from(behavior.activity == Activity::Walking);
             }
-            for (_, (demo, ill)) in sim.agents.query::<(&cairn_sim::Demographics, &cairn_sim::Illness)>().iter() {
+            let mut now_ill = BTreeMap::new();
+            for (_, (id, demo, phys, ill)) in sim
+                .agents
+                .query::<(
+                    &AgentId,
+                    &cairn_sim::Demographics,
+                    &Physiology,
+                    &cairn_sim::Illness,
+                )>()
+                .iter()
+            {
                 let k = usize::from(demo.is_adult(sim.time.tick));
                 r.lived_h[k] += 1;
                 r.sick_h[k] += u64::from(ill.active.iter().any(Option::is_some));
+                let age = demo.age_years(sim.time.tick);
+                let a = age_class(age);
+                let before = prev_ill.get(&id.0).map(|(_, act)| *act).unwrap_or_default();
+                let mut active = [None; disease::ROUTES];
+                for route in 0..disease::ROUTES {
+                    let Some(inf) = ill.active[route] else {
+                        continue;
+                    };
+                    active[route] = Some(inf.severity);
+                    if before[route].is_none() {
+                        r.onsets[a][route] += 1;
+                        r.onset_defense[a][route] += f64::from(
+                            disease::defense(age, false, phys.hunger, phys.cold)
+                                * disease::experience(ill.episodes[route]),
+                        );
+                        r.onset_hunger[a][route] += f64::from(phys.hunger);
+                    }
+                }
+                if active.iter().any(Option::is_some) {
+                    now_ill.insert(id.0, (a, active));
+                }
             }
+            prev_ill = now_ill;
             prev = sim
                 .clans
                 .iter()
@@ -416,7 +507,8 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
         }
         if day % 360 == 0 {
             r.pop_years.push(sim.population());
-            r.tps_years.push((360 * TICKS_PER_DAY) as f64 / year_started.elapsed().as_secs_f64());
+            r.tps_years
+                .push((360 * TICKS_PER_DAY) as f64 / year_started.elapsed().as_secs_f64());
             year_started = std::time::Instant::now();
         }
         // Survivants des effondrements, 30 jours après : en clan ou non ?
@@ -444,11 +536,14 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
         for (_, demo) in sim.agents.query::<&cairn_sim::Demographics>().iter() {
             r.person_days[age_class(demo.age_years(sim.time.tick))] += 1;
         }
-        r.clan_sizes.extend(sim.clans.iter().map(|c| c.members.len()));
+        r.clan_sizes
+            .extend(sim.clans.iter().map(|c| c.members.len()));
         // Tensions entre clans, une fois par jour.
         for i in 0..sim.clans.len() {
             for j in (i + 1)..sim.clans.len() {
-                let t = sim.clan_relations.tension_between(sim.clans[i].id, sim.clans[j].id);
+                let t = sim
+                    .clan_relations
+                    .tension_between(sim.clans[i].id, sim.clans[j].id);
                 r.pair_days += 1;
                 r.tension_max = r.tension_max.max(t);
                 if t >= 0.4 {
@@ -464,8 +559,10 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
     r.births = sim.births.len();
     // Phase 3 : curiosité contre territoire connu.
     let mut pts: Vec<(f64, f64)> = Vec::new();
-    for (_, (traits, mem, demo)) in
-        sim.agents.query::<(&Traits, &Memory, &cairn_sim::Demographics)>().iter()
+    for (_, (traits, mem, demo)) in sim
+        .agents
+        .query::<(&Traits, &Memory, &cairn_sim::Demographics)>()
+        .iter()
     {
         if demo.is_adult(sim.time.tick) {
             pts.push((f64::from(traits.curiosity), mem.known.len() as f64));
@@ -487,7 +584,11 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
     }
     r.clans_end = sim.clans.len();
     if let Some(fire) = fire {
-        r.fire_clans = sim.clans.iter().filter(|c| sim.clan_corpus(c.id).contains(&fire)).count();
+        r.fire_clans = sim
+            .clans
+            .iter()
+            .filter(|c| sim.clan_corpus(c.id).contains(&fire))
+            .count();
     }
     r
 }
@@ -497,23 +598,38 @@ fn pearson(pts: &[(f64, f64)]) -> f64 {
     if n < 3.0 {
         return f64::NAN;
     }
-    let (mx, my) = (pts.iter().map(|p| p.0).sum::<f64>() / n, pts.iter().map(|p| p.1).sum::<f64>() / n);
+    let (mx, my) = (
+        pts.iter().map(|p| p.0).sum::<f64>() / n,
+        pts.iter().map(|p| p.1).sum::<f64>() / n,
+    );
     let (mut sxy, mut sxx, mut syy) = (0.0, 0.0, 0.0);
     for (x, y) in pts {
         sxy += (x - mx) * (y - my);
         sxx += (x - mx).powi(2);
         syy += (y - my).powi(2);
     }
-    if sxx == 0.0 || syy == 0.0 { f64::NAN } else { sxy / (sxx * syy).sqrt() }
+    if sxx == 0.0 || syy == 0.0 {
+        f64::NAN
+    } else {
+        sxy / (sxx * syy).sqrt()
+    }
 }
 
 fn pct(a: u64, b: u64) -> String {
-    if b == 0 { "—".into() } else { format!("{:.0} %", 100.0 * a as f64 / b as f64) }
+    if b == 0 {
+        "—".into()
+    } else {
+        format!("{:.0} %", 100.0 * a as f64 / b as f64)
+    }
 }
 
 /// Taux de mortalité en pour mille par an ; « — » sans exposition.
 fn rate(deaths: usize, person_days: u64) -> String {
-    if person_days == 0 { "—".into() } else { format!("{:.0}", 1000.0 * deaths as f64 * 360.0 / person_days as f64) }
+    if person_days == 0 {
+        "—".into()
+    } else {
+        format!("{:.0}", 1000.0 * deaths as f64 * 360.0 / person_days as f64)
+    }
 }
 
 /// Table de mortalité de tous les runs réunis : taux par classe d'âge, morts
@@ -521,12 +637,24 @@ fn rate(deaths: usize, person_days: u64) -> String {
 /// Les runs se somment : chacun est un tirage, l'agrégat n'efface pas le
 /// détail par run imprimé plus haut.
 fn print_mortality(rs: &[Report]) {
-    println!("\nMortalité, {} runs réunis (régime : scènes du banc ; années-personnes ci-dessous)", rs.len());
-    println!("{:<8}{:>10}{:>7}{:>8}  {}", "âge", "années-p", "morts", "‰/an", CAUSES.map(|c| format!("{c:>6}")).join(""));
+    println!(
+        "\nMortalité, {} runs réunis (régime : scènes du banc ; années-personnes ci-dessous)",
+        rs.len()
+    );
+    println!(
+        "{:<8}{:>10}{:>7}{:>8}  {}",
+        "âge",
+        "années-p",
+        "morts",
+        "‰/an",
+        CAUSES.map(|c| format!("{c:>6}")).join("")
+    );
     let mut q15_hazard = 0.0;
     for (k, (_, name)) in AGE_CLASSES.iter().enumerate() {
         let pd: u64 = rs.iter().map(|r| r.person_days[k]).sum();
-        let by_cause: Vec<usize> = (0..CAUSES.len()).map(|c| rs.iter().map(|r| r.deaths_by_age[k][c]).sum()).collect();
+        let by_cause: Vec<usize> = (0..CAUSES.len())
+            .map(|c| rs.iter().map(|r| r.deaths_by_age[k][c]).sum())
+            .collect();
         let total: usize = by_cause.iter().sum();
         if k < 3 && pd > 0 {
             let width = AGE_CLASSES[k + 1].0 - AGE_CLASSES[k].0;
@@ -536,111 +664,289 @@ fn print_mortality(rs: &[Report]) {
             "{name:<8}{:>10.0}{total:>7}{:>8}  {}",
             pd as f64 / 360.0,
             rate(total, pd),
-            by_cause.iter().map(|n| format!("{n:>6}")).collect::<String>()
+            by_cause
+                .iter()
+                .map(|n| format!("{n:>6}"))
+                .collect::<String>()
         );
     }
-    println!("mourir avant 15 ans (impliqué par les taux) : {:.0} %", 100.0 * (1.0 - (-q15_hazard).exp()));
+    println!(
+        "mourir avant 15 ans (impliqué par les taux) : {:.0} %",
+        100.0 * (1.0 - (-q15_hazard).exp())
+    );
+}
+
+/// MOR-5a : épisodes de maladie par personne-année, létalité observée par
+/// épisode, défense et faim moyennes à l'infection, par classe d'âge et par
+/// voie, tous runs réunis. Deux compteurs : les morts de maladie de la table
+/// (cause de décès) et les infections closes par une mort de maladie.
+fn print_episodes(rs: &[Report]) {
+    const ROUTE_NAMES: [&str; disease::ROUTES] = ["digestive", "respiratoire", "plaie"];
+    println!(
+        "\nÉpisodes de maladie, {} runs réunis (défense hors anticorps du lait)",
+        rs.len()
+    );
+    println!(
+        "{:<8}{:<14}{:>9}{:>9}{:>8}{:>10}{:>9}{:>7}{:>10}",
+        "âge", "voie", "épisodes", "/p-an", "morts", "létalité", "défense", "faim", "(toutes)"
+    );
+    for (k, (_, name)) in AGE_CLASSES.iter().enumerate() {
+        let years = rs.iter().map(|r| r.person_days[k]).sum::<u64>() as f64 / 360.0;
+        for (route, rname) in ROUTE_NAMES.iter().enumerate() {
+            let n: u64 = rs.iter().map(|r| r.onsets[k][route]).sum();
+            let fatal: u64 = rs.iter().map(|r| r.fatal[k][route]).sum();
+            let died: u64 = rs.iter().map(|r| r.died_sick[k][route]).sum();
+            if n == 0 && died == 0 {
+                continue;
+            }
+            let mean = |f: &dyn Fn(&Report) -> f64| {
+                if n == 0 {
+                    0.0
+                } else {
+                    rs.iter().map(f).sum::<f64>() / n as f64
+                }
+            };
+            println!(
+                "{name:<8}{rname:<14}{n:>9}{:>9.2}{fatal:>8}{:>9.2} %{:>9.2}{:>7.2}{:>10}",
+                if years > 0.0 { n as f64 / years } else { 0.0 },
+                if n == 0 {
+                    0.0
+                } else {
+                    100.0 * fatal as f64 / n as f64
+                },
+                mean(&|r| r.onset_defense[k][route]),
+                mean(&|r| r.onset_hunger[k][route]),
+                format!("({died})"),
+            );
+        }
+        let disease_deaths: usize = rs.iter().map(|r| r.deaths_by_age[k][5]).sum();
+        println!(
+            "{name:<8}{:<14}{:>34}",
+            "",
+            format!("morts de maladie (table) : {disease_deaths}")
+        );
+    }
 }
 
 fn print_table(rs: &[Report], years: u64) {
     let col = |f: &dyn Fn(&Report) -> String| -> String {
-        rs.iter().map(|r| format!("{:>12}", f(r))).collect::<Vec<_>>().join("")
+        rs.iter()
+            .map(|r| format!("{:>12}", f(r)))
+            .collect::<Vec<_>>()
+            .join("")
     };
     let head = col(&|r| r.label.clone());
     println!("\n{:<44}{head}", "critère");
     let line = |name: &str, f: &dyn Fn(&Report) -> String| println!("{name:<44}{}", col(f));
 
     println!("— Phase 2 : la vie");
-    line("survie (population départ → fin)", &|r| format!("{}→{}", r.pop0, r.pop_end));
+    line("survie (population départ → fin)", &|r| {
+        format!("{}→{}", r.pop0, r.pop_end)
+    });
     line("mortalité ni nulle ni totale", &|r| {
-        if r.pop_end == 0 { "TOTALE".into() } else if r.deaths == 0 { "NULLE".into() } else { format!("{} morts", r.deaths) }
+        if r.pop_end == 0 {
+            "TOTALE".into()
+        } else if r.deaths == 0 {
+            "NULLE".into()
+        } else {
+            format!("{} morts", r.deaths)
+        }
     });
     // Contraste : la réponse quand le besoin presse, contre la même réponse
     // quand tout va bien (un « 30 % » brut ne dit rien sans ce point de comparaison).
     let ratio = |ok: u64, h: u64, calm_ok: u64, calm_h: u64| -> String {
-        if h == 0 || calm_h == 0 { return "—".into(); }
+        if h == 0 || calm_h == 0 {
+            return "—".into();
+        }
         let (a, b) = (ok as f64 / h as f64, calm_ok as f64 / calm_h as f64);
         format!("{:.0}% vs {:.0}%", 100.0 * a, 100.0 * b)
     };
-    line("boire : assoiffé vs repu", &|r| ratio(r.thirst_ok, r.thirst_h, r.calm_drink, r.calm_h));
-    line("manger/chasser : affamé vs repu", &|r| ratio(r.hunger_ok, r.hunger_h, r.calm_eat, r.calm_h));
-    line("s'abriter : transi vs au chaud", &|r| ratio(r.cold_ok, r.cold_h, r.calm_shelter, r.calm_h));
+    line("boire : assoiffé vs repu", &|r| {
+        ratio(r.thirst_ok, r.thirst_h, r.calm_drink, r.calm_h)
+    });
+    line("manger/chasser : affamé vs repu", &|r| {
+        ratio(r.hunger_ok, r.hunger_h, r.calm_eat, r.calm_h)
+    });
+    line("s'abriter : transi vs au chaud", &|r| {
+        ratio(r.cold_ok, r.cold_h, r.calm_shelter, r.calm_h)
+    });
     line("morts de soif (dont enfants ; dont affamés)", &|r| {
-        format!("{} ({} ; {})", r.thirst_deaths, r.thirst_children, r.thirst_starving)
+        format!(
+            "{} ({} ; {})",
+            r.thirst_deaths, r.thirst_children, r.thirst_starving
+        )
     });
-    line("…nourrissons : orphelins ; mère sans lait ; autre", &|r| {
-        format!("{} ; {} ; {}", r.infant_orphan, r.infant_dry_mother, r.infant_other)
+    line(
+        "…nourrissons : orphelins ; mère sans lait ; autre",
+        &|r| {
+            format!(
+                "{} ; {} ; {}",
+                r.infant_orphan, r.infant_dry_mother, r.infant_other
+            )
+        },
+    );
+    line("morts de maladie (dont affamés)", &|r| {
+        format!("{} ({})", r.disease_deaths, r.disease_hungry)
     });
-    line("morts de maladie (dont affamés)", &|r| format!("{} ({})", r.disease_deaths, r.disease_hungry));
     line("malades : part du temps, enfants ; adultes", &|r| {
-        format!("{} ; {}", pct(r.sick_h[0], r.lived_h[0]), pct(r.sick_h[1], r.lived_h[1]))
+        format!(
+            "{} ; {}",
+            pct(r.sick_h[0], r.lived_h[0]),
+            pct(r.sick_h[1], r.lived_h[1])
+        )
     });
     let kcal = |r: &Report, c: usize| -> String {
-        if r.hours[c] == 0 { "—".into() } else { format!("{:.0}", 24.0 * r.burn[c] / r.hours[c] as f64) }
+        if r.hours[c] == 0 {
+            "—".into()
+        } else {
+            format!("{:.0}", 24.0 * r.burn[c] / r.hours[c] as f64)
+        }
     };
     let pal = |r: &Report, c: usize| -> String {
-        if r.bmr[c] == 0.0 { "—".into() } else { format!("{:.2}", r.burn[c] / r.bmr[c]) }
+        if r.bmr[c] == 0.0 {
+            "—".into()
+        } else {
+            format!("{:.2}", r.burn[c] / r.bmr[c])
+        }
     };
-    line("kcal/j : femmes ; hommes", &|r| format!("{} ; {}", kcal(r, 0), kcal(r, 1)));
-    line("kcal/j : < 3 ans ; 3-13 ans", &|r| format!("{} ; {}", kcal(r, 2), kcal(r, 3)));
-    line("PAL : femmes ; hommes (Hadza 1,78 ; 2,26)", &|r| format!("{} ; {}", pal(r, 0), pal(r, 1)));
+    line("kcal/j : femmes ; hommes", &|r| {
+        format!("{} ; {}", kcal(r, 0), kcal(r, 1))
+    });
+    line("kcal/j : < 3 ans ; 3-13 ans", &|r| {
+        format!("{} ; {}", kcal(r, 2), kcal(r, 3))
+    });
+    line("PAL : femmes ; hommes (Hadza 1,78 ; 2,26)", &|r| {
+        format!("{} ; {}", pal(r, 0), pal(r, 1))
+    });
     line("marche km/j : femmes ; hommes (5,8 ; 11,4)", &|r| {
-        let km = |c: usize| if r.hours[c] == 0 { "—".into() } else { format!("{:.1}", 24.0 * 4.0 * r.walk_h[c] as f64 / r.hours[c] as f64) };
+        let km = |c: usize| {
+            if r.hours[c] == 0 {
+                "—".into()
+            } else {
+                format!("{:.1}", 24.0 * 4.0 * r.walk_h[c] as f64 / r.hours[c] as f64)
+            }
+        };
         format!("{} ; {}", km(0), km(1))
     });
-    line("trajets refusés faute de budget", &|r| r.path_denied.to_string());
+    line("trajets refusés faute de budget", &|r| {
+        r.path_denied.to_string()
+    });
     line("mortalité ‰/an : <1 ; 1-4 ; 5-14", &|r| {
-        (0..3).map(|k| rate(r.deaths_by_age[k].iter().sum(), r.person_days[k])).collect::<Vec<_>>().join(";")
+        (0..3)
+            .map(|k| rate(r.deaths_by_age[k].iter().sum(), r.person_days[k]))
+            .collect::<Vec<_>>()
+            .join(";")
     });
     line("mortalité ‰/an : 15-39 ; 40-59 ; 60+", &|r| {
-        (3..6).map(|k| rate(r.deaths_by_age[k].iter().sum(), r.person_days[k])).collect::<Vec<_>>().join(";")
+        (3..6)
+            .map(|k| rate(r.deaths_by_age[k].iter().sum(), r.person_days[k]))
+            .collect::<Vec<_>>()
+            .join(";")
     });
     println!("— Phase 3 : le nombre (projection, pas verdict)");
     // Après la cohorte des fondateurs (baby-boom puis allaitement) : de la fin
     // de l'an 2 à la fin du run, si le run dure au moins 5 ans.
     let late = |r: &Report| -> Option<f64> {
-        if r.pop_years.len() < 5 || r.pop_end == 0 { return None; }
+        if r.pop_years.len() < 5 || r.pop_end == 0 {
+            return None;
+        }
         let (a, n) = (r.pop_years[1] as f64, (r.pop_years.len() - 2) as f64);
         Some((r.pop_end as f64 / a.max(1.0)).powf(1.0 / n))
     };
-    line("croissance après la cohorte (an 2 → fin)", &|r| late(r).map_or("(≥ 5 ans)".into(), |g| format!("{:+.1} %", 100.0 * (g - 1.0))));
+    line("croissance après la cohorte (an 2 → fin)", &|r| {
+        late(r).map_or("(≥ 5 ans)".into(), |g| {
+            format!("{:+.1} %", 100.0 * (g - 1.0))
+        })
+    });
     line("croissance annuelle (brute)", &|r| {
-        if r.pop_end == 0 { "—".into() } else {
-            format!("{:+.1} %", 100.0 * ((r.pop_end as f64 / r.pop0 as f64).powf(1.0 / r.years) - 1.0))
+        if r.pop_end == 0 {
+            "—".into()
+        } else {
+            format!(
+                "{:+.1} %",
+                100.0 * ((r.pop_end as f64 / r.pop0 as f64).powf(1.0 / r.years) - 1.0)
+            )
         }
     });
     line("projection à 100 ans (critère : 50 → 300)", &|r| {
-        if r.years < 5.0 { "(≥ 5 ans)".into() } else if r.pop_end == 0 { "0".into() } else {
+        if r.years < 5.0 {
+            "(≥ 5 ans)".into()
+        } else if r.pop_end == 0 {
+            "0".into()
+        } else {
             let g = late(r).unwrap_or(1.0);
             let p = 50.0 * g.powf(100.0);
-            if p > 99_999.0 { ">99 999".into() } else { format!("{p:.0}") }
+            if p > 99_999.0 {
+                ">99 999".into()
+            } else {
+                format!("{p:.0}")
+            }
         }
     });
     line("naissances", &|r| r.births.to_string());
-    line("curiosité ↔ territoire connu (r)", &|r| format!("{:.2}", r.curiosity_corr));
+    line("curiosité ↔ territoire connu (r)", &|r| {
+        format!("{:.2}", r.curiosity_corr)
+    });
     println!("— Phase 4 : le clan");
     line("clans formés (1er au jour…)", &|r| {
-        format!("{} ({})", r.clans_formed, r.first_clan_day.map_or("—".into(), |d| d.to_string()))
+        format!(
+            "{} ({})",
+            r.clans_formed,
+            r.first_clan_day.map_or("—".into(), |d| d.to_string())
+        )
     });
-    line("scissions (un clan parent survit)", &|r| r.fissions.to_string());
-    line("absorptions (un clan en rejoint un autre)", &|r| r.merges.to_string());
+    line("scissions (un clan parent survit)", &|r| {
+        r.fissions.to_string()
+    });
+    line("absorptions (un clan en rejoint un autre)", &|r| {
+        r.merges.to_string()
+    });
     line("taille des clans (médiane ; max)", &|r| {
         let mut v = r.clan_sizes.clone();
         v.sort_unstable();
-        if v.is_empty() { "—".into() } else { format!("{} ; {}", v[v.len() / 2], v[v.len() - 1]) }
+        if v.is_empty() {
+            "—".into()
+        } else {
+            format!("{} ; {}", v[v.len() / 2], v[v.len() - 1])
+        }
     });
-    line("effondrements par la faim", &|r| r.hunger_collapses.to_string());
+    line("effondrements par la faim", &|r| {
+        r.hunger_collapses.to_string()
+    });
     line("…survivants regroupés à 30 j", &|r| {
-        if r.collapse_survivors == 0 { "—".into() } else { format!("{}/{}", r.collapse_survivors_regrouped, r.collapse_survivors) }
+        if r.collapse_survivors == 0 {
+            "—".into()
+        } else {
+            format!(
+                "{}/{}",
+                r.collapse_survivors_regrouped, r.collapse_survivors
+            )
+        }
     });
-    line("tension (max ; jours-paires ≥ 0,4)", &|r| format!("{:.2} ; {}", r.tension_max, pct(r.tense_pair_days, r.pair_days)));
+    line("tension (max ; jours-paires ≥ 0,4)", &|r| {
+        format!(
+            "{:.2} ; {}",
+            r.tension_max,
+            pct(r.tense_pair_days, r.pair_days)
+        )
+    });
     println!("— Phase 5 : l'étincelle");
-    line("découvertes / oublis", &|r| format!("{} / {}", r.discoveries, r.forgotten));
-    line("clans qui ont le feu (fin)", &|r| format!("{}/{}", r.fire_clans, r.clans_end));
-    line("bronze (doit supposer une route)", &|r| r.bronze.to_string());
+    line("découvertes / oublis", &|r| {
+        format!("{} / {}", r.discoveries, r.forgotten)
+    });
+    line("clans qui ont le feu (fin)", &|r| {
+        format!("{}/{}", r.fire_clans, r.clans_end)
+    });
+    line("bronze (doit supposer une route)", &|r| {
+        r.bronze.to_string()
+    });
     println!("— Débit (objectif : ≥ 20 tps chaque année ; instruments compris, un run par cœur)");
     line("débit plancher annuel (tps)", &|r| {
-        r.tps_years.iter().copied().reduce(f64::min).map_or("—".into(), |t| format!("{t:.1}"))
+        r.tps_years
+            .iter()
+            .copied()
+            .reduce(f64::min)
+            .map_or("—".into(), |t| format!("{t:.1}"))
     });
     line("…atteint l'année", &|r| {
         r.tps_years
@@ -649,9 +955,17 @@ fn print_table(rs: &[Report], years: u64) {
             .min_by(|a, b| a.1.total_cmp(b.1))
             .map_or("—".into(), |(i, _)| (i + 1).to_string())
     });
-    line("techniques connues", &|r| r.techs.iter().map(|t| t.chars().take(4).collect::<String>()).collect::<Vec<_>>().join(","));
-    let distinct: BTreeSet<(usize, usize, Vec<String>)> =
-        rs.iter().map(|r| (r.pop_end, r.clans_formed, r.techs.iter().cloned().collect())).collect();
+    line("techniques connues", &|r| {
+        r.techs
+            .iter()
+            .map(|t| t.chars().take(4).collect::<String>())
+            .collect::<Vec<_>>()
+            .join(",")
+    });
+    let distinct: BTreeSet<(usize, usize, Vec<String>)> = rs
+        .iter()
+        .map(|r| (r.pop_end, r.clans_formed, r.techs.iter().cloned().collect()))
+        .collect();
     println!(
         "\nDeux seeds, deux histoires : {} trajectoires distinctes sur {} runs.\n\
          Couverts par des tests unitaires : déterminisme, surchasse, échange d'informations, carte mentale incluse.\n\
@@ -660,10 +974,14 @@ fn print_table(rs: &[Report], years: u64) {
         rs.len()
     );
     print_mortality(rs);
+    print_episodes(rs);
     // Pic mémoire du processus entier (tous les fils ensemble).
     if let Ok(status) = std::fs::read_to_string("/proc/self/status")
         && let Some(l) = status.lines().find(|l| l.starts_with("VmHWM"))
     {
-        println!("Mémoire, pic du processus (tous fils) : {}", l.trim_start_matches("VmHWM:").trim());
+        println!(
+            "Mémoire, pic du processus (tous fils) : {}",
+            l.trim_start_matches("VmHWM:").trim()
+        );
     }
 }

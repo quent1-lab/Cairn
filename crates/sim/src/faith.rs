@@ -134,14 +134,19 @@ const PRAYER_HUNGER: f32 = 0.45;
 /// signes partout, un peuple comblé n'en voit aucun.**
 pub(crate) fn witness_weather(sim: &mut Sim, center: (f64, f64), radius: f64, rain: bool) -> usize {
     let mut count = 0usize;
-    for (_, (pos, phys, faith)) in
-        sim.agents.query_mut::<(&Position, &crate::agent::Physiology, &mut Faith)>()
+    for (_, (pos, phys, faith)) in sim
+        .agents
+        .query_mut::<(&Position, &crate::agent::Physiology, &mut Faith)>()
     {
         if (pos.x - center.0).hypot(pos.y - center.1) > radius {
             continue;
         }
         // Le besoin décide. Sans lui, ce n'est que du temps qu'il fait.
-        let answered = if rain { phys.thirst >= PRAYER_THIRST } else { phys.hunger >= PRAYER_HUNGER };
+        let answered = if rain {
+            phys.thirst >= PRAYER_THIRST
+        } else {
+            phys.hunger >= PRAYER_HUNGER
+        };
         if !answered {
             continue;
         }
@@ -253,8 +258,15 @@ mod tests {
 
         assert_eq!(vus, 1, "un seul témoin");
         assert!(faith_of(&sim, present).believes(), "celui qui a vu croit");
-        assert!(!faith_of(&sim, absent).believes(), "celui qui n'était pas là, non");
-        assert_eq!(faith_of(&sim, present).boons, 1, "et il se souvient de quoi");
+        assert!(
+            !faith_of(&sim, absent).believes(),
+            "celui qui n'était pas là, non"
+        );
+        assert_eq!(
+            faith_of(&sim, present).boons,
+            1,
+            "et il se souvient de quoi"
+        );
     }
 
     /// **La boucle du §6.1** : pas de croyants, pas de Foi. C'est ce qui rend la
@@ -283,7 +295,10 @@ mod tests {
         for _ in 0..400 {
             daily(&mut sim);
         }
-        assert!(!faith_of(&sim, croyant).believes(), "le souvenir s'est éteint");
+        assert!(
+            !faith_of(&sim, croyant).believes(),
+            "le souvenir s'est éteint"
+        );
 
         let acquise = sim.faith;
         daily(&mut sim);
@@ -310,22 +325,50 @@ mod tests {
             sim.time.tick += 4;
             preach(&mut sim);
         }
-        let (t, v, l) = (faith_of(&sim, temoin), faith_of(&sim, voisin), faith_of(&sim, lointain));
+        let (t, v, l) = (
+            faith_of(&sim, temoin),
+            faith_of(&sim, voisin),
+            faith_of(&sim, lointain),
+        );
         assert!(v.believes(), "le voisin a fini par être convaincu");
-        assert!(v.fervor < t.fervor, "mais il y croit moins fort ({} < {})", v.fervor, t.fervor);
+        assert!(
+            v.fervor < t.fervor,
+            "mais il y croit moins fort ({} < {})",
+            v.fervor,
+            t.fervor
+        );
         assert!(!l.believes(), "on ne prêche pas à dix kilomètres");
-        assert_eq!(v.boons, 0, "il n'a rien vu lui-même : il n'a pas de souvenir");
+        assert_eq!(
+            v.boons, 0,
+            "il n'a rien vu lui-même : il n'a pas de souvenir"
+        );
     }
 
     /// Ce qu'on croit du caractère d'un dieu se **dérive** de ce qu'on a subi.
     #[test]
     fn le_caractere_percu_se_derive_de_ce_qu_on_a_subi() {
-        let nourricier = Faith { fervor: 0.5, boons: 3, banes: 0 };
-        let colerique = Faith { fervor: 0.5, boons: 0, banes: 3 };
-        let ambigu = Faith { fervor: 0.5, boons: 2, banes: 2 };
+        let nourricier = Faith {
+            fervor: 0.5,
+            boons: 3,
+            banes: 0,
+        };
+        let colerique = Faith {
+            fervor: 0.5,
+            boons: 0,
+            banes: 3,
+        };
+        let ambigu = Faith {
+            fervor: 0.5,
+            boons: 2,
+            banes: 2,
+        };
         assert_eq!(nourricier.benevolence(), 1.0);
         assert_eq!(colerique.benevolence(), -1.0);
         assert_eq!(ambigu.benevolence(), 0.0);
-        assert_eq!(Faith::default().benevolence(), 0.0, "qui n'a rien vu ne croit rien");
+        assert_eq!(
+            Faith::default().benevolence(),
+            0.0,
+            "qui n'a rien vu ne croit rien"
+        );
     }
 }

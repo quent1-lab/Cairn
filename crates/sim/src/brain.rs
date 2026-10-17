@@ -188,7 +188,10 @@ pub fn decide(
     // aperçu. Arrivé sur une piste sans rien y voir, on l'oublie.
     match nearest_herd(agent.pos, herds, crate::climate::sight(agent.light)) {
         Some(herd) => {
-            mem.game = Some(((herd.pos.0.floor() as i64, herd.pos.1.floor() as i64), time.tick));
+            mem.game = Some((
+                (herd.pos.0.floor() as i64, herd.pos.1.floor() as i64),
+                time.tick,
+            ));
         }
         None => {
             // Seulement une fois **sur** la piste : juste après avoir perdu un
@@ -201,12 +204,16 @@ pub fn decide(
             }
         }
     }
-    let candidates =
-        build_candidates(world, time, &agent, mem, spring, current, herds, packs, humans, clan_views, relations, shrines);
+    let candidates = build_candidates(
+        world, time, &agent, mem, spring, current, herds, packs, humans, clan_views, relations,
+        shrines,
+    );
 
     let scores: Vec<f32> = candidates.iter().map(|c| c.2).collect();
-    let mut rng =
-        Pcg32::new(world.seed().derive(salt::DECISIONS) ^ splitmix64(time.tick), agent.id.0);
+    let mut rng = Pcg32::new(
+        world.seed().derive(salt::DECISIONS) ^ splitmix64(time.tick),
+        agent.id.0,
+    );
     let (kind, target, _) = candidates[softmax_pick(&scores, SOFTMAX_TAU, &mut rng)];
     Some(Task { kind, target })
 }
@@ -233,8 +240,15 @@ fn build_candidates(
     shrines: &[crate::cult::Shrine],
 ) -> Vec<(TaskKind, (i64, i64), f32)> {
     let (id, pos, phys, traits, demo, kin, clan, carrying, knows_agriculture) = (
-        agent.id, agent.pos, agent.phys, agent.traits, agent.demo, agent.kin, agent.clan,
-        agent.carrying, agent.knows_agriculture,
+        agent.id,
+        agent.pos,
+        agent.phys,
+        agent.traits,
+        agent.demo,
+        agent.kin,
+        agent.clan,
+        agent.carrying,
+        agent.knows_agriculture,
     );
     let adult = demo.is_adult(time.tick);
     // Ce qu'on voit (MAR-2) : de nuit, ce qui se fait à vue — cueillir,
@@ -251,10 +265,15 @@ fn build_candidates(
     // Une source où la marche vient de buter est mise de côté (D11) : on vise la
     // suivante plutôt que de retenter la même jusqu'à en mourir.
     let open = |s: &(i64, i64)| !mem.is_blocked(*s, time.tick);
-    if let Some(target) =
-        spring.filter(open).or_else(|| mem.nearest_open_spring((pos.x, pos.y), time.tick))
+    if let Some(target) = spring
+        .filter(open)
+        .or_else(|| mem.nearest_open_spring((pos.x, pos.y), time.tick))
     {
-        let urgency = Curve::Logistic { steepness: 9.0, midpoint: 0.45 }.eval(phys.thirst);
+        let urgency = Curve::Logistic {
+            steepness: 9.0,
+            midpoint: 0.45,
+        }
+        .eval(phys.thirst);
         let score = urgency * travel_discount(pos.distance_tiles(target));
         candidates.push((TaskKind::Drink, target, score));
     }
@@ -263,7 +282,11 @@ fn build_candidates(
     //   l'abondance est celle de la **maille** (ce que le pays offre de
     //   comestible, partagé entre ceux qui y vivent), plus la seule tuile.
     let (forage_target, forage_biomass) = best_forage(world, here);
-    let urgency = Curve::Logistic { steepness: 6.0, midpoint: 0.4 }.eval(phys.hunger);
+    let urgency = Curve::Logistic {
+        steepness: 6.0,
+        midpoint: 0.4,
+    }
+    .eval(phys.hunger);
     let share_here = edible_share(world, (pos.x, pos.y), time.tick, humans);
     // MAR-6a : pondérée par ce que la cueillette rapporte, à son expérience,
     // au regard de la chasse.
@@ -290,7 +313,16 @@ fn build_candidates(
         // maille faisait glisser le camp au hasard : deux bandes à 900 km
         // l'une de l'autre en 25 ans. Rien n'interdit l'inconnu.
         let mut best: Option<(f32, (i64, i64))> = None;
-        for dz in [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)] {
+        for dz in [
+            (-1, -1),
+            (0, -1),
+            (1, -1),
+            (-1, 0),
+            (1, 0),
+            (-1, 1),
+            (0, 1),
+            (1, 1),
+        ] {
             let c = ((zone.0 + dz.0) as f64 + 0.5) * side;
             let r = ((zone.1 + dz.1) as f64 + 0.5) * side;
             let share = edible_share(world, (c, r), time.tick, humans);
@@ -330,15 +362,23 @@ fn build_candidates(
         });
         (own, clan_gap)
     };
-    let need_curve = Curve::Logistic { steepness: 6.0, midpoint: 0.4 };
+    let need_curve = Curve::Logistic {
+        steepness: 6.0,
+        midpoint: 0.4,
+    };
     let hunt_urgency = (need_curve.eval(own_need) * hunt_return).max(need_curve.eval(clan_gap));
-    let nearest_herd = if adult { nearest_herd(pos, herds, sight) } else { None };
+    let nearest_herd = if adult {
+        nearest_herd(pos, herds, sight)
+    } else {
+        None
+    };
     if let Some(herd) = nearest_herd {
         let target = (herd.pos.0.floor() as i64, herd.pos.1.floor() as i64);
         let urgency = hunt_urgency;
         // Un gros troupeau est une proie plus sûre (plus de bêtes à approcher).
         let size = Curve::Power { k: 0.5 }.eval(herd.population / 60.0);
-        let score = urgency * (0.55 + 0.45 * size) * sight * travel_discount(pos.distance_tiles(target));
+        let score =
+            urgency * (0.55 + 0.45 * size) * sight * travel_discount(pos.distance_tiles(target));
         candidates.push((TaskKind::Hunt, target, score));
     }
 
@@ -357,7 +397,11 @@ fn build_candidates(
         let freshness = (-age_days / GAME_MEMORY_DAYS).exp() as f32;
         let urgency = hunt_urgency;
         let day = 1.0 / (1.0 + pos.distance_tiles(spot) / (WALK_TILES_PER_TICK * 24.0));
-        candidates.push((TaskKind::Track, spot, urgency * 0.55 * freshness * day as f32 * sight));
+        candidates.push((
+            TaskKind::Track,
+            spot,
+            urgency * 0.55 * freshness * day as f32 * sight,
+        ));
     }
 
     // — Partir à la rencontre du gibier (D10, refait en MAR-4 sur les sorties
@@ -382,7 +426,10 @@ fn build_candidates(
         && !fresh_track
         && let Some(home) = base
     {
-        let mut rng = Pcg32::new(world.seed().derive(salt::WANDER) ^ splitmix64(time.tick ^ 0x5eed), id.0);
+        let mut rng = Pcg32::new(
+            world.seed().derive(salt::WANDER) ^ splitmix64(time.tick ^ 0x5eed),
+            id.0,
+        );
         let angle = rng.next_f64() * std::f64::consts::TAU;
         let (dx, dy) = (angle.cos(), angle.sin());
         // D2 : la faim **personnelle** allonge la quête au-delà du territoire,
@@ -395,13 +442,18 @@ fn build_candidates(
         // (`social::RESIDENCE_NIGHTS`). La bande affamée se disperse ainsi
         // sans aucune règle de scission.
         let own_hunger = (phys.hunger - carrying).max(0.0);
-        let reach_beyond = Curve::Logistic { steepness: 10.0, midpoint: 0.6 }.eval(own_hunger) as f64;
+        let reach_beyond = Curve::Logistic {
+            steepness: 10.0,
+            midpoint: 0.6,
+        }
+        .eval(own_hunger) as f64;
         let max_d = 0.9 * RESIDENCE_RADIUS_TILES
             + reach_beyond * (FORAY_RADIUS_TILES - 0.9 * RESIDENCE_RADIUS_TILES).max(0.0);
         // Le chemin qu'on peut faire avant la nuit : aller jusqu'au point, puis
         // revenir au camp.
         let walkable = f64::from(agent.daylight_left_h) * WALK_TILES_PER_TICK;
-        let dist = |a: (f64, f64), b: (f64, f64)| ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt();
+        let dist =
+            |a: (f64, f64), b: (f64, f64)| ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)).sqrt();
         let mut target = None;
         let mut d = 80.0;
         while d <= max_d {
@@ -461,9 +513,7 @@ fn build_candidates(
     //   **tension** passe à portée, va en découdre. Score ∝ agressivité ×
     //   tension — jamais « déclare la guerre », juste le trait et la tension
     //   changés en probabilité. La cible : le rival hostile le plus proche.
-    if adult
-        && let Some(my_clan) = clan
-    {
+    if adult && let Some(my_clan) = clan {
         let mut best: Option<(f64, (f64, f64), f32)> = None; // (dist², position, tension)
         for h in humans {
             if h.id == id {
@@ -506,7 +556,11 @@ fn build_candidates(
         && (forage_biomass < FORAGE_MIN_BIOMASS || share_here < LEAN_SHARE)
         && nearest_herd.is_none()
     {
-        let urgency = Curve::Logistic { steepness: 6.0, midpoint: 0.4 }.eval(phys.hunger);
+        let urgency = Curve::Logistic {
+            steepness: 6.0,
+            midpoint: 0.4,
+        }
+        .eval(phys.hunger);
         let target = (view.home.0.floor() as i64, view.home.1.floor() as i64);
         let score = urgency * travel_discount(pos.distance_tiles(target));
         candidates.push((TaskKind::EatFromStock, target, score));
@@ -636,7 +690,9 @@ fn build_candidates(
             .is_some_and(|owner| owner != clan_id);
         if d > RESIDENCE_RADIUS_TILES || intruding {
             let far = ((d / RESIDENCE_RADIUS_TILES) as f32 - 1.0).clamp(0.0, 1.0);
-            let score = far.max(if intruding { INTRUSION_URGENCY } else { 0.0 }).max(0.3);
+            let score = far
+                .max(if intruding { INTRUSION_URGENCY } else { 0.0 })
+                .max(0.3);
             let target = (view.home.0.floor() as i64, view.home.1.floor() as i64);
             candidates.push((TaskKind::ReturnToClan, target, score));
         }
@@ -693,7 +749,10 @@ fn build_candidates(
     {
         let tile = world.tile(here.0, here.1);
         let cultivable = tile.is_walkable()
-            && matches!(tile.biome, Biome::Grassland | Biome::Steppe | Biome::Savanna)
+            && matches!(
+                tile.biome,
+                Biome::Grassland | Biome::Steppe | Biome::Savanna
+            )
             && tile.soil_fertility > crate::sim::FIELD_MIN_FERTILITY
             && tile.biomass < crate::sim::CULTIVATED_CEILING;
         if cultivable {
@@ -766,8 +825,10 @@ fn build_candidates(
             }
         }
         if !unknown.is_empty() {
-            let mut rng =
-                Pcg32::new(world.seed().derive(salt::EXPLORE) ^ splitmix64(time.tick), id.0);
+            let mut rng = Pcg32::new(
+                world.seed().derive(salt::EXPLORE) ^ splitmix64(time.tick),
+                id.0,
+            );
             let target = unknown[(rng.next_u32() as usize) % unknown.len()];
             let score = 0.15 * traits.curiosity * comfort * sight;
             candidates.push((TaskKind::Explore, target, score));
@@ -789,8 +850,10 @@ fn build_candidates(
         desperation += 0.5 * phys.hunger;
     }
     let wander_score = (0.06 + desperation).min(1.0) * sight;
-    let mut wander_rng =
-        Pcg32::new(world.seed().derive(salt::WANDER) ^ splitmix64(time.tick), id.0);
+    let mut wander_rng = Pcg32::new(
+        world.seed().derive(salt::WANDER) ^ splitmix64(time.tick),
+        id.0,
+    );
     let angle = wander_rng.next_f64() * std::f64::consts::TAU;
     // On vise la **terre** : on avance le long du rayon jusqu'à la dernière
     // tuile ferme avant l'eau. Sans ça, errer vers l'océan déclenchait un A*
@@ -810,7 +873,10 @@ fn build_candidates(
     let mut wander_target = here;
     let mut d = 40.0;
     while d <= leg {
-        let p = ((pos.x + dx * d).floor() as i64, (pos.y + dy * d).floor() as i64);
+        let p = (
+            (pos.x + dx * d).floor() as i64,
+            (pos.y + dy * d).floor() as i64,
+        );
         if world.worldgen().elevation(p.0, p.1) <= 0.0 {
             break; // eau : on s'arrête à la dernière terre trouvée
         }
@@ -895,14 +961,21 @@ pub fn inspect(
 ) -> Vec<Motivation> {
     let here = agent.pos.tile();
     let spring = world.nearest_spring(here, SPRING_RADIUS_CHUNKS); // lue, jamais mémorisée
-    let candidates =
-        build_candidates(world, time, agent, mem, spring, current, herds, packs, humans, clan_views, relations, shrines);
+    let candidates = build_candidates(
+        world, time, agent, mem, spring, current, herds, packs, humans, clan_views, relations,
+        shrines,
+    );
     let scores: Vec<f32> = candidates.iter().map(|c| c.2).collect();
     let probs = softmax_weights(&scores, SOFTMAX_TAU);
     let mut out: Vec<Motivation> = candidates
         .iter()
         .zip(probs)
-        .map(|(&(kind, target, score), probability)| Motivation { kind, target, score, probability })
+        .map(|(&(kind, target, score), probability)| Motivation {
+            kind,
+            target,
+            score,
+            probability,
+        })
         .collect();
     // La pile, du plus fort au plus faible (total_cmp : ordre total sur f32,
     // pas de surprise NaN).
@@ -956,7 +1029,11 @@ const LEAN_SHARE: f32 = 0.3;
 fn edible_share(world: &mut World, pos: (f64, f64), tick: u64, humans: &[HumanView]) -> f32 {
     const WEEK_KCAL: f64 = 7.0 * 2_500.0;
     let zone = crate::fauna::range_zone(pos);
-    let here = humans.iter().filter(|h| crate::fauna::range_zone(h.pos) == zone).count().max(1);
+    let here = humans
+        .iter()
+        .filter(|h| crate::fauna::range_zone(h.pos) == zone)
+        .count()
+        .max(1);
     let kcal = world.edible_kcal(pos, tick);
     (kcal / (here as f64 * WEEK_KCAL)).min(1.0) as f32
 }
@@ -972,12 +1049,19 @@ fn familiarity_weight(mem: &Memory, center: (f64, f64), side: f64) -> f32 {
         let mut x = center.0 - side / 2.0;
         while x < center.0 + side / 2.0 {
             all += 1;
-            seen += u32::from(mem.known.contains(&crate::memory::cell_of((x as i64, y as i64))));
+            seen += u32::from(
+                mem.known
+                    .contains(&crate::memory::cell_of((x as i64, y as i64))),
+            );
             x += step;
         }
         y += step;
     }
-    let known = if all == 0 { 0.0 } else { seen as f32 / all as f32 };
+    let known = if all == 0 {
+        0.0
+    } else {
+        seen as f32 / all as f32
+    };
     FAMILIAR_FLOOR + (1.0 - FAMILIAR_FLOOR) * known
 }
 

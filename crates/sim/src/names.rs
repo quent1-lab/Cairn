@@ -45,7 +45,9 @@ const ONSETS: &[&str] = &[
 ];
 
 /// Noyaux vocaliques.
-const VOWELS: &[&str] = &["a", "e", "i", "o", "u", "a", "e", "i", "o", "ae", "ei", "ou"];
+const VOWELS: &[&str] = &[
+    "a", "e", "i", "o", "u", "a", "e", "i", "o", "ae", "ei", "ou",
+];
 
 /// Codas : ce qui ferme une syllabe.
 const CODAS: &[&str] = &["n", "r", "l", "s", "m", "k", "th", "rn", "sk", "kh"];
@@ -56,7 +58,11 @@ pub fn agent_name(seed: WorldSeed, id: AgentId, sex: Sex) -> String {
     // Flux propre à l'agent : `stream = id` sur la seed des noms. Deux agents
     // consécutifs ne se ressemblent donc pas (PCG décorrèle les flux).
     let mut rng = Pcg32::new(seed.derive(salt::NAMES), id.0);
-    let syllables = if rng.next_u32().is_multiple_of(4) { 3 } else { 2 };
+    let syllables = if rng.next_u32().is_multiple_of(4) {
+        3
+    } else {
+        2
+    };
     let mut name = String::new();
     for _ in 0..syllables {
         name.push_str(pick(ONSETS, &mut rng));
@@ -119,9 +125,21 @@ mod tests {
     fn un_nom_est_stable_et_propre_a_son_porteur() {
         let seed = WorldSeed(42);
         let a = agent_name(seed, AgentId(7), Sex::Female);
-        assert_eq!(a, agent_name(seed, AgentId(7), Sex::Female), "même seed, même nom");
-        assert_ne!(a, agent_name(seed, AgentId(8), Sex::Female), "deux agents, deux noms");
-        assert_ne!(a, agent_name(WorldSeed(43), AgentId(7), Sex::Female), "autre monde, autre nom");
+        assert_eq!(
+            a,
+            agent_name(seed, AgentId(7), Sex::Female),
+            "même seed, même nom"
+        );
+        assert_ne!(
+            a,
+            agent_name(seed, AgentId(8), Sex::Female),
+            "deux agents, deux noms"
+        );
+        assert_ne!(
+            a,
+            agent_name(WorldSeed(43), AgentId(7), Sex::Female),
+            "autre monde, autre nom"
+        );
     }
 
     /// Un clan et un agent de même numéro ne doivent pas porter la même racine
@@ -141,24 +159,39 @@ mod tests {
     fn la_terminaison_marque_le_sexe() {
         let seed = WorldSeed(42);
         let vowel = |s: &String| "aeiou".contains(s.chars().last().unwrap());
-        let femmes: Vec<String> =
-            (0..200).map(|i| agent_name(seed, AgentId(i), Sex::Female)).collect();
-        assert!(femmes.iter().all(vowel), "un nom féminin se termine par une voyelle");
+        let femmes: Vec<String> = (0..200)
+            .map(|i| agent_name(seed, AgentId(i), Sex::Female))
+            .collect();
+        assert!(
+            femmes.iter().all(vowel),
+            "un nom féminin se termine par une voyelle"
+        );
         let fermes = (0..200)
             .map(|i| agent_name(seed, AgentId(i), Sex::Male))
             .filter(|n| !vowel(n))
             .count();
-        assert!((80..160).contains(&fermes), "~60 % des noms masculins ferment ({fermes}/200)");
+        assert!(
+            (80..160).contains(&fermes),
+            "~60 % des noms masculins ferment ({fermes}/200)"
+        );
     }
 
     /// Un générateur de noms n'a aucun intérêt s'il n'en produit qu'une poignée.
     #[test]
     fn la_variete_est_suffisante() {
         let seed = WorldSeed(42);
-        let noms: std::collections::BTreeSet<String> =
-            (0..500).map(|i| agent_name(seed, AgentId(i), Sex::Female)).collect();
-        assert!(noms.len() > 400, "500 agents doivent donner >400 noms distincts ({})", noms.len());
+        let noms: std::collections::BTreeSet<String> = (0..500)
+            .map(|i| agent_name(seed, AgentId(i), Sex::Female))
+            .collect();
+        assert!(
+            noms.len() > 400,
+            "500 agents doivent donner >400 noms distincts ({})",
+            noms.len()
+        );
         // Et rien de dégénéré : deux syllabes au moins, lisible.
-        assert!(noms.iter().all(|n| n.len() >= 3 && n.len() <= 12), "longueurs plausibles");
+        assert!(
+            noms.iter().all(|n| n.len() >= 3 && n.len() <= 12),
+            "longueurs plausibles"
+        );
     }
 }

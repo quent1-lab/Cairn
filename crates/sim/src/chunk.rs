@@ -91,7 +91,10 @@ impl Chunk {
         let t0 = std::time::Instant::now();
         let corners = Self::corner_coords(coord).map(|(x, y)| world.humidity(x, y));
         #[cfg(feature = "profile")]
-        CHUNK_PROF[0].fetch_add(t0.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+        CHUNK_PROF[0].fetch_add(
+            t0.elapsed().as_nanos() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
         Self::from_corners(coord, world, corners)
     }
 
@@ -99,7 +102,12 @@ impl Chunk {
     /// l'ordre de `humidity_corners`. Un coin est partagé par quatre chunks.
     pub fn corner_coords(coord: ChunkCoord) -> [(i64, i64); 4] {
         let (x0, y0) = coord.origin();
-        [(x0, y0), (x0 + CHUNK_SIZE, y0), (x0, y0 + CHUNK_SIZE), (x0 + CHUNK_SIZE, y0 + CHUNK_SIZE)]
+        [
+            (x0, y0),
+            (x0 + CHUNK_SIZE, y0),
+            (x0, y0 + CHUNK_SIZE),
+            (x0 + CHUNK_SIZE, y0 + CHUNK_SIZE),
+        ]
     }
 
     /// Génère le chunk à partir de ses coins d'humidité déjà connus.
@@ -112,7 +120,10 @@ impl Chunk {
         // les 4 096 tuiles ici.
         let springs = springs_for(world, coord);
         #[cfg(feature = "profile")]
-        CHUNK_PROF[1].fetch_add(t1.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+        CHUNK_PROF[1].fetch_add(
+            t1.elapsed().as_nanos() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
         Self::from_parts(coord, world, humidity_corners, springs)
     }
 
@@ -367,7 +378,10 @@ mod tests {
         let wg = WorldGen::new(WorldSeed(42));
         for cy in -6..6 {
             for cx in -6..6 {
-                let coord = ChunkCoord { x: cx * 17, y: cy * 23 };
+                let coord = ChunkCoord {
+                    x: cx * 17,
+                    y: cy * 23,
+                };
                 let chunk = Chunk::generate(coord, &wg);
                 assert_eq!(chunk.springs, springs_for(&wg, coord), "chunk {coord:?}");
             }

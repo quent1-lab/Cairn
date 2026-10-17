@@ -105,21 +105,40 @@ mod tests {
             assert!(gain >= 0.0);
             previous = skill;
         }
-        assert!(skill > 0.9 * cap, "2000 h de pratique doivent frôler le plafond");
+        assert!(
+            skill > 0.9 * cap,
+            "2000 h de pratique doivent frôler le plafond"
+        );
         // Courbe saturante : le premier gain est le plus grand.
         assert!(previous - skill < first_gain.unwrap());
     }
 
     #[test]
     fn le_plafond_suit_les_traits() {
-        let doue = Traits { dexterity: 1.0, ..Traits::default() };
-        let maladroit = Traits { dexterity: 0.0, ..Traits::default() };
+        let doue = Traits {
+            dexterity: 1.0,
+            ..Traits::default()
+        };
+        let maladroit = Traits {
+            dexterity: 0.0,
+            ..Traits::default()
+        };
         assert!(forage_cap(&doue) > forage_cap(&maladroit));
-        let costaud = Traits { strength: 1.0, endurance: 1.0, ..Traits::default() };
+        let costaud = Traits {
+            strength: 1.0,
+            endurance: 1.0,
+            ..Traits::default()
+        };
         assert!(hunt_cap(&costaud) > hunt_cap(&Traits::default()));
         assert!(hunt_cap(&costaud) <= 1.0);
-        let sociable = Traits { sociability: 1.0, ..Traits::default() };
-        let solitaire = Traits { sociability: 0.0, ..Traits::default() };
+        let sociable = Traits {
+            sociability: 1.0,
+            ..Traits::default()
+        };
+        let solitaire = Traits {
+            sociability: 0.0,
+            ..Traits::default()
+        };
         assert!(oratory_cap(&sociable) > oratory_cap(&solitaire));
         assert!(oratory_cap(&sociable) <= 1.0);
     }

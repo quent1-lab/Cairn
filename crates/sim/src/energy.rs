@@ -46,12 +46,22 @@ pub fn body_mass_kg(age_years: f64, sex: Sex) -> f32 {
         Sex::Female => [38.0, 43.4],
         Sex::Male => [40.0, 50.9],
     };
-    let marks: [(f64, f32); 7] =
-        [(0.0, 3.0), (1.0, 8.5), (2.0, 10.5), (5.0, 15.0), (10.0, 24.0), (15.0, adult[0]), (18.0, adult[1])];
+    let marks: [(f64, f32); 7] = [
+        (0.0, 3.0),
+        (1.0, 8.5),
+        (2.0, 10.5),
+        (5.0, 15.0),
+        (10.0, 24.0),
+        (15.0, adult[0]),
+        (18.0, adult[1]),
+    ];
     if age_years >= 18.0 {
         return adult[1];
     }
-    let i = marks.iter().rposition(|(a, _)| age_years >= *a).unwrap_or(0);
+    let i = marks
+        .iter()
+        .rposition(|(a, _)| age_years >= *a)
+        .unwrap_or(0);
     let ((a0, m0), (a1, m1)) = (marks[i], marks[i + 1]);
     m0 + (m1 - m0) * ((age_years - a0) / (a1 - a0)) as f32
 }
@@ -137,7 +147,11 @@ pub struct Body {
 impl Body {
     pub fn of(age_years: f64, sex: Sex) -> Self {
         let mass_kg = body_mass_kg(age_years, sex);
-        Self { mass_kg, bmr_day: bmr_kcal_day(mass_kg, age_years, sex), growth_day: growth_kcal_day(age_years) }
+        Self {
+            mass_kg,
+            bmr_day: bmr_kcal_day(mass_kg, age_years, sex),
+            growth_day: growth_kcal_day(age_years),
+        }
     }
 
     /// Réserves pleines (kcal) : la graisse au-dessus de la graisse
@@ -197,7 +211,10 @@ mod tests {
         };
         let woman = day(Sex::Female, 1.5, 3.0, Activity::Eating);
         let man = day(Sex::Male, 3.0, 3.0, Activity::Hunting);
-        assert!((1_500.0..2_300.0).contains(&woman), "femme : {woman:.0} kcal/j");
+        assert!(
+            (1_500.0..2_300.0).contains(&woman),
+            "femme : {woman:.0} kcal/j"
+        );
         assert!((2_100.0..3_300.0).contains(&man), "homme : {man:.0} kcal/j");
     }
 
@@ -205,7 +222,10 @@ mod tests {
     fn un_enfant_coute_bien_moins_qu_un_adulte() {
         let toddler = Body::of(1.5, Sex::Female).reference_day();
         let adult = Body::of(30.0, Sex::Male).reference_day();
-        assert!((600.0..1_100.0).contains(&toddler), "1,5 an : {toddler:.0} kcal/j");
+        assert!(
+            (600.0..1_100.0).contains(&toddler),
+            "1,5 an : {toddler:.0} kcal/j"
+        );
         assert!(adult > 2.0 * toddler);
     }
 

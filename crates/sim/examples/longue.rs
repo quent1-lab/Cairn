@@ -24,7 +24,10 @@ use cairn_sim::exposure::{Exposure, Exposures};
 use cairn_sim::fauna::Herd;
 use cairn_sim::social::BOND_THRESHOLD;
 use cairn_sim::tech::TechEventKind;
-use cairn_sim::{Activity, AgentId, Behavior, ClanEventKind, ClanMembership, DeathCause, Demographics, Physiology, Position, Sim, fauna, scenario};
+use cairn_sim::{
+    Activity, AgentId, Behavior, ClanEventKind, ClanMembership, DeathCause, Demographics,
+    Physiology, Position, Sim, fauna, scenario,
+};
 use cairn_worldgen::Biome;
 
 const STOP_TPS: f64 = 1.0;
@@ -50,8 +53,13 @@ fn main() {
     let cold = args.next().is_some_and(|s| s == "froid");
     let start_day: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(135);
     let scene = if cold { "froid" } else { "tempere" };
-    let out = args.next().unwrap_or_else(|| format!("out/longue_{scene}_{seed}.csv"));
-    let horizon_days: Option<u64> = args.next().and_then(|s| s.parse::<u64>().ok()).map(|y| y * 360);
+    let out = args
+        .next()
+        .unwrap_or_else(|| format!("out/longue_{scene}_{seed}.csv"));
+    let horizon_days: Option<u64> = args
+        .next()
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(|y| y * 360);
 
     // Même scène que `acceptation`.
     let n_agents = if cold { 60 } else { 40 };
@@ -90,8 +98,13 @@ fn main() {
         causes_head.join(",")
     )
     .unwrap();
-    println!("# longue — seed {seed}, scène {scene}, départ jour {start_day}, {n_agents} agents ; CSV {out}");
-    println!("# arrêt : débit < {STOP_TPS} tps sur {WINDOW_DAYS} j, mémoire > {} Mo, ou extinction", STOP_RSS_KB / 1000);
+    println!(
+        "# longue — seed {seed}, scène {scene}, départ jour {start_day}, {n_agents} agents ; CSV {out}"
+    );
+    println!(
+        "# arrêt : débit < {STOP_TPS} tps sur {WINDOW_DAYS} j, mémoire > {} Mo, ou extinction",
+        STOP_RSS_KB / 1000
+    );
 
     let started = std::time::Instant::now();
     let mut window: VecDeque<f64> = VecDeque::new(); // secondes par jour de jeu
@@ -133,7 +146,8 @@ fn main() {
             window.pop_front();
         }
         let tps_day = TICKS_PER_DAY as f64 / secs.max(1e-9);
-        let tps_win = (window.len() as f64 * TICKS_PER_DAY as f64) / window.iter().sum::<f64>().max(1e-9);
+        let tps_win =
+            (window.len() as f64 * TICKS_PER_DAY as f64) / window.iter().sum::<f64>().max(1e-9);
         let rss_kb = rss_kb();
 
         for e in &sim.clan_events[seen_events..] {
@@ -159,14 +173,34 @@ fn main() {
         }
         let mut ages_dead: Vec<f64> = death_ages.iter().map(|(_, a)| *a).collect();
         ages_dead.sort_by(f64::total_cmp);
-        born = sim.agents.query::<(&AgentId, &Demographics)>().iter().map(|(_, (id, d))| (id.0, d.born_tick)).collect();
-        let mut ages_alive: Vec<f64> =
-            sim.agents.query::<&Demographics>().iter().map(|(_, d)| d.age_years(sim.time.tick)).collect();
+        born = sim
+            .agents
+            .query::<(&AgentId, &Demographics)>()
+            .iter()
+            .map(|(_, (id, d))| (id.0, d.born_tick))
+            .collect();
+        let mut ages_alive: Vec<f64> = sim
+            .agents
+            .query::<&Demographics>()
+            .iter()
+            .map(|(_, d)| d.age_years(sim.time.tick))
+            .collect();
         ages_alive.sort_by(f64::total_cmp);
-        let pts: Vec<(f64, f64)> = sim.agents.query::<&Position>().iter().map(|(_, p)| (p.x, p.y)).collect();
+        let pts: Vec<(f64, f64)> = sim
+            .agents
+            .query::<&Position>()
+            .iter()
+            .map(|(_, p)| (p.x, p.y))
+            .collect();
         let n = pts.len().max(1) as f64;
-        let c = (pts.iter().map(|p| p.0).sum::<f64>() / n, pts.iter().map(|p| p.1).sum::<f64>() / n);
-        let mut dist: Vec<f64> = pts.iter().map(|p| cairn_core::tiles_to_km((p.0 - c.0).hypot(p.1 - c.1))).collect();
+        let c = (
+            pts.iter().map(|p| p.0).sum::<f64>() / n,
+            pts.iter().map(|p| p.1).sum::<f64>() / n,
+        );
+        let mut dist: Vec<f64> = pts
+            .iter()
+            .map(|p| cairn_core::tiles_to_km((p.0 - c.0).hypot(p.1 - c.1)))
+            .collect();
         dist.sort_by(f64::total_cmp);
         let med = |v: &[f64]| v.get(v.len() / 2).copied().unwrap_or(0.0);
 
@@ -175,8 +209,16 @@ fn main() {
         for d in &sim.deaths {
             *by_cause.entry(format!("{:?}", d.cause)).or_default() += 1;
         }
-        let causes: Vec<String> =
-            CAUSES.iter().map(|c| by_cause.get(&format!("{c:?}")).copied().unwrap_or(0).to_string()).collect();
+        let causes: Vec<String> = CAUSES
+            .iter()
+            .map(|c| {
+                by_cause
+                    .get(&format!("{c:?}"))
+                    .copied()
+                    .unwrap_or(0)
+                    .to_string()
+            })
+            .collect();
 
         let mut sizes: Vec<usize> = sim.clans.iter().map(|c| c.members.len()).collect();
         sizes.sort_unstable();
@@ -187,7 +229,12 @@ fn main() {
             n => (sizes[n / 2 - 1] + sizes[n / 2]) as f64 / 2.0,
         };
         let sizes_str: Vec<String> = sizes.iter().map(|x| x.to_string()).collect();
-        let in_clan = sim.agents.query::<&ClanMembership>().iter().filter(|(_, m)| m.0.is_some()).count();
+        let in_clan = sim
+            .agents
+            .query::<&ClanMembership>()
+            .iter()
+            .filter(|(_, m)| m.0.is_some())
+            .count();
         let mut degree: BTreeMap<u64, usize> = BTreeMap::new();
         for (&(a, b), &w) in &sim.social.bonds {
             if w >= BOND_THRESHOLD {
@@ -198,18 +245,29 @@ fn main() {
         let mut links: Vec<usize> = sim
             .clans
             .iter()
-            .flat_map(|c| c.members.iter().map(|m| degree.get(&m.0).copied().unwrap_or(0)))
+            .flat_map(|c| {
+                c.members
+                    .iter()
+                    .map(|m| degree.get(&m.0).copied().unwrap_or(0))
+            })
             .collect();
         links.sort_unstable();
         let (mut tension_max, mut tense) = (0.0f32, 0usize);
         for i in 0..sim.clans.len() {
             for j in (i + 1)..sim.clans.len() {
-                let t = sim.clan_relations.tension_between(sim.clans[i].id, sim.clans[j].id);
+                let t = sim
+                    .clan_relations
+                    .tension_between(sim.clans[i].id, sim.clans[j].id);
                 tension_max = tension_max.max(t);
                 tense += usize::from(t >= 0.4);
             }
         }
-        let mut hunger: Vec<f32> = sim.agents.query::<&Physiology>().iter().map(|(_, p)| p.hunger).collect();
+        let mut hunger: Vec<f32> = sim
+            .agents
+            .query::<&Physiology>()
+            .iter()
+            .map(|(_, p)| p.hunger)
+            .collect();
         hunger.sort_by(f32::total_cmp);
         let hunger_mean = hunger.iter().sum::<f32>() / hunger.len().max(1) as f32;
         let hunger_p90 = hunger.get(hunger.len() * 9 / 10).copied().unwrap_or(0.0);
@@ -230,7 +288,10 @@ fn main() {
             .fauna
             .query::<(&Herd, &Position)>()
             .iter()
-            .filter(|(_, (h, p))| h.anchor.is_none() && (p.x - home.0 as f64).hypot(p.y - home.1 as f64) < km_to_tiles(10.0))
+            .filter(|(_, (h, p))| {
+                h.anchor.is_none()
+                    && (p.x - home.0 as f64).hypot(p.y - home.1 as f64) < km_to_tiles(10.0)
+            })
             .count();
         let side = km_to_tiles(ZONE_KM);
         let zones: BTreeSet<(i64, i64)> = sim
@@ -266,7 +327,11 @@ fn main() {
                 }
             }
         }
-        let chief_huts = sim.structures.iter().filter(|s| s.kind == cairn_sim::StructureKind::ChiefHut).count();
+        let chief_huts = sim
+            .structures
+            .iter()
+            .filter(|s| s.kind == cairn_sim::StructureKind::ChiefHut)
+            .count();
         writeln!(
             csv,
             "{day},{:.3},{pop},{},{},{},{},{in_clan},{},{},{formed},{dissolved},{merged},{},{tension_max:.3},{tense},{hunger_mean:.3},{hunger_p90:.3},{fire},{copper},{},{disc},{forgot},{herds},{heads:.0},{packs},{predators:.0},{},{},{tps_day:.1},{tps_win:.1},{},{dead_infants},{dead_children},{:.1},{:.1},{:.2},{:.2},{},{hunted_day:.2},{walk_per_adult:.2},{dark_slept:.3},{near_herds},{camp_step_km:.3},{:.2},{inter:.2},{chief_huts}",
@@ -293,8 +358,11 @@ fn main() {
         csv.flush().unwrap();
 
         if day % 360 == 0 {
-            let techs: Vec<String> =
-                sim.known_techs.iter().map(|t| sim.tech_tree.get(*t).name.clone()).collect();
+            let techs: Vec<String> = sim
+                .known_techs
+                .iter()
+                .map(|t| sim.tech_tree.get(*t).name.clone())
+                .collect();
             println!(
                 "an {:>3} · {:>5.1} h · pop {pop} (nés {}, morts {}) · clans {} (méd. {}) · techs {:?} · faune {herds} trp / {heads:.0} têtes, {packs} meutes · tps 30 j {tps_win:.1} · {} Mo",
                 day / 360,

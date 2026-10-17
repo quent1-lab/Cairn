@@ -110,9 +110,9 @@ pub fn daily_regrowth(
             let half0 = crate::chunk::CHUNK_SIZE as f64 / 2.0;
             let c = (ox0 as f64 + half0, oy0 as f64 + half0);
             let r = cairn_core::km_to_tiles(4.0);
-            let vu = humans.iter().any(|h| {
-                (h.0 - c.0).powi(2) + (h.1 - c.1).powi(2) <= r * r
-            });
+            let vu = humans
+                .iter()
+                .any(|h| (h.0 - c.0).powi(2) + (h.1 - c.1).powi(2) <= r * r);
             if !vu {
                 continue;
             }
@@ -160,12 +160,22 @@ pub fn daily_regrowth(
         //   et la faune, exponentiellement instable, en faisait 984 troupeaux
         //   contre 421 au 600ᵉ. On trie donc par lignes, comme la double
         //   boucle d'origine.
-        let Some((chunk, worldgen)) = world.chunk_mut_with_gen(coord) else { continue };
+        let Some((chunk, worldgen)) = world.chunk_mut_with_gen(coord) else {
+            continue;
+        };
         if weather_factor > 1.0 {
             for ly in 0..CHUNK_SIZE as usize {
                 for lx in 0..CHUNK_SIZE as usize {
                     regrow_tile(
-                        chunk, worldgen, lx, ly, oy, climate, time, weather_factor, elapsed,
+                        chunk,
+                        worldgen,
+                        lx,
+                        ly,
+                        oy,
+                        climate,
+                        time,
+                        weather_factor,
+                        elapsed,
                         &mut rng,
                     );
                 }
@@ -179,7 +189,16 @@ pub fn daily_regrowth(
             for (lx, ly) in cibles {
                 let (lx, ly) = (lx as usize, ly as usize);
                 regrow_tile(
-                    chunk, worldgen, lx, ly, oy, climate, time, weather_factor, elapsed, &mut rng,
+                    chunk,
+                    worldgen,
+                    lx,
+                    ly,
+                    oy,
+                    climate,
+                    time,
+                    weather_factor,
+                    elapsed,
+                    &mut rng,
                 );
                 // — Revenue au baseline exact, la tuile quitte `touched`. Elle
                 //   n'avait plus rien à faire ici : à capacité, `regrow_tile`
@@ -383,7 +402,9 @@ mod tests {
         let world = World::new(WorldSeed(42), 64);
         let climate = Climate::new(world.worldgen().temperature.latitude());
         // Plein été de l'hémisphère nord : on ne veut pas mesurer un hiver.
-        let time = SimTime { tick: 180 * cairn_core::TICKS_PER_DAY };
+        let time = SimTime {
+            tick: 180 * cairn_core::TICKS_PER_DAY,
+        };
         (world, climate, time)
     }
 
@@ -408,8 +429,14 @@ mod tests {
         }
 
         let apres = world.tile(x, y).biomass;
-        assert!(apres > 20, "la tuile broutée n'a pas repoussé en 60 jours (à {apres})");
-        assert!(apres <= cap, "repousse au-delà de la capacité : {apres} > {cap}");
+        assert!(
+            apres > 20,
+            "la tuile broutée n'a pas repoussé en 60 jours (à {apres})"
+        );
+        assert!(
+            apres <= cap,
+            "repousse au-delà de la capacité : {apres} > {cap}"
+        );
     }
 
     #[test]
@@ -462,10 +489,16 @@ mod tests {
         // ailleurs, comme dans les tests d'éviction de `world`.
         let mut world = World::new(WorldSeed(42), 8);
         let climate = Climate::new(world.worldgen().temperature.latitude());
-        let time = SimTime { tick: 180 * cairn_core::TICKS_PER_DAY };
+        let time = SimTime {
+            tick: 180 * cairn_core::TICKS_PER_DAY,
+        };
         let (x, y) = tuile_qui_pousse(&mut world, time, &climate);
         let baseline = crate::tile::baseline_biomass(world.tile(x, y).biome);
-        assert_eq!(world.tile(x, y).biomass, baseline, "la tuile témoin doit être intacte");
+        assert_eq!(
+            world.tile(x, y).biomass,
+            baseline,
+            "la tuile témoin doit être intacte"
+        );
 
         // Salir une *autre* tuile du chunk : c'est ce qui rend le chunk sale,
         // donc visible de la passe, sans toucher celle qu'on observe.
@@ -486,7 +519,10 @@ mod tests {
             t.tick += cairn_core::TICKS_PER_DAY;
         }
         let pousse = world.tile(x, y).biomass;
-        assert!(pousse > baseline, "l'averse n'a rien fait pousser : le test ne prouverait rien");
+        assert!(
+            pousse > baseline,
+            "l'averse n'a rien fait pousser : le test ne prouverait rien"
+        );
 
         // On s'éloigne : le chunk est évincé, et seul son instantané le suit.
         for cx in 50..70 {
@@ -511,7 +547,9 @@ mod tests {
     fn une_tuile_revenue_au_baseline_n_est_plus_visitee() {
         let mut world = World::new(WorldSeed(42), 64);
         let climate = Climate::new(world.worldgen().temperature.latitude());
-        let time = SimTime { tick: 180 * cairn_core::TICKS_PER_DAY };
+        let time = SimTime {
+            tick: 180 * cairn_core::TICKS_PER_DAY,
+        };
         let (x, y) = tuile_qui_pousse(&mut world, time, &climate);
         let baseline = crate::tile::baseline_biomass(world.tile(x, y).biome);
         world.tile_mut(x, y).biomass = baseline - 3;
@@ -523,9 +561,19 @@ mod tests {
             daily_regrowth(&mut world, &climate, t, &[], &[], 1);
             t.tick += cairn_core::TICKS_PER_DAY;
         }
-        assert_eq!(world.tile(x, y).biomass, baseline, "la tuile n'a pas repoussé : le test ne prouverait rien");
-        let coord = crate::chunk::ChunkCoord { x: x.div_euclid(CHUNK_SIZE), y: y.div_euclid(CHUNK_SIZE) };
-        let local = (x.rem_euclid(CHUNK_SIZE) as u8, y.rem_euclid(CHUNK_SIZE) as u8);
+        assert_eq!(
+            world.tile(x, y).biomass,
+            baseline,
+            "la tuile n'a pas repoussé : le test ne prouverait rien"
+        );
+        let coord = crate::chunk::ChunkCoord {
+            x: x.div_euclid(CHUNK_SIZE),
+            y: y.div_euclid(CHUNK_SIZE),
+        };
+        let local = (
+            x.rem_euclid(CHUNK_SIZE) as u8,
+            y.rem_euclid(CHUNK_SIZE) as u8,
+        );
         assert!(
             !world.chunk(coord).touched().contains(&local),
             "revenue à son baseline, la tuile est encore marquée : la repousse la visitera chaque jour pour rien"

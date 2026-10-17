@@ -130,12 +130,18 @@ pub(crate) fn resolve(sim: &mut Sim, engagements: &[Engagement]) {
 
     // 3. Appliquer aux assaillants : plaie (mortelle à 1), et pratique du
     //    combat (qu'on ait saigné ou non — on s'est battu).
-    for (_, (id, traits, skills, wound, phys)) in sim
-        .agents
-        .query_mut::<(&AgentId, &Traits, &mut Skills, &mut Wound, &mut Physiology)>()
+    for (_, (id, traits, skills, wound, phys)) in
+        sim.agents
+            .query_mut::<(&AgentId, &Traits, &mut Skills, &mut Wound, &mut Physiology)>()
     {
-        let Some(&dmg) = hurt.get(&id.0) else { continue };
-        skills::practice(&mut skills.combat, skills::combat_cap(traits), COMBAT_PRACTICE_HOURS);
+        let Some(&dmg) = hurt.get(&id.0) else {
+            continue;
+        };
+        skills::practice(
+            &mut skills.combat,
+            skills::combat_cap(traits),
+            COMBAT_PRACTICE_HOURS,
+        );
         wound.0 = (wound.0 + dmg).min(1.0);
         if wound.0 >= 1.0 {
             // Plaie mortelle : on passe par le pipeline de mort ordinaire
@@ -171,8 +177,10 @@ pub(crate) fn resolve_clashes(sim: &mut Sim, clashes: &[Clash]) {
     let tick = sim.time.tick;
 
     // 1. Instantané des combattants (force, compétence de combat, clan).
-    let involved: BTreeSet<u64> =
-        clashes.iter().flat_map(|c| [c.attacker.0, c.target.0]).collect();
+    let involved: BTreeSet<u64> = clashes
+        .iter()
+        .flat_map(|c| [c.attacker.0, c.target.0])
+        .collect();
     let mut stats: BTreeMap<u64, (f32, f32, Option<ClanId>)> = BTreeMap::new();
     for (_, (id, traits, skills, membership)) in sim
         .agents
@@ -223,14 +231,18 @@ pub(crate) fn resolve_clashes(sim: &mut Sim, clashes: &[Clash]) {
     //    Les morts sont comptées par affrontement au passage : c'est le bilan
     //    que la Chronique raconte (« Douze morts », BRIEF §6.4).
     let mut casualties: BTreeMap<(u64, u64), usize> = BTreeMap::new();
-    for (_, (id, traits, skills, wound, phys)) in sim
-        .agents
-        .query_mut::<(&AgentId, &Traits, &mut Skills, &mut Wound, &mut Physiology)>()
+    for (_, (id, traits, skills, wound, phys)) in
+        sim.agents
+            .query_mut::<(&AgentId, &Traits, &mut Skills, &mut Wound, &mut Physiology)>()
     {
         if !fought.contains(&id.0) {
             continue;
         }
-        skills::practice(&mut skills.combat, skills::combat_cap(traits), COMBAT_PRACTICE_HOURS);
+        skills::practice(
+            &mut skills.combat,
+            skills::combat_cap(traits),
+            COMBAT_PRACTICE_HOURS,
+        );
         if let Some(&dmg) = hurt.get(&id.0) {
             let before = wound.0;
             wound.0 = (wound.0 + dmg).min(1.0);
@@ -281,11 +293,9 @@ pub(crate) fn resolve_clashes(sim: &mut Sim, clashes: &[Clash]) {
             continue;
         }
         // Le lieu : le foyer du clan attaqué — c'est chez lui qu'on est venu.
-        let pos = sim
-            .clans
-            .iter()
-            .find(|c| c.id.0 == d)
-            .map_or((0, 0), |c| (c.home.0.floor() as i64, c.home.1.floor() as i64));
+        let pos = sim.clans.iter().find(|c| c.id.0 == d).map_or((0, 0), |c| {
+            (c.home.0.floor() as i64, c.home.1.floor() as i64)
+        });
         crate::chronicle::record_raid(
             sim,
             pos,
@@ -307,8 +317,11 @@ mod tests {
 
     /// Fait naître une meute de loups d'effectif connu et renvoie son entité.
     fn spawn_wolf_pack(sim: &mut Sim, pop: f32) -> hecs::Entity {
-        sim.fauna
-            .spawn((FaunaId(999), Position { x: 0.0, y: 0.0 }, Pack::new(pop, Species::Wolf)))
+        sim.fauna.spawn((
+            FaunaId(999),
+            Position { x: 0.0, y: 0.0 },
+            Pack::new(pop, Species::Wolf),
+        ))
     }
 
     /// Le premier affrontement de l'histoire du projet : la meute encaisse le
@@ -318,10 +331,21 @@ mod tests {
         let mut sim = Sim::new(WorldSeed(1), 64);
         let pack = spawn_wolf_pack(&mut sim, 30.0);
         let attacker = sim.spawn_agent(0.0, 0.0);
-        resolve(&mut sim, &[Engagement { attacker, pack, power: 5.0, defense: 0.2 }]);
+        resolve(
+            &mut sim,
+            &[Engagement {
+                attacker,
+                pack,
+                power: 5.0,
+                defense: 0.2,
+            }],
+        );
 
         let pop = sim.fauna.query_one_mut::<&Pack>(pack).unwrap().population;
-        assert!((pop - 25.0).abs() < 1e-3, "la meute perd la somme des coups (30 − 5 = {pop})");
+        assert!(
+            (pop - 25.0).abs() < 1e-3,
+            "la meute perd la somme des coups (30 − 5 = {pop})"
+        );
 
         let (mut wound, mut combat) = (0.0, 0.0);
         for (_, (id, w, s)) in sim.agents.query::<(&AgentId, &Wound, &Skills)>().iter() {
@@ -344,7 +368,12 @@ mod tests {
             let ids: Vec<AgentId> = (0..attackers).map(|_| sim.spawn_agent(0.0, 0.0)).collect();
             let engs: Vec<Engagement> = ids
                 .iter()
-                .map(|&a| Engagement { attacker: a, pack, power: 2.0, defense: 0.2 })
+                .map(|&a| Engagement {
+                    attacker: a,
+                    pack,
+                    power: 2.0,
+                    defense: 0.2,
+                })
                 .collect();
             resolve(&mut sim, &engs);
             let mut w = 0.0;
@@ -375,7 +404,15 @@ mod tests {
                 Pack::new(20.0, species),
             ));
             let attacker = sim.spawn_agent(0.0, 0.0);
-            resolve(&mut sim, &[Engagement { attacker, pack, power: 2.0, defense: 0.2 }]);
+            resolve(
+                &mut sim,
+                &[Engagement {
+                    attacker,
+                    pack,
+                    power: 2.0,
+                    defense: 0.2,
+                }],
+            );
             let mut w = 0.0;
             for (_, (id, wound)) in sim.agents.query::<(&AgentId, &Wound)>().iter() {
                 if *id == attacker {
@@ -397,8 +434,9 @@ mod tests {
         let mut sim = Sim::new(WorldSeed(1), 64);
         let raider = sim.spawn_agent(0.0, 0.0);
         let victim = sim.spawn_agent(0.0, 0.0);
-        for (_, (id, membership, traits)) in
-            sim.agents.query_mut::<(&AgentId, &mut ClanMembership, &mut Traits)>()
+        for (_, (id, membership, traits)) in sim
+            .agents
+            .query_mut::<(&AgentId, &mut ClanMembership, &mut Traits)>()
         {
             traits.strength = 0.7; // de quoi frapper et riposter
             membership.0 = Some(ClanId(if *id == raider { 1 } else { 2 }));
@@ -416,7 +454,13 @@ mod tests {
         sim.clans.push(clan(1, raider, 0.0));
         sim.clans.push(clan(2, victim, 5.0));
 
-        resolve_clashes(&mut sim, &[Clash { attacker: raider, target: victim }]);
+        resolve_clashes(
+            &mut sim,
+            &[Clash {
+                attacker: raider,
+                target: victim,
+            }],
+        );
 
         let wound_of = |sim: &Sim, who: AgentId| {
             let mut w = 0.0;
@@ -427,10 +471,16 @@ mod tests {
             }
             w
         };
-        assert!(wound_of(&sim, raider) > 0.0, "l'agresseur encaisse la riposte");
+        assert!(
+            wound_of(&sim, raider) > 0.0,
+            "l'agresseur encaisse la riposte"
+        );
         assert!(wound_of(&sim, victim) > 0.0, "la cible est blessée");
         let stock = |id| sim.clans.iter().find(|c| c.id == ClanId(id)).unwrap().stock;
         assert!(stock(2) < 5.0, "le clan rival est razzié");
-        assert!((stock(1) + stock(2) - 5.0).abs() < 1e-4, "le butin est transféré, pas créé");
+        assert!(
+            (stock(1) + stock(2) - 5.0).abs() < 1e-4,
+            "le butin est transféré, pas créé"
+        );
     }
 }

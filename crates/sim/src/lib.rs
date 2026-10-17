@@ -22,16 +22,16 @@ pub mod agent;
 pub mod brain;
 pub mod chronicle;
 pub mod chunk;
+pub mod climate;
 pub mod combat;
 pub mod commerce;
-pub mod climate;
 pub mod cult;
 pub mod curves;
 pub mod demography;
 pub mod disease;
-pub mod energy;
 pub mod divine;
 pub mod ecology;
+pub mod energy;
 pub mod exposure;
 pub mod faith;
 pub mod fauna;
@@ -49,39 +49,44 @@ pub mod skills;
 pub mod social;
 pub mod structures;
 pub mod tech;
-pub mod weather;
 pub mod tile;
+pub mod weather;
 pub mod world;
 pub mod yields;
 
-pub use agent::{Activity, AgentId, Behavior, DeathCause, Physiology, Position, Task, TaskKind, Wound};
+pub use agent::{
+    Activity, AgentId, Behavior, DeathCause, Physiology, Position, Task, TaskKind, Wound,
+};
 pub use brain::Motivation;
 pub use chronicle::{Event, EventKind};
+pub use chunk::{CHUNK_AREA, CHUNK_SIZE, Chunk, ChunkCoord};
+pub use climate::Climate;
 pub use climate::Season;
 pub use combat::{Clash, Engagement};
-pub use chunk::{CHUNK_AREA, CHUNK_SIZE, Chunk, ChunkCoord};
 pub use commerce::Expedition;
-pub use climate::Climate;
+pub use cult::{Creed, Theology};
 pub use demography::{Demographics, HumanView, Kinship, Pregnancy, Sex, Traits};
 pub use disease::{Illness, Route};
 pub use divine::{DivineError, Intervention, Miracle, Outcome};
 pub use exposure::{Exposure, Exposures};
-pub use cult::{Creed, Theology};
 pub use faith::Faith;
-pub use fire::Fire;
 pub use fauna::{FaunaId, Herd, HerdState, Pack, PackView, Species};
+pub use fire::Fire;
 pub use memory::Memory;
 pub use pressure::ClanPressure;
 pub use sim::{BirthRecord, DeathRecord, Sim};
 pub use skills::Skills;
-pub use social::{Clan, ClanDiagnostics, ClanEvent, ClanEventKind, ClanId, ClanMembership, ClanRelations, SocialGraph};
+pub use social::{
+    Clan, ClanDiagnostics, ClanEvent, ClanEventKind, ClanId, ClanMembership, ClanRelations,
+    SocialGraph,
+};
 pub use structures::{Structure, StructureKind};
 pub use tech::{
     Age, EnvCond, Knowledge, Tech, TechEvent, TechEventKind, TechId, TechPressure, TechSkill,
     TechTree,
 };
-pub use weather::{WeatherCell, WeatherKind};
 pub use tile::{Tile, TileFlags};
+pub use weather::{WeatherCell, WeatherKind};
 pub use world::World;
 
 /// Salts des flux aléatoires de la simulation, dérivés de la seed du monde

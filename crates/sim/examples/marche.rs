@@ -103,17 +103,24 @@ fn main() {
             jobs.push((seed, cold));
         }
     }
-    println!("# marche — {days} jours, départ au jour {start_day}, seeds {seeds:?}, {} runs", jobs.len());
+    println!(
+        "# marche — {days} jours, départ au jour {start_day}, seeds {seeds:?}, {} runs",
+        jobs.len()
+    );
     let queue = std::sync::Mutex::new(jobs.into_iter().enumerate().collect::<Vec<_>>());
     let results = std::sync::Mutex::new(Vec::new());
     std::thread::scope(|scope| {
         for _ in 0..threads {
-            scope.spawn(|| loop {
-                let job = queue.lock().unwrap().pop();
-                let Some((idx, (seed, cold))) = job else { break };
-                let r = run(seed, cold, days, start_day);
-                eprintln!("  fini : {}", r.label);
-                results.lock().unwrap().push((idx, r));
+            scope.spawn(|| {
+                loop {
+                    let job = queue.lock().unwrap().pop();
+                    let Some((idx, (seed, cold))) = job else {
+                        break;
+                    };
+                    let r = run(seed, cold, days, start_day);
+                    eprintln!("  fini : {}", r.label);
+                    results.lock().unwrap().push((idx, r));
+                }
             });
         }
     });
@@ -129,8 +136,13 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
     scenario::start_on_day(&mut sim, start_day);
     let seed_point = (km_to_tiles(1500.0) as i64, km_to_tiles(2100.0) as i64);
     let home = if cold {
-        scenario::find_home_where(&mut sim, seed_point, 1.0..=5.0, &[Biome::TemperateForest, Biome::Taiga, Biome::Grassland])
-            .unwrap_or_else(|| scenario::find_home(&mut sim, seed_point))
+        scenario::find_home_where(
+            &mut sim,
+            seed_point,
+            1.0..=5.0,
+            &[Biome::TemperateForest, Biome::Taiga, Biome::Grassland],
+        )
+        .unwrap_or_else(|| scenario::find_home(&mut sim, seed_point))
     } else {
         scenario::find_home(&mut sim, seed_point)
     };
@@ -148,7 +160,11 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
     let day_hours = |sim: &Sim| {
         let day = sim.time.tick / TICKS_PER_DAY * TICKS_PER_DAY;
         (0..TICKS_PER_DAY)
-            .filter(|h| sim.climate.sun_elevation_deg(home.1, cairn_core::SimTime { tick: day + h }) > 0.0)
+            .filter(|h| {
+                sim.climate
+                    .sun_elevation_deg(home.1, cairn_core::SimTime { tick: day + h })
+                    > 0.0
+            })
             .count()
     };
     let mut r = Report {
@@ -159,7 +175,9 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
     };
     let first_day_hours = day_hours(&sim);
     let near = |m: &BTreeMap<u64, (f64, f64)>| {
-        m.values().filter(|p| ((p.0 - home.0 as f64).hypot(p.1 - home.1 as f64)) < km_to_tiles(10.0)).count()
+        m.values()
+            .filter(|p| ((p.0 - home.0 as f64).hypot(p.1 - home.1 as f64)) < km_to_tiles(10.0))
+            .count()
     };
     let herds0 = herds_at(&sim);
     r.herbivores.0 = sim.fauna_census().0;
@@ -171,7 +189,11 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
     for _ in 0..days * TICKS_PER_DAY {
         sim.step();
         if sim.time.tick % TICKS_PER_DAY == 0 {
-            for (_, (id, demo, y)) in sim.agents.query::<(&cairn_sim::AgentId, &Demographics, &Yields)>().iter() {
+            for (_, (id, demo, y)) in sim
+                .agents
+                .query::<(&cairn_sim::AgentId, &Demographics, &Yields)>()
+                .iter()
+            {
                 let before = ledgers.insert(id.0, *y).unwrap_or_default();
                 if demo.is_adult(sim.time.tick) {
                     let s = usize::from(demo.sex == Sex::Male);
@@ -182,7 +204,11 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
                     }
                 }
             }
-            for st in sim.structures.iter().filter(|st| st.kind == cairn_sim::StructureKind::Hut) {
+            for st in sim
+                .structures
+                .iter()
+                .filter(|st| st.kind == cairn_sim::StructureKind::Hut)
+            {
                 huts.insert((st.built_tick, st.pos.0 as i64, st.pos.1 as i64));
             }
             for c in &sim.clans {
@@ -202,9 +228,18 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
                 .filter(|(_, d)| d.is_adult(sim.time.tick))
                 .count() as u64;
         }
-        for (_, (id, demo, behavior)) in sim.agents.query::<(&cairn_sim::AgentId, &Demographics, &Behavior)>().iter() {
+        for (_, (id, demo, behavior)) in sim
+            .agents
+            .query::<(&cairn_sim::AgentId, &Demographics, &Behavior)>()
+            .iter()
+        {
             let hunting = behavior.task.is_some_and(|t| {
-                matches!(t.kind, cairn_sim::TaskKind::Hunt | cairn_sim::TaskKind::Track | cairn_sim::TaskKind::SeekGame)
+                matches!(
+                    t.kind,
+                    cairn_sim::TaskKind::Hunt
+                        | cairn_sim::TaskKind::Track
+                        | cairn_sim::TaskKind::SeekGame
+                )
             });
             if hunting && demo.is_adult(sim.time.tick) {
                 hunted_today.insert(id.0);
@@ -241,15 +276,26 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
     let herds1 = herds_at(&sim);
     let mut nets: Vec<f64> = herds0
         .iter()
-        .filter_map(|(id, a)| herds1.get(id).map(|b| cairn_core::tiles_to_km((a.0 - b.0).hypot(a.1 - b.1))))
+        .filter_map(|(id, a)| {
+            herds1
+                .get(id)
+                .map(|b| cairn_core::tiles_to_km((a.0 - b.0).hypot(a.1 - b.1)))
+        })
         .collect();
     nets.sort_by(f64::total_cmp);
     r.herd_net_km = nets.get(nets.len() / 2).copied().unwrap_or(f64::NAN);
     r.herds_near = (near(&herds0), near(&herds1));
     r.herbivores.1 = sim.fauna_census().0;
     r.huts_built = huts.len();
-    r.chief_huts = sim.structures.iter().filter(|s| s.kind == cairn_sim::StructureKind::ChiefHut).count();
-    r.camp_net_km = camps.values().map(|(a, b)| cairn_core::tiles_to_km((a.0 - b.0).hypot(a.1 - b.1))).collect();
+    r.chief_huts = sim
+        .structures
+        .iter()
+        .filter(|s| s.kind == cairn_sim::StructureKind::ChiefHut)
+        .count();
+    r.camp_net_km = camps
+        .values()
+        .map(|(a, b)| cairn_core::tiles_to_km((a.0 - b.0).hypot(a.1 - b.1)))
+        .collect();
     r
 }
 
@@ -272,7 +318,9 @@ fn print(rs: &[Report]) {
             }
         }
     }
-    let names = ["dort", "repos", "marche", "cueille", "boit", "abri", "chasse", "cultive", "combat"];
+    let names = [
+        "dort", "repos", "marche", "cueille", "boit", "abri", "chasse", "cultive", "combat",
+    ];
     for (s, sex) in ["femmes", "hommes"].iter().enumerate() {
         let per_day = |n: u64| 24.0 * n as f64 / adult_h[s].max(1) as f64;
         println!("\n## {sex} adultes — heures par jour et par adulte, selon l'heure (tous runs)");
@@ -281,12 +329,22 @@ fn print(rs: &[Report]) {
             let total: u64 = by_hour[s][h].iter().take(9).sum();
             println!(
                 "{h:>5}{}",
-                (0..9).map(|a| format!("{:>7.0}%", 100.0 * by_hour[s][h][a] as f64 / total.max(1) as f64)).collect::<String>()
+                (0..9)
+                    .map(|a| format!(
+                        "{:>7.0}%",
+                        100.0 * by_hour[s][h][a] as f64 / total.max(1) as f64
+                    ))
+                    .collect::<String>()
             );
         }
         let walk: u64 = (0..24).map(|h| by_hour[s][h][2]).sum();
         let sleep: u64 = (0..24).map(|h| by_hour[s][h][0]).sum();
-        println!("marche : {:.1} h/j ({:.1} km/j) ; sommeil : {:.1} h/j", per_day(walk), 4.0 * per_day(walk), per_day(sleep));
+        println!(
+            "marche : {:.1} h/j ({:.1} km/j) ; sommeil : {:.1} h/j",
+            per_day(walk),
+            4.0 * per_day(walk),
+            per_day(sleep)
+        );
         println!("marche par tâche (h/j) :");
         let mut v: Vec<_> = tasks[s].iter().collect();
         v.sort_by(|a, b| b.1.cmp(a.1));
@@ -294,14 +352,20 @@ fn print(rs: &[Report]) {
             println!("  {k:<18}{:>6.2}", per_day(*n));
         }
     }
-    let (k, hd, ad): (f32, u64, u64) = rs.iter().fold((0.0, 0, 0), |a, r| (a.0 + r.kills, a.1 + r.hunter_days, a.2 + r.adult_days));
+    let (k, hd, ad): (f32, u64, u64) = rs.iter().fold((0.0, 0, 0), |a, r| {
+        (a.0 + r.kills, a.1 + r.hunter_days, a.2 + r.adult_days)
+    });
     println!(
         "\n## chasse (tous runs) : {k:.0} têtes ; {hd} jours-chasseur sur {ad} jours-adulte ({:.0} %) ; {:.2} % de prise par jour-chasseur (Hadza : 1 à 3 %)",
         100.0 * hd as f64 / ad.max(1) as f64,
         100.0 * f64::from(k) / hd.max(1) as f64
     );
-    println!("\n## rendements des adultes (tous runs ; trajets compris ; kcal acquises, partagées ou non)");
-    println!("  Ache : ~1 200-1 340 kcal/h de sortie ; Hadza : gros gibier ~67-91 kcal/h pour la famille");
+    println!(
+        "\n## rendements des adultes (tous runs ; trajets compris ; kcal acquises, partagées ou non)"
+    );
+    println!(
+        "  Ache : ~1 200-1 340 kcal/h de sortie ; Hadza : gros gibier ~67-91 kcal/h pour la famille"
+    );
     for (s, sex) in ["femmes", "hommes"].iter().enumerate() {
         let (mut h, mut k, mut c) = ([0.0; 2], [0.0; 2], [0.0; 2]);
         let mut ah = 0u64;
@@ -325,7 +389,9 @@ fn print(rs: &[Report]) {
             per_day(k[0] + k[1])
         );
     }
-    println!("\n## foyers de clan, par run : chemin (km/an de clan), déplacement net médian (km), clans, huttes du chef, levées de camp (> 1 km en un jour), huttes bâties");
+    println!(
+        "\n## foyers de clan, par run : chemin (km/an de clan), déplacement net médian (km), clans, huttes du chef, levées de camp (> 1 km en un jour), huttes bâties"
+    );
     for r in rs {
         let mut net = r.camp_net_km.clone();
         net.sort_by(f64::total_cmp);
@@ -340,8 +406,12 @@ fn print(rs: &[Report]) {
             r.huts_built
         );
     }
-    println!("  (chasseurs-cueilleurs : ~160-175 km/an de déplacements résidentiels ; Batek : un camp tous les 8 j)");
-    println!("\n## par run : régime (latitude, heures de jour départ → fin) ; marche km/j femmes ; hommes ; sommeil dans le noir ; noir passé à dormir");
+    println!(
+        "  (chasseurs-cueilleurs : ~160-175 km/an de déplacements résidentiels ; Batek : un camp tous les 8 j)"
+    );
+    println!(
+        "\n## par run : régime (latitude, heures de jour départ → fin) ; marche km/j femmes ; hommes ; sommeil dans le noir ; noir passé à dormir"
+    );
     for r in rs {
         let km = |s: usize| {
             let w: u64 = (0..24).map(|h| r.by_hour[s][h][2]).sum();

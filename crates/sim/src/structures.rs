@@ -62,7 +62,9 @@ use cairn_core::km_to_tiles;
 
 /// Les structures qu'un clan peut bâtir. `repr(u8)` implicite via l'ordre :
 /// `Ord` sert au tri déterministe du registre.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub enum StructureKind {
     Hut,
     Granary,
@@ -166,16 +168,19 @@ pub struct Structure {
 /// du tout. `huts` est l'instantané `(x, y, clan)` des huttes existantes.
 pub fn hut_warmth(pos: (f64, f64), clan: Option<ClanId>, huts: &[(f64, f64, ClanId)]) -> f64 {
     let Some(clan) = clan else { return 0.0 };
-    let sheltered = huts.iter().any(|&(hx, hy, hc)| {
-        hc == clan && (pos.0 - hx).hypot(pos.1 - hy) <= HUT_RADIUS_TILES
-    });
+    let sheltered = huts
+        .iter()
+        .any(|&(hx, hy, hc)| hc == clan && (pos.0 - hx).hypot(pos.1 - hy) <= HUT_RADIUS_TILES);
     if sheltered { HUT_WARMTH_C } else { 0.0 }
 }
 
 /// Facteur de durée de vie de la réserve d'un clan : `GRANARY_KEEP_FACTOR`
 /// s'il a un grenier, 1 sinon.
 pub fn granary_keep_factor(clan: ClanId, structures: &[Structure]) -> f32 {
-    if structures.iter().any(|s| s.clan == clan && s.kind == StructureKind::Granary) {
+    if structures
+        .iter()
+        .any(|s| s.clan == clan && s.kind == StructureKind::Granary)
+    {
         GRANARY_KEEP_FACTOR
     } else {
         1.0
@@ -184,7 +189,9 @@ pub fn granary_keep_factor(clan: ClanId, structures: &[Structure]) -> f32 {
 
 /// Le clan a-t-il une palissade ? (lu par `social::update_relations`).
 pub fn has_palisade(clan: ClanId, structures: &[Structure]) -> bool {
-    structures.iter().any(|s| s.clan == clan && s.kind == StructureKind::Palisade)
+    structures
+        .iter()
+        .any(|s| s.clan == clan && s.kind == StructureKind::Palisade)
 }
 
 /// Passe quotidienne : mesure les pressions de chaque clan et fixe la
@@ -216,18 +223,26 @@ pub(crate) fn plan(sim: &mut Sim) {
     // Score de chaque agent (`oratoire × prestige`) : sert à lire celui du
     // chef de chaque clan — la pression qui fait bâtir la hutte du chef.
     let mut score: BTreeMap<u64, f32> = BTreeMap::new();
-    for (_, (id, skills, prestige)) in
-        sim.agents.query::<(&crate::agent::AgentId, &Skills, &Prestige)>().iter()
+    for (_, (id, skills, prestige)) in sim
+        .agents
+        .query::<(&crate::agent::AgentId, &Skills, &Prestige)>()
+        .iter()
     {
         score.insert(id.0, skills.oratory * prestige.0);
     }
 
     for clan in &mut sim.clans {
         let present = existing.get(&clan.id.0);
-        let mean_cold =
-            cold.get(&clan.id.0).map(|&(sum, n)| sum / n.max(1) as f32).unwrap_or(0.0);
+        let mean_cold = cold
+            .get(&clan.id.0)
+            .map(|&(sum, n)| sum / n.max(1) as f32)
+            .unwrap_or(0.0);
         let base_cap = STOCK_SCALE_PER_MEMBER * clan.members.len() as f32;
-        let storage = if base_cap > 0.0 { clan.stock / base_cap } else { 0.0 };
+        let storage = if base_cap > 0.0 {
+            clan.stock / base_cap
+        } else {
+            0.0
+        };
         let menace = threat.get(&clan.id.0).copied().unwrap_or(0.0);
         let chief_score = score.get(&clan.chief.0).copied().unwrap_or(0.0);
 
@@ -239,7 +254,11 @@ pub(crate) fn plan(sim: &mut Sim) {
             (StructureKind::Hut, mean_cold, COLD_PRESSURE_THRESHOLD),
             (StructureKind::Granary, storage, STORAGE_PRESSURE_THRESHOLD),
             (StructureKind::Palisade, menace, THREAT_PRESSURE_THRESHOLD),
-            (StructureKind::ChiefHut, chief_score, CHIEF_PRESTIGE_THRESHOLD),
+            (
+                StructureKind::ChiefHut,
+                chief_score,
+                CHIEF_PRESTIGE_THRESHOLD,
+            ),
         ];
         let mut best: Option<(StructureKind, f32)> = None;
         for (kind, pressure, threshold) in candidates {
@@ -339,7 +358,10 @@ mod tests {
         for _ in 0..4 {
             sim.spawn_agent(0.0, 0.0);
         }
-        for (_, (m, phys)) in sim.agents.query_mut::<(&mut ClanMembership, &mut Physiology)>() {
+        for (_, (m, phys)) in sim
+            .agents
+            .query_mut::<(&mut ClanMembership, &mut Physiology)>()
+        {
             m.0 = Some(ClanId(1));
             phys.cold = 0.5;
         }
@@ -366,7 +388,10 @@ mod tests {
     fn un_clan_sans_pression_ne_desire_rien() {
         let mut sim = Sim::new(WorldSeed(1), 64);
         sim.spawn_agent(0.0, 0.0);
-        for (_, (m, phys)) in sim.agents.query_mut::<(&mut ClanMembership, &mut Physiology)>() {
+        for (_, (m, phys)) in sim
+            .agents
+            .query_mut::<(&mut ClanMembership, &mut Physiology)>()
+        {
             m.0 = Some(ClanId(1));
             phys.cold = 0.05;
         }
@@ -384,7 +409,10 @@ mod tests {
         for _ in 0..4 {
             sim.spawn_agent(0.0, 0.0);
         }
-        for (_, (m, phys)) in sim.agents.query_mut::<(&mut ClanMembership, &mut Physiology)>() {
+        for (_, (m, phys)) in sim
+            .agents
+            .query_mut::<(&mut ClanMembership, &mut Physiology)>()
+        {
             m.0 = Some(ClanId(1));
             phys.cold = 0.5;
         }
@@ -397,7 +425,10 @@ mod tests {
             abandoned_since: None,
         });
         plan(&mut sim);
-        assert_eq!(sim.clans[0].desired, None, "une hutte déjà là ne se redésire pas");
+        assert_eq!(
+            sim.clans[0].desired, None,
+            "une hutte déjà là ne se redésire pas"
+        );
     }
 
     /// « Quoi bâtir » — un chef au fort prestige appelle la hutte du chef
@@ -412,8 +443,9 @@ mod tests {
         }
         // Le chef (AgentId(0), cf. `clan_with`) a un score bien au-dessus du
         // seuil ; les autres restent à zéro.
-        for (_, (id, skills, prestige)) in
-            sim.agents.query_mut::<(&AgentId, &mut Skills, &mut Prestige)>()
+        for (_, (id, skills, prestige)) in sim
+            .agents
+            .query_mut::<(&AgentId, &mut Skills, &mut Prestige)>()
         {
             if id.0 == 0 {
                 skills.oratory = 0.8;
@@ -446,7 +478,11 @@ mod tests {
             abandoned_since: None,
         });
         anchor_homes(&mut sim);
-        assert_eq!(sim.clans[0].home, (5000.0, -3000.0), "le foyer doit être figé sur la hutte du chef");
+        assert_eq!(
+            sim.clans[0].home,
+            (5000.0, -3000.0),
+            "le foyer doit être figé sur la hutte du chef"
+        );
     }
 
     /// Contre-épreuve : sans hutte du chef, `anchor_homes` ne touche pas au
@@ -458,7 +494,11 @@ mod tests {
         clan.home = (123.0, 456.0);
         sim.clans.push(clan);
         anchor_homes(&mut sim);
-        assert_eq!(sim.clans[0].home, (123.0, 456.0), "sans hutte, le foyer flottant reste inchangé");
+        assert_eq!(
+            sim.clans[0].home,
+            (123.0, 456.0),
+            "sans hutte, le foyer flottant reste inchangé"
+        );
     }
 
     /// Le cœur du correctif de persistance : quand le clan bâtisseur s'efface
@@ -479,8 +519,16 @@ mod tests {
             abandoned_since: None,
         });
         maintain(&mut sim, 10);
-        assert_eq!(sim.structures.len(), 1, "la structure ne doit pas disparaître : le lieu est tenu");
-        assert_eq!(sim.structures[0].clan, ClanId(2), "elle passe au clan qui contrôle sa tuile");
+        assert_eq!(
+            sim.structures.len(),
+            1,
+            "la structure ne doit pas disparaître : le lieu est tenu"
+        );
+        assert_eq!(
+            sim.structures[0].clan,
+            ClanId(2),
+            "elle passe au clan qui contrôle sa tuile"
+        );
     }
 
     /// Une structure que plus aucun clan ne revendient tombe en ruine — mais
@@ -499,12 +547,19 @@ mod tests {
             abandoned_since: None,
         });
         maintain(&mut sim, 100); // premier jour d'abandon constaté
-        assert_eq!(sim.structures.len(), 1, "un abandon tout frais ne ruine pas encore");
+        assert_eq!(
+            sim.structures.len(),
+            1,
+            "un abandon tout frais ne ruine pas encore"
+        );
         assert_eq!(sim.structures[0].abandoned_since, Some(100));
         maintain(&mut sim, 100 + STRUCTURE_DECAY_DAYS - 1);
         assert_eq!(sim.structures.len(), 1, "toujours dans le délai de grâce");
         maintain(&mut sim, 100 + STRUCTURE_DECAY_DAYS);
-        assert!(sim.structures.is_empty(), "passé le délai, la ruine emporte la structure");
+        assert!(
+            sim.structures.is_empty(),
+            "passé le délai, la ruine emporte la structure"
+        );
     }
 
     #[test]
@@ -512,24 +567,43 @@ mod tests {
         let hut = (0.0, 0.0, ClanId(1));
         let huts = [hut];
         // Membre du clan 1, juste à côté : réchauffé.
-        assert_eq!(hut_warmth((10.0, 0.0), Some(ClanId(1)), &huts), HUT_WARMTH_C);
+        assert_eq!(
+            hut_warmth((10.0, 0.0), Some(ClanId(1)), &huts),
+            HUT_WARMTH_C
+        );
         // Membre d'un autre clan, même position : rien.
         assert_eq!(hut_warmth((10.0, 0.0), Some(ClanId(2)), &huts), 0.0);
         // Membre du clan 1 mais hors de portée : rien.
-        assert_eq!(hut_warmth((HUT_RADIUS_TILES + 10.0, 0.0), Some(ClanId(1)), &huts), 0.0);
+        assert_eq!(
+            hut_warmth((HUT_RADIUS_TILES + 10.0, 0.0), Some(ClanId(1)), &huts),
+            0.0
+        );
         // Agent sans clan : rien.
         assert_eq!(hut_warmth((10.0, 0.0), None, &huts), 0.0);
     }
 
     #[test]
     fn le_grenier_allonge_la_vie_de_la_reserve() {
-        let st = |kind, clan| Structure { kind, clan, pos: (0.0, 0.0), built_tick: 0, abandoned_since: None };
+        let st = |kind, clan| Structure {
+            kind,
+            clan,
+            pos: (0.0, 0.0),
+            built_tick: 0,
+            abandoned_since: None,
+        };
         let structures = [
             st(StructureKind::Granary, ClanId(1)),
             st(StructureKind::Hut, ClanId(1)),
             st(StructureKind::Granary, ClanId(2)),
         ];
-        assert_eq!(granary_keep_factor(ClanId(1), &structures), GRANARY_KEEP_FACTOR);
-        assert_eq!(granary_keep_factor(ClanId(3), &structures), 1.0, "un clan sans grenier ne garde pas mieux");
+        assert_eq!(
+            granary_keep_factor(ClanId(1), &structures),
+            GRANARY_KEEP_FACTOR
+        );
+        assert_eq!(
+            granary_keep_factor(ClanId(3), &structures),
+            1.0,
+            "un clan sans grenier ne garde pas mieux"
+        );
     }
 }

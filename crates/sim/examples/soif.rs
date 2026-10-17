@@ -17,7 +17,10 @@
 use std::collections::BTreeMap;
 
 use cairn_core::{TICKS_PER_DAY, WorldSeed, km_to_tiles, tiles_to_km};
-use cairn_sim::{AgentId, Behavior, ClanMembership, DeathCause, Demographics, Kinship, Memory, Physiology, Position, Sim, fauna, scenario};
+use cairn_sim::{
+    AgentId, Behavior, ClanMembership, DeathCause, Demographics, Kinship, Memory, Physiology,
+    Position, Sim, fauna, scenario,
+};
 use cairn_worldgen::Biome;
 
 #[derive(Default, Clone)]
@@ -59,7 +62,13 @@ fn bucket(km: Option<f64>) -> String {
 }
 
 fn task_name(b: &Behavior) -> String {
-    b.task.map_or("(aucune)".into(), |t| format!("{:?}", t.kind).split('(').next().unwrap_or("").to_string())
+    b.task.map_or("(aucune)".into(), |t| {
+        format!("{:?}", t.kind)
+            .split('(')
+            .next()
+            .unwrap_or("")
+            .to_string()
+    })
 }
 
 fn main() {
@@ -77,17 +86,24 @@ fn main() {
             jobs.push((seed, cold));
         }
     }
-    println!("# soif — {days} jours, départ au jour {start_day}, seeds {seeds:?}, {} runs", jobs.len());
+    println!(
+        "# soif — {days} jours, départ au jour {start_day}, seeds {seeds:?}, {} runs",
+        jobs.len()
+    );
     let queue = std::sync::Mutex::new(jobs.into_iter().enumerate().collect::<Vec<_>>());
     let results = std::sync::Mutex::new(Vec::new());
     std::thread::scope(|scope| {
         for _ in 0..threads {
-            scope.spawn(|| loop {
-                let job = queue.lock().unwrap().pop();
-                let Some((idx, (seed, cold))) = job else { break };
-                let r = run(seed, cold, days, start_day);
-                eprintln!("  fini : {}", r.label);
-                results.lock().unwrap().push((idx, r));
+            scope.spawn(|| {
+                loop {
+                    let job = queue.lock().unwrap().pop();
+                    let Some((idx, (seed, cold))) = job else {
+                        break;
+                    };
+                    let r = run(seed, cold, days, start_day);
+                    eprintln!("  fini : {}", r.label);
+                    results.lock().unwrap().push((idx, r));
+                }
             });
         }
     });
@@ -102,20 +118,31 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
     scenario::start_on_day(&mut sim, start_day);
     let seed_point = (km_to_tiles(1500.0) as i64, km_to_tiles(2100.0) as i64);
     let home = if cold {
-        scenario::find_home_where(&mut sim, seed_point, 1.0..=5.0, &[Biome::TemperateForest, Biome::Taiga, Biome::Grassland])
-            .unwrap_or_else(|| scenario::find_home(&mut sim, seed_point))
+        scenario::find_home_where(
+            &mut sim,
+            seed_point,
+            1.0..=5.0,
+            &[Biome::TemperateForest, Biome::Taiga, Biome::Grassland],
+        )
+        .unwrap_or_else(|| scenario::find_home(&mut sim, seed_point))
     } else {
         scenario::find_home(&mut sim, seed_point)
     };
     scenario::populate(&mut sim, home, n_agents, 2);
     for i in 0..4i64 {
         let angle = i as f64 * 1.57;
-        let (x, y) = (home.0 + (angle.cos() * km_to_tiles(4.0)) as i64, home.1 + (angle.sin() * km_to_tiles(4.0)) as i64);
+        let (x, y) = (
+            home.0 + (angle.cos() * km_to_tiles(4.0)) as i64,
+            home.1 + (angle.sin() * km_to_tiles(4.0)) as i64,
+        );
         if sim.world.tile(x, y).is_walkable() {
             sim.spawn_pack(x as f64, y as f64, fauna::PACK_START);
         }
     }
-    let mut r = Report { label: format!("{} {seed}", if cold { "froid" } else { "tempéré" }), ..Report::default() };
+    let mut r = Report {
+        label: format!("{} {seed}", if cold { "froid" } else { "tempéré" }),
+        ..Report::default()
+    };
     let mut last: BTreeMap<u64, String> = BTreeMap::new();
     let mut seen_deaths = 0usize;
     for _ in 0..days * TICKS_PER_DAY {
@@ -132,12 +159,30 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
             .agents
             .query::<(&AgentId, &Physiology)>()
             .iter()
-            .map(|(_, (id, p))| (id.0, (p.reserves_kcal, p.health, cairn_sim::demography::milk_flow(p))))
+            .map(|(_, (id, p))| {
+                (
+                    id.0,
+                    (
+                        p.reserves_kcal,
+                        p.health,
+                        cairn_sim::demography::milk_flow(p),
+                    ),
+                )
+            })
             .collect();
         let homes: BTreeMap<u64, (f64, f64)> = sim.clans.iter().map(|c| (c.id.0, c.home)).collect();
         for (_, (id, demo, kin, phys, pos, b, mem, cm)) in sim
             .agents
-            .query::<(&AgentId, &Demographics, &Kinship, &Physiology, &Position, &Behavior, &Memory, &ClanMembership)>()
+            .query::<(
+                &AgentId,
+                &Demographics,
+                &Kinship,
+                &Physiology,
+                &Position,
+                &Behavior,
+                &Memory,
+                &ClanMembership,
+            )>()
             .iter()
         {
             let age = demo.age_years(tick);
@@ -154,20 +199,31 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
             let d_spring = mem
                 .nearest_known_spring((pos.x, pos.y))
                 .map(|s| tiles_to_km((s.0 as f64 - pos.x).hypot(s.1 as f64 - pos.y)));
-            let d_home = cm.0.and_then(|c| homes.get(&c.0)).map(|h| tiles_to_km((h.0 - pos.x).hypot(h.1 - pos.y)));
+            let d_home =
+                cm.0.and_then(|c| homes.get(&c.0))
+                    .map(|h| tiles_to_km((h.0 - pos.x).hypot(h.1 - pos.y)));
             let task = task_name(b);
-            let age_key = if age < 3.0 { "1-3 ans (porté)" } else { "3-4 ans" };
+            let age_key = if age < 3.0 {
+                "1-3 ans (porté)"
+            } else {
+                "3-4 ans"
+            };
             *r.by_age.entry(age_key.into()).or_default() += 1;
-            let ms = kin.mother.and_then(|m| bodies.get(&m.0)).map_or("(sans mère)".to_string(), |&(res, health, milk)| {
-                format!(
-                    "réserves {} ; santé {} ; lait {}",
-                    if res <= 0.0 { "vides" } else { "non vides" },
-                    if health < 0.5 { "< 0,5" } else { "≥ 0,5" },
-                    if milk < 0.6 { "< 0,6" } else { "≥ 0,6" }
-                )
-            });
+            let ms = kin.mother.and_then(|m| bodies.get(&m.0)).map_or(
+                "(sans mère)".to_string(),
+                |&(res, health, milk)| {
+                    format!(
+                        "réserves {} ; santé {} ; lait {}",
+                        if res <= 0.0 { "vides" } else { "non vides" },
+                        if health < 0.5 { "< 0,5" } else { "≥ 0,5" },
+                        if milk < 0.6 { "< 0,6" } else { "≥ 0,6" }
+                    )
+                },
+            );
             *r.mother_state.entry(ms).or_default() += 1;
-            *r.by_task.entry((task.clone(), mother_task.clone())).or_default() += 1;
+            *r.by_task
+                .entry((task.clone(), mother_task.clone()))
+                .or_default() += 1;
             *r.to_mother.entry(bucket(d_mother)).or_default() += 1;
             *r.to_spring.entry(bucket(d_spring)).or_default() += 1;
             *r.to_home.entry(bucket(d_home)).or_default() += 1;
@@ -189,7 +245,11 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
                 .filter(|(_, (d, _))| d.age_years(tick) < 3.0)
                 .filter_map(|(_, (_, k))| k.mother.map(|m| m.0))
                 .collect();
-            for (_, (id, phys, carrying)) in sim.agents.query::<(&AgentId, &Physiology, &cairn_sim::agent::Carrying)>().iter() {
+            for (_, (id, phys, carrying)) in sim
+                .agents
+                .query::<(&AgentId, &Physiology, &cairn_sim::agent::Carrying)>()
+                .iter()
+            {
                 if mothers.contains(&id.0) {
                     r.mother_days += 1;
                     r.mother_empty += u64::from(phys.reserves_kcal <= 0.0);
@@ -212,7 +272,11 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
 
 fn print(rs: &[Report]) {
     let mut by_task: BTreeMap<(String, String), u64> = BTreeMap::new();
-    let (mut m, mut s, mut h): (BTreeMap<String, u64>, BTreeMap<String, u64>, BTreeMap<String, u64>) = Default::default();
+    let (mut m, mut s, mut h): (
+        BTreeMap<String, u64>,
+        BTreeMap<String, u64>,
+        BTreeMap<String, u64>,
+    ) = Default::default();
     let (mut ages, mut ms): (BTreeMap<String, u64>, BTreeMap<String, u64>) = Default::default();
     let mut total = 0u64;
     let mut child_h = 0u64;
@@ -222,26 +286,54 @@ fn print(rs: &[Report]) {
             *by_task.entry(k.clone()).or_default() += v;
             total += v;
         }
-        for (src, dst) in [(&r.to_mother, &mut m), (&r.to_spring, &mut s), (&r.to_home, &mut h), (&r.by_age, &mut ages), (&r.mother_state, &mut ms)] {
+        for (src, dst) in [
+            (&r.to_mother, &mut m),
+            (&r.to_spring, &mut s),
+            (&r.to_home, &mut h),
+            (&r.by_age, &mut ages),
+            (&r.mother_state, &mut ms),
+        ] {
             for (k, v) in src {
                 *dst.entry(k.clone()).or_default() += v;
             }
         }
     }
-    println!("\n## heures-enfant (1-4 ans) en soif saturée : {total} sur {child_h} ({:.2} %)", 100.0 * total as f64 / child_h.max(1) as f64);
+    println!(
+        "\n## heures-enfant (1-4 ans) en soif saturée : {total} sur {child_h} ({:.2} %)",
+        100.0 * total as f64 / child_h.max(1) as f64
+    );
     println!("\n## par (tâche de l'enfant, tâche de la mère), les 15 premières");
     let mut v: Vec<_> = by_task.iter().collect();
     v.sort_by(|a, b| b.1.cmp(a.1));
     for ((c, mo), n) in v.iter().take(15) {
-        println!("  {c:<16} {mo:<18}{:>6.1} %", 100.0 * **n as f64 / total.max(1) as f64);
+        println!(
+            "  {c:<16} {mo:<18}{:>6.1} %",
+            100.0 * **n as f64 / total.max(1) as f64
+        );
     }
-    for (title, map) in [("âge de l'enfant", &ages), ("état de la mère", &ms), ("distance à la mère", &m), ("distance à la source connue la plus proche", &s), ("distance au foyer", &h)] {
+    for (title, map) in [
+        ("âge de l'enfant", &ages),
+        ("état de la mère", &ms),
+        ("distance à la mère", &m),
+        ("distance à la source connue la plus proche", &s),
+        ("distance au foyer", &h),
+    ] {
         println!("\n## {title} (km)");
         for (k, n) in map {
-            println!("  {k:<10}{:>6.1} %", 100.0 * *n as f64 / total.max(1) as f64);
+            println!(
+                "  {k:<10}{:>6.1} %",
+                100.0 * *n as f64 / total.max(1) as f64
+            );
         }
     }
-    let (md, me, ml, mh) = rs.iter().fold((0u64, 0u64, 0.0, 0.0), |a, r| (a.0 + r.mother_days, a.1 + r.mother_empty, a.2 + r.mother_load, a.3 + r.mother_hunger));
+    let (md, me, ml, mh) = rs.iter().fold((0u64, 0u64, 0.0, 0.0), |a, r| {
+        (
+            a.0 + r.mother_days,
+            a.1 + r.mother_empty,
+            a.2 + r.mother_load,
+            a.3 + r.mother_hunger,
+        )
+    });
     println!(
         "\n## mères d'un enfant de moins de 3 ans, à minuit : {md} jours-mère ; réserves vides {:.2} % ; charge moyenne {:.2} point ; faim moyenne {:.3}",
         100.0 * me as f64 / md.max(1) as f64,

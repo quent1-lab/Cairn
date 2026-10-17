@@ -24,3 +24,27 @@ par (moi, sous-agent `sourceur`) · lu en entier ou de seconde main.
   trois générations, des cycles de 60-80 ans reconnus. https://www.cclmportal.ca/node/4141
 - Non trouvé : forme et demi-vie de l'oubli des lieux, facteur du danger ou de la
   récompense, nombre d'années sur lesquelles porte la mémoire des ressources saisonnières.
+
+## Ce qu'on retient d'un territoire (sous-agent `sourceur`, 2026-10-17, soir ; tout de seconde main)
+- !Kung (Dobe) : 105 espèces de plantes comestibles connues. Lee 1979, via https://en.wikipedia.org/wiki/Richard_Borshay_Lee
+- Mbuti/Efe (Ituri) : > 750 espèces végétales et ~60 espèces de mammifères nommées et
+  connues. Terashima, https://repository.kulib.kyoto-u.ac.jp/dspace/bitstream/2433/68429/1/ASM_S_28_7.pdf
+- Hadza : 47 plantes consommées (inventaire du groupe, pas par personne). Crittenden et al.,
+  digitalscholarship.unlv.edu/anthro_fac_articles/342
+- Aborigènes australiens : calendriers jusqu'à 8 saisons nommées d'après la ressource
+  disponible. https://www.csiro.au/Indigenous-calendars
+- Hadza, GPS (Wood et al. 2021, Nat. Hum. Behav. 5:436-446) : 179 personnes de 2 à 84 ans ;
+  les hommes parcourent ~3,9 fois la surface des femmes ; l'écart de mobilité apparaît vers
+  6 ans, net à 10, maximal à 15. https://pmc.ncbi.nlm.nih.gov/articles/PMC8060163/ — **lu
+  par résumé automatique, chiffres fins non fiables, à revérifier**.
+- Hadza : l'enseignement entre enfants plus fréquent qu'adulte-enfant (35 enfants de 3 à 18
+  ans). Lew-Levy et al. 2020, https://www.eva.mpg.de/fileadmin/content_files/ecology/pdfs/Lew-Levy_et_al._2020-child-child_teaching.pdf
+- Baka (Cameroun) : territoire de chasse cartographié 205 ± 109 km² par village (77-352).
+  Hattori et al. 2021, https://e-space.mmu.ac.uk/627252/1/s41598-021-83223-y.pdf
+- Inuinnait (Naujaat) : ~650 toponymes traditionnels sur > 130 000 km².
+  https://ica-abs.copernicus.org/articles/10/225/2025/ica-abs-10-225-2025.pdf
+- Hadza : les tubercules sont l'aliment de repli, plus mangés quand miel, baies et baobab
+  manquent (aliment de disette, pas lieu). https://par.nsf.gov/servlets/purl/10567853
+- **Non trouvé** : un nombre de *lieux* retenus par personne ; la durée du souvenir d'un lieu
+  précis ; l'écart territoire connu / fréquenté ; des lieux-refuges gardés pour les mauvaises
+  années (seulement la notion d'aliment de repli).

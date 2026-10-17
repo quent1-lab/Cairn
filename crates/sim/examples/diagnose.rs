@@ -22,9 +22,7 @@ use std::collections::BTreeMap;
 
 use cairn_core::{TICKS_PER_DAY, TICKS_PER_YEAR, WorldSeed, km_to_tiles};
 use cairn_sim::social::{BOND_THRESHOLD, RESIDENCE_RADIUS_TILES};
-use cairn_sim::{
-    AgentId, ClanEventKind, ClanId, Knowledge, Sim, TechId, scenario,
-};
+use cairn_sim::{AgentId, ClanEventKind, ClanId, Knowledge, Sim, TechId, scenario};
 use cairn_worldgen::Biome;
 
 fn main() {
@@ -118,7 +116,12 @@ fn main() {
             prev = Some((big.id, big.members.clone()));
         }
         if (sim.time.tick / TICKS_PER_DAY).is_multiple_of(360) {
-            let strong = sim.social.bonds.values().filter(|&&w| w >= BOND_THRESHOLD).count();
+            let strong = sim
+                .social
+                .bonds
+                .values()
+                .filter(|&&w| w >= BOND_THRESHOLD)
+                .count();
             bond_samples.push((
                 sim.time.tick / TICKS_PER_YEAR,
                 sim.social.bonds.len(),
@@ -127,10 +130,24 @@ fn main() {
         }
     }
 
-    report(&sim, seed, years, &min_bearers, &bond_samples, &merge_distances, &coexist_distances);
+    report(
+        &sim,
+        seed,
+        years,
+        &min_bearers,
+        &bond_samples,
+        &merge_distances,
+        &coexist_distances,
+    );
 
     println!("\n— 6. Le plus gros clan change-t-il de gens, ou seulement de nom ? —");
-    let moyenne = |v: &[f64]| if v.is_empty() { 0.0 } else { v.iter().sum::<f64>() / v.len() as f64 };
+    let moyenne = |v: &[f64]| {
+        if v.is_empty() {
+            0.0
+        } else {
+            v.iter().sum::<f64>() / v.len() as f64
+        }
+    };
     println!(
         "  recouvrement moyen d'un jour à l'autre : {:.3}   (1,0 = exactement les mêmes gens)",
         moyenne(&jaccards)
@@ -174,11 +191,24 @@ fn report(
     let d = &sim.clan_diagnostics;
     let rejects = d.too_small + d.low_cohesion + d.scattered;
     let total = d.validated + rejects;
-    println!("\n=== DIAGNOSTIC — seed {seed}, {years} ans, {} habitants ===", sim.population());
+    println!(
+        "\n=== DIAGNOSTIC — seed {seed}, {years} ans, {} habitants ===",
+        sim.population()
+    );
 
     println!("\n— 1. Pourquoi un groupe n'est-il pas un clan ? ({total} verdicts) —");
-    let pct = |n: u64| if total > 0 { 100.0 * n as f64 / total as f64 } else { 0.0 };
-    println!("  validés          {:>8}  ({:.1} %)", d.validated, pct(d.validated));
+    let pct = |n: u64| {
+        if total > 0 {
+            100.0 * n as f64 / total as f64
+        } else {
+            0.0
+        }
+    };
+    println!(
+        "  validés          {:>8}  ({:.1} %)",
+        d.validated,
+        pct(d.validated)
+    );
     println!(
         "  trop petits      {:>8}  ({:.1} %)   effectif moyen {:.1}  [seuil : 8]",
         d.too_small,
@@ -246,15 +276,25 @@ fn report(
             sim.clans.len(),
         );
         let under_year = lifespans.iter().filter(|&&l| l < 1.0).count();
-        println!("  {:.0} % n'atteignent pas un an", 100.0 * under_year as f64 / n as f64);
+        println!(
+            "  {:.0} % n'atteignent pas un an",
+            100.0 * under_year as f64 / n as f64
+        );
     }
 
     println!("\n— 3. Les liens sociaux tiennent-ils ? —");
-    println!("  {:>4}  {:>8}  {:>8}  {:>7}", "an", "liens", "≥ seuil", "part");
+    println!(
+        "  {:>4}  {:>8}  {:>8}  {:>7}",
+        "an", "liens", "≥ seuil", "part"
+    );
     for &(year, all, strong) in bond_samples {
         println!(
             "  {year:>4}  {all:>8}  {strong:>8}  {:>6.1} %",
-            if all > 0 { 100.0 * strong as f64 / all as f64 } else { 0.0 }
+            if all > 0 {
+                100.0 * strong as f64 / all as f64
+            } else {
+                0.0
+            }
         );
     }
 
@@ -288,7 +328,7 @@ fn report(
     match quantiles(&mut coexist) {
         Some((p10, med, p90)) => println!(
             "  distance entre peuples coexistants: médiane {med:.2} km  (p10 {p10:.2}, p90 {p90:.2})",
-            ),
+        ),
         None => println!("  jamais deux peuples à la fois"),
     }
     println!(
@@ -302,7 +342,10 @@ fn report(
         if matches!(e.kind, cairn_sim::TechEventKind::Discovered)
             && let Some(agent) = e.agent
         {
-            discoveries.entry(e.tech.0).or_default().push((e.tick, e.clan, agent));
+            discoveries
+                .entry(e.tech.0)
+                .or_default()
+                .push((e.tick, e.clan, agent));
         }
     }
     for (tech, list) in &discoveries {

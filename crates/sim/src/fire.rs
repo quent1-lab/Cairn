@@ -102,8 +102,8 @@ pub struct Fire {
 /// paramètre que le ciel décide si le feu est possible — et donc, in fine, si un
 /// peuple sans silex pourra un jour voir brûler.
 fn is_flammable(tile: &Tile, humidity_shift: f32) -> bool {
-    let humidity =
-        (f32::from(tile.humidity) + humidity_shift * crate::weather::HUMIDITY_EFFECT).clamp(0.0, 255.0);
+    let humidity = (f32::from(tile.humidity) + humidity_shift * crate::weather::HUMIDITY_EFFECT)
+        .clamp(0.0, 255.0);
     tile.is_walkable()
         && tile.biomass >= FUEL_MIN_BIOMASS
         && humidity <= f32::from(DRY_MAX_HUMIDITY)
@@ -123,7 +123,11 @@ pub(crate) fn ignite_at(sim: &mut Sim, pos: (f64, f64)) -> bool {
     if !is_flammable(&tile, shift) {
         return false;
     }
-    sim.fires.push(Fire { pos, radius: FIRE_START_RADIUS_TILES, age_days: 0 });
+    sim.fires.push(Fire {
+        pos,
+        radius: FIRE_START_RADIUS_TILES,
+        age_days: 0,
+    });
     true
 }
 
@@ -145,7 +149,8 @@ fn update_fires(sim: &mut Sim) {
     // Croissance, puis combustion : chaque foyer met à zéro la biomasse de son
     // disque (le `tile_mut` marque le chunk sale — l'écologie le fera repousser).
     for i in 0..sim.fires.len() {
-        sim.fires[i].radius = (sim.fires[i].radius + FIRE_GROWTH_PER_DAY_TILES).min(FIRE_MAX_RADIUS_TILES);
+        sim.fires[i].radius =
+            (sim.fires[i].radius + FIRE_GROWTH_PER_DAY_TILES).min(FIRE_MAX_RADIUS_TILES);
         let f = sim.fires[i];
         burn_disk(&mut sim.world, f.pos, f.radius);
     }
@@ -163,14 +168,19 @@ fn update_fires(sim: &mut Sim) {
     }
 
     // Exposition : tout agent à portée de vue d'un feu voit le feu.
-    let fires: Vec<(f64, f64, f64)> = sim.fires.iter().map(|f| (f.pos.0, f.pos.1, f.radius)).collect();
+    let fires: Vec<(f64, f64, f64)> = sim
+        .fires
+        .iter()
+        .map(|f| (f.pos.0, f.pos.1, f.radius))
+        .collect();
     let mut discovering: BTreeSet<u64> = BTreeSet::new();
-    for (_, (pos, exposures, membership)) in
-        sim.agents.query_mut::<(&Position, &mut Exposures, &ClanMembership)>()
+    for (_, (pos, exposures, membership)) in sim
+        .agents
+        .query_mut::<(&Position, &mut Exposures, &ClanMembership)>()
     {
-        let seen = fires.iter().any(|&(fx, fy, r)| {
-            (pos.x - fx).hypot(pos.y - fy) <= r + FIRE_SIGHT_MARGIN_TILES
-        });
+        let seen = fires
+            .iter()
+            .any(|&(fx, fy, r)| (pos.x - fx).hypot(pos.y - fy) <= r + FIRE_SIGHT_MARGIN_TILES);
         if seen {
             exposures.expose(Exposure::Fire);
             if let Some(clan) = membership.0
@@ -231,14 +241,19 @@ fn try_ignite(sim: &mut Sim) {
     if rng.next_f64() >= FIRE_IGNITION_CHANCE_PER_DAY {
         return;
     }
-    let anchors: Vec<(f64, f64)> =
-        sim.agents.query::<&Position>().iter().map(|(_, p)| (p.x, p.y)).collect();
+    let anchors: Vec<(f64, f64)> = sim
+        .agents
+        .query::<&Position>()
+        .iter()
+        .map(|(_, p)| (p.x, p.y))
+        .collect();
     if anchors.is_empty() {
         return;
     }
     let anchor = anchors[(rng.next_u32() as usize) % anchors.len()];
     let angle = rng.next_f64() * std::f64::consts::TAU;
-    let dist = FIRE_IGNITION_MIN_TILES + rng.next_f64() * (FIRE_IGNITION_MAX_TILES - FIRE_IGNITION_MIN_TILES);
+    let dist = FIRE_IGNITION_MIN_TILES
+        + rng.next_f64() * (FIRE_IGNITION_MAX_TILES - FIRE_IGNITION_MIN_TILES);
     let pos = (anchor.0 + angle.cos() * dist, anchor.1 + angle.sin() * dist);
     // Rien dans la Chronique ici : un départ de feu n'est pas un fait. Il en
     // devient un le jour où un peuple le voit pour la première fois — c'est là
@@ -278,14 +293,22 @@ mod tests {
         let near = sim.spawn_agent(fx as f64 + 0.5, fy as f64 + 0.5);
         let far = sim.spawn_agent(fx as f64 + 100_000.0, fy as f64 + 0.5);
         // On allume à la main (l'ignition aléatoire est testée à part).
-        sim.fires.push(Fire { pos: (fx as f64 + 0.5, fy as f64 + 0.5), radius: FIRE_START_RADIUS_TILES, age_days: 0 });
+        sim.fires.push(Fire {
+            pos: (fx as f64 + 0.5, fy as f64 + 0.5),
+            radius: FIRE_START_RADIUS_TILES,
+            age_days: 0,
+        });
         // Quelques jours de feu.
         for _ in 0..FIRE_DURATION_DAYS {
             sim.time.tick += TICKS_PER_DAY;
             update_fires(&mut sim);
         }
         // La biomasse du foyer est consumée.
-        assert_eq!(sim.world.tile(fx, fy).biomass, 0, "le fourrage doit avoir brûlé");
+        assert_eq!(
+            sim.world.tile(fx, fy).biomass,
+            0,
+            "le fourrage doit avoir brûlé"
+        );
         // Le feu s'est éteint après sa durée de vie.
         assert!(sim.fires.is_empty(), "le feu doit finir par s'éteindre");
         // L'agent proche a vu le feu ; le lointain non.
@@ -327,9 +350,17 @@ mod tests {
         });
 
         // Premier incendie sous leurs yeux : cela fait date.
-        sim.fires.push(Fire { pos: (0.0, 0.0), radius: FIRE_START_RADIUS_TILES, age_days: 0 });
+        sim.fires.push(Fire {
+            pos: (0.0, 0.0),
+            radius: FIRE_START_RADIUS_TILES,
+            age_days: 0,
+        });
         update_fires(&mut sim);
-        assert_eq!(sim.chronicle.len(), 1, "le premier feu vu entre dans la Chronique");
+        assert_eq!(
+            sim.chronicle.len(),
+            1,
+            "le premier feu vu entre dans la Chronique"
+        );
         assert!(matches!(
             sim.chronicle[0].kind,
             crate::chronicle::EventKind::FireWitnessed { clan } if clan == ClanId(1)
@@ -337,10 +368,18 @@ mod tests {
 
         // Les suivants sont du climat, plus de l'histoire.
         for _ in 0..5 {
-            sim.fires.push(Fire { pos: (0.0, 0.0), radius: FIRE_START_RADIUS_TILES, age_days: 0 });
+            sim.fires.push(Fire {
+                pos: (0.0, 0.0),
+                radius: FIRE_START_RADIUS_TILES,
+                age_days: 0,
+            });
             update_fires(&mut sim);
         }
-        assert_eq!(sim.chronicle.len(), 1, "les incendies suivants ne se racontent plus");
+        assert_eq!(
+            sim.chronicle.len(),
+            1,
+            "les incendies suivants ne se racontent plus"
+        );
     }
 
     #[test]
@@ -356,16 +395,58 @@ mod tests {
             biomass: 120,
             flags: crate::tile::TileFlags::default(),
         };
-        assert!(is_flammable(&dry_fuel, 0.0), "savane sèche et fournie : inflammable");
-        assert!(!is_flammable(&Tile { humidity: 200, ..dry_fuel }, 0.0), "trop humide");
-        assert!(!is_flammable(&Tile { biomass: 10, ..dry_fuel }, 0.0), "pas assez de combustible");
-        assert!(!is_flammable(&Tile { temperature: -5.0, ..dry_fuel }, 0.0), "trop froid");
+        assert!(
+            is_flammable(&dry_fuel, 0.0),
+            "savane sèche et fournie : inflammable"
+        );
+        assert!(
+            !is_flammable(
+                &Tile {
+                    humidity: 200,
+                    ..dry_fuel
+                },
+                0.0
+            ),
+            "trop humide"
+        );
+        assert!(
+            !is_flammable(
+                &Tile {
+                    biomass: 10,
+                    ..dry_fuel
+                },
+                0.0
+            ),
+            "pas assez de combustible"
+        );
+        assert!(
+            !is_flammable(
+                &Tile {
+                    temperature: -5.0,
+                    ..dry_fuel
+                },
+                0.0
+            ),
+            "trop froid"
+        );
         // Et le ciel du jour fait basculer ce même sol, dans les deux sens : une
         // averse le détrempe, une sécheresse rend inflammable ce qui ne l'était
         // pas. C'est par là, et seulement par là, que la météo touche le feu.
-        assert!(!is_flammable(&dry_fuel, 1.0), "sous l'averse, la savane ne prend plus");
-        let trop_humide = Tile { humidity: 150, ..dry_fuel };
-        assert!(!is_flammable(&trop_humide, 0.0), "sol humide : ne prend pas");
-        assert!(is_flammable(&trop_humide, -1.0), "la sécheresse le rend inflammable");
+        assert!(
+            !is_flammable(&dry_fuel, 1.0),
+            "sous l'averse, la savane ne prend plus"
+        );
+        let trop_humide = Tile {
+            humidity: 150,
+            ..dry_fuel
+        };
+        assert!(
+            !is_flammable(&trop_humide, 0.0),
+            "sol humide : ne prend pas"
+        );
+        assert!(
+            is_flammable(&trop_humide, -1.0),
+            "la sécheresse le rend inflammable"
+        );
     }
 }

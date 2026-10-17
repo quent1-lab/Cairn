@@ -78,7 +78,10 @@ fn niveau1(seed: u64, days: u64, cap: usize) -> (Releve, u64, usize) {
     }
     let generated = sim.world.generated;
     let loaded = sim.world.loaded();
-    let values = written.iter().map(|&(x, y)| ((x, y), sim.world.tile(x, y).biomass)).collect();
+    let values = written
+        .iter()
+        .map(|&(x, y)| ((x, y), sim.world.tile(x, y).biomass))
+        .collect();
     (values, generated, loaded)
 }
 
@@ -131,12 +134,17 @@ fn main() {
     let (a, gen_a, loaded_a) = niveau1(seed, days, large);
     println!(
         "  grande capacité : {gen_a} chunks générés, {loaded_a} résidents ⇒ {}",
-        if gen_a as usize == loaded_a { "aucune éviction (témoin valide)" } else { "ÉVICTIONS — témoin invalide" }
+        if gen_a as usize == loaded_a {
+            "aucune éviction (témoin valide)"
+        } else {
+            "ÉVICTIONS — témoin invalide"
+        }
     );
     let (b, gen_b, loaded_b) = niveau1(seed, days, small);
     println!("  petite capacité : {gen_b} chunks générés, {loaded_b} résidents");
     let n = a.len();
-    let (mut differ, mut neg, mut sum_abs, mut max_abs, mut sum_signed) = (0usize, 0usize, 0i64, 0i64, 0i64);
+    let (mut differ, mut neg, mut sum_abs, mut max_abs, mut sum_signed) =
+        (0usize, 0usize, 0i64, 0i64, 0i64);
     let mut hist = [0usize; 6]; // |Δ| : 1, 2-6, 7-20, 21-50, 51-100, >100
     for ((_, va), (_, vb)) in a.iter().zip(&b) {
         let d = i64::from(*vb) - i64::from(*va);
@@ -182,7 +190,9 @@ fn main() {
     }
 
     if days2 > 0 {
-        println!("\n══ NIVEAU 2 — simulation sans faune · 40 humains · {days2} j · capacités 512 / 16384");
+        println!(
+            "\n══ NIVEAU 2 — simulation sans faune · 40 humains · {days2} j · capacités 512 / 16384"
+        );
         let s = niveau2(seed, days2, 512);
         let l = niveau2(seed, days2, 16384);
         let first = s.iter().zip(&l).position(|(x, y)| x.0 != y.0);
@@ -197,7 +207,11 @@ fn main() {
                     "  jour {d:>3} : population {} / {} · positions {}",
                     s[i].1,
                     l[i].1,
-                    if s[i].0 == l[i].0 { "identiques" } else { "différentes" }
+                    if s[i].0 == l[i].0 {
+                        "identiques"
+                    } else {
+                        "différentes"
+                    }
                 );
             }
         }

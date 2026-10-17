@@ -269,8 +269,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::agent::{AgentId, Position, Prestige};
 use crate::chronicle::EventKind;
-use crate::fauna::Herd;
 use crate::demography::{Kinship, Traits, find_human};
+use crate::fauna::Herd;
 use crate::memory::TALK_RADIUS_TILES;
 use crate::sim::Sim;
 use crate::skills::{self, Skills};
@@ -510,7 +510,9 @@ const TENSION_DECAY_RATE: f32 = 0.08;
 const TENSION_FORGET_THRESHOLD: f32 = 0.02;
 
 /// Identifiant stable d'un clan, monotone — comme `AgentId`/`FaunaId`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct ClanId(pub u64);
 
 /// Un clan détecté : identité, membres, **territoire** (BRIEF §5.1) et
@@ -607,7 +609,9 @@ pub enum ClanEventKind {
     /// vivent désormais sous une autre bannière. Distinguer ce cas de la
     /// dissolution n'est pas cosmétique : la plupart des « extinctions »
     /// mesurées étaient en réalité des fusions (voir `detect_clans`).
-    Merged { into: ClanId },
+    Merged {
+        into: ClanId,
+    },
 }
 
 /// Trace d'une naissance ou d'une mort de clan — le futur matériau de la
@@ -655,7 +659,8 @@ impl SocialGraph {
     /// Retire les liens dont un membre a disparu (mort) : le graphe ne doit
     /// pas porter le poids d'agents qui n'existent plus.
     fn prune_dead(&mut self, alive: &BTreeSet<u64>) {
-        self.bonds.retain(|&(a, b), _| alive.contains(&a) && alive.contains(&b));
+        self.bonds
+            .retain(|&(a, b), _| alive.contains(&a) && alive.contains(&b));
         self.residence.retain(|id, _| alive.contains(id));
     }
 
@@ -685,11 +690,16 @@ impl SocialGraph {
             // Tri décroissant par poids ; égalité départagée par id pour un
             // résultat indépendant de l'ordre d'insertion.
             neighbors.sort_by(|x, y| y.0.total_cmp(&x.0).then(x.1.cmp(&y.1)));
-            let kept: BTreeSet<u64> = neighbors.iter().take(max_per_agent).map(|&(_, id)| id).collect();
+            let kept: BTreeSet<u64> = neighbors
+                .iter()
+                .take(max_per_agent)
+                .map(|&(_, id)| id)
+                .collect();
             top.insert(*agent, kept);
         }
         self.bonds.retain(|&(a, b), _| {
-            top.get(&a).is_some_and(|s| s.contains(&b)) && top.get(&b).is_some_and(|s| s.contains(&a))
+            top.get(&a).is_some_and(|s| s.contains(&b))
+                && top.get(&b).is_some_and(|s| s.contains(&a))
         });
     }
 }
@@ -755,7 +765,11 @@ pub(crate) fn encounter(sim: &mut Sim) {
     // — Passe 2 : ce que chacun accorde à l'autre, comparé au prestige ambiant
     // de sa propre assemblée. —
     let local_mean = |i: usize| {
-        if degree[i] == 0 { 0.0 } else { prestige_sum[i] / degree[i] as f32 }
+        if degree[i] == 0 {
+            0.0
+        } else {
+            prestige_sum[i] / degree[i] as f32
+        }
     };
     let mut pairs: Vec<(usize, usize, f32, f32)> = Vec::with_capacity(met.len());
     let mut total: Vec<f32> = vec![0.0; views.len()];
@@ -775,7 +789,11 @@ pub(crate) fn encounter(sim: &mut Sim) {
     let mut spoke: BTreeSet<u64> = BTreeSet::new();
     for &(i, j, w_ab, w_ba) in &pairs {
         let (a, b) = (&views[i], &views[j]);
-        let base = if are_kin(a.id, &a.kin, b.id, &b.kin) { KIN_GAIN } else { ENCOUNTER_GAIN };
+        let base = if are_kin(a.id, &a.kin, b.id, &b.kin) {
+            KIN_GAIN
+        } else {
+            ENCOUNTER_GAIN
+        };
         // La part de son attention que chacun consacre à l'autre, ramenée à ce
         // qu'elle vaudrait si tous ses interlocuteurs se valaient : 1,0 quand
         // personne ne sort du lot — le comportement d'avant ce mécanisme, à
@@ -784,13 +802,18 @@ pub(crate) fn encounter(sim: &mut Sim) {
         // elle, s'attacher à quelqu'un ne coûtait rien à personne, et le graphe
         // se densifiait au lieu de se structurer.
         let share = |w: f32, sum: f32, n: u32| {
-            if sum <= 0.0 || n == 0 { 1.0 } else { (n as f32) * w / sum }
+            if sum <= 0.0 || n == 0 {
+                1.0
+            } else {
+                (n as f32) * w / sum
+            }
         };
         let invest_a = share(w_ab, total[i], degree[i]);
         let invest_b = share(w_ba, total[j], degree[j]);
         // Un lien se noue à deux : il vaut la moyenne des deux investissements,
         // pas celui du plus enthousiaste.
-        sim.social.reinforce(a.id, b.id, base * 0.5 * (invest_a + invest_b));
+        sim.social
+            .reinforce(a.id, b.id, base * 0.5 * (invest_a + invest_b));
         spoke.insert(a.id.0);
         spoke.insert(b.id.0);
     }
@@ -818,7 +841,10 @@ struct DisjointSet {
 
 impl DisjointSet {
     fn new(n: usize) -> Self {
-        Self { parent: (0..n).collect(), rank: vec![0; n] }
+        Self {
+            parent: (0..n).collect(),
+            rank: vec![0; n],
+        }
     }
 
     fn find(&mut self, x: usize) -> usize {
@@ -876,25 +902,36 @@ fn validate_cluster(
     humans: &[crate::demography::HumanView],
 ) -> Result<(f64, f64), ClanReject> {
     if members.len() < MIN_CLAN_SIZE {
-        return Err(ClanReject::TooSmall { members: members.len() });
+        return Err(ClanReject::TooSmall {
+            members: members.len(),
+        });
     }
     // Aucun test de densité absolue ici : voir « Une ligne de faille, pas un
     // seuil de taille » en tête de module. La cohésion se juge à l'**absence de
     // ligne de faille** (`best_split`, appelée avant nous par `resolve_cluster`),
     // ce qui est indépendant de l'effectif — une densité seuil, elle, devenait
     // inatteignable au-delà de 54 membres et hachait les clans en trois jours.
-    let positions: Vec<(f64, f64)> =
-        members.iter().filter_map(|&id| find_human(humans, AgentId(id)).map(|h| h.pos)).collect();
+    let positions: Vec<(f64, f64)> = members
+        .iter()
+        .filter_map(|&id| find_human(humans, AgentId(id)).map(|h| h.pos))
+        .collect();
     if positions.len() != members.len() {
         return Err(ClanReject::Missing); // sécurité : ne devrait pas arriver (agent introuvable)
     }
-    let (sx, sy) = positions.iter().fold((0.0, 0.0), |(sx, sy), &(x, y)| (sx + x, sy + y));
+    let (sx, sy) = positions
+        .iter()
+        .fold((0.0, 0.0), |(sx, sy), &(x, y)| (sx + x, sy + y));
     let (cx, cy) = (sx / positions.len() as f64, sy / positions.len() as f64);
-    let resident_count =
-        positions.iter().filter(|&&(x, y)| (x - cx).hypot(y - cy) <= RESIDENCE_RADIUS_TILES).count();
+    let resident_count = positions
+        .iter()
+        .filter(|&&(x, y)| (x - cx).hypot(y - cy) <= RESIDENCE_RADIUS_TILES)
+        .count();
     let resident_fraction = resident_count as f32 / positions.len() as f32;
     if resident_fraction < RESIDENCE_FRACTION {
-        return Err(ClanReject::Scattered { members: members.len(), resident_fraction });
+        return Err(ClanReject::Scattered {
+            members: members.len(),
+            resident_fraction,
+        });
     }
     Ok((cx, cy))
 }
@@ -910,7 +947,10 @@ pub enum ClanReject {
     /// Densité du graphe interne sous `COHESION_THRESHOLD`.
     LowCohesion { members: usize, density: f32 },
     /// Moins de `RESIDENCE_FRACTION` des membres à portée du centroïde.
-    Scattered { members: usize, resident_fraction: f32 },
+    Scattered {
+        members: usize,
+        resident_fraction: f32,
+    },
     /// Un membre introuvable dans l'instantané (ne devrait pas arriver).
     Missing,
 }
@@ -954,7 +994,10 @@ impl ClanDiagnostics {
                 self.low_cohesion_members += members as u64;
                 self.low_cohesion_density += f64::from(density);
             }
-            ClanReject::Scattered { members, resident_fraction } => {
+            ClanReject::Scattered {
+                members,
+                resident_fraction,
+            } => {
                 self.scattered += 1;
                 self.scattered_members += members as u64;
                 self.scattered_fraction += f64::from(resident_fraction);
@@ -1091,9 +1134,7 @@ fn best_split(
     while threshold <= FISSION_MAX_THRESHOLD {
         let stronger: Vec<(u64, u64)> = bonds
             .iter()
-            .filter(|&(&(a, b), &w)| {
-                w >= threshold && members.contains(&a) && members.contains(&b)
-            })
+            .filter(|&(&(a, b), &w)| w >= threshold && members.contains(&a) && members.contains(&b))
             .map(|(&k, _)| k)
             .collect();
         let parts = connected_components(members, &stronger);
@@ -1147,8 +1188,10 @@ fn modularity(parts: &[BTreeSet<u64>], edges: &[(u64, u64)], members: &BTreeSet<
     }
     let mut q = 0.0;
     for part in parts {
-        let inside =
-            internal.iter().filter(|(a, b)| part.contains(a) && part.contains(b)).count() as f64;
+        let inside = internal
+            .iter()
+            .filter(|(a, b)| part.contains(a) && part.contains(b))
+            .count() as f64;
         let d: f64 = part.iter().filter_map(|id| degree.get(id)).sum();
         q += inside / total - (d / (2.0 * total)).powi(2);
     }
@@ -1160,7 +1203,12 @@ fn modularity(parts: &[BTreeSet<u64>], edges: &[(u64, u64)], members: &BTreeSet<
 /// appelée après `detect_clans`). Appelée à la même cadence que
 /// `demography::daily` — c'est le rythme « administratif » de la simulation.
 pub(crate) fn daily(sim: &mut Sim) {
-    let alive: BTreeSet<u64> = sim.agents.query::<&AgentId>().iter().map(|(_, id)| id.0).collect();
+    let alive: BTreeSet<u64> = sim
+        .agents
+        .query::<&AgentId>()
+        .iter()
+        .map(|(_, id)| id.0)
+        .collect();
     sim.social.prune_dead(&alive);
     update_residence(sim);
     sim.social.decay(DAILY_DECAY, FORGET_THRESHOLD);
@@ -1198,8 +1246,11 @@ fn elect_chiefs(sim: &mut Sim) {
         .map(|(_, (id, skills, prestige))| (id.0, skills.oratory * prestige.0))
         .collect();
     for clan in &mut sim.clans {
-        let mut ranked: Vec<f32> =
-            clan.members.iter().map(|m| scores.get(&m.0).copied().unwrap_or(0.0)).collect();
+        let mut ranked: Vec<f32> = clan
+            .members
+            .iter()
+            .map(|m| scores.get(&m.0).copied().unwrap_or(0.0))
+            .collect();
         if let Some(&chief) = clan.members.iter().max_by(|a, b| {
             let sa = scores.get(&a.0).copied().unwrap_or(0.0);
             let sb = scores.get(&b.0).copied().unwrap_or(0.0);
@@ -1353,8 +1404,13 @@ fn detect_clans(sim: &mut Sim) {
     // Arêtes « vraies relations » : au-dessus du seuil de lien. `cap_bonds`
     // borne déjà le degré, mais un agent presque sans contact garde ses
     // quelques liens même faibles — ce filtre ne garde que ceux qui comptent.
-    let edges: Vec<(u64, u64)> =
-        sim.social.bonds.iter().filter(|&(_, &w)| w >= BOND_THRESHOLD).map(|(&k, _)| k).collect();
+    let edges: Vec<(u64, u64)> = sim
+        .social
+        .bonds
+        .iter()
+        .filter(|&(_, &w)| w >= BOND_THRESHOLD)
+        .map(|(&k, _)| k)
+        .collect();
 
     let mut ids: BTreeSet<u64> = BTreeSet::new();
     for &(a, b) in &edges {
@@ -1365,7 +1421,10 @@ fn detect_clans(sim: &mut Sim) {
 
     let mut dsu = DisjointSet::new(ids.len());
     for &(a, b) in &edges {
-        let (ia, ib) = (ids.binary_search(&a).unwrap(), ids.binary_search(&b).unwrap());
+        let (ia, ib) = (
+            ids.binary_search(&a).unwrap(),
+            ids.binary_search(&b).unwrap(),
+        );
         dsu.union(ia, ib);
     }
 
@@ -1389,8 +1448,11 @@ fn detect_clans(sim: &mut Sim) {
     let mut diag = std::mem::take(&mut sim.clan_diagnostics);
     // Les peuples d'hier, pour l'hystérésis de fission : un groupe qui prolonge
     // l'un d'eux ne se brise qu'à une faille franche (`MODULARITY_ESTABLISHED`).
-    let established: Vec<BTreeSet<u64>> =
-        sim.clans.iter().map(|c| c.members.iter().map(|a| a.0).collect()).collect();
+    let established: Vec<BTreeSet<u64>> = sim
+        .clans
+        .iter()
+        .map(|c| c.members.iter().map(|a| a.0).collect())
+        .collect();
     for members in groups.into_values() {
         let member_set: BTreeSet<u64> = members.into_iter().collect();
         clusters.extend(resolve_cluster(
@@ -1427,7 +1489,8 @@ fn detect_clans(sim: &mut Sim) {
             .max_by_key(|&(_, overlap)| overlap);
         let kept = best.is_some_and(|(i, overlap)| {
             let (cluster, home) = &clusters[i];
-            let majority_old = overlap * IDENTITY_CORE_DEN >= clan.members.len() * IDENTITY_CORE_NUM;
+            let majority_old =
+                overlap * IDENTITY_CORE_DEN >= clan.members.len() * IDENTITY_CORE_NUM;
             let majority_new = overlap * IDENTITY_SHARE_DEN >= cluster.len() * IDENTITY_SHARE_NUM;
             if majority_old && majority_new {
                 matched[i] = true;
@@ -1537,8 +1600,15 @@ fn detect_clans(sim: &mut Sim) {
             sim.record(
                 home,
                 match into {
-                    Some(host) => EventKind::ClanMerged { clan: clan.id, into: host, members },
-                    None => EventKind::ClanDissolved { clan: clan.id, members },
+                    Some(host) => EventKind::ClanMerged {
+                        clan: clan.id,
+                        into: host,
+                        members,
+                    },
+                    None => EventKind::ClanDissolved {
+                        clan: clan.id,
+                        members,
+                    },
                 },
             );
         }
@@ -1556,7 +1626,11 @@ fn detect_clans(sim: &mut Sim) {
                 == crate::chronicle::CLAN_NOTABLE_DAYS
         })
         .map(|c| {
-            (c.id, (c.home.0.floor() as i64, c.home.1.floor() as i64), c.members.len())
+            (
+                c.id,
+                (c.home.0.floor() as i64, c.home.1.floor() as i64),
+                c.members.len(),
+            )
         })
         .collect();
     for (clan, pos, members) in born {
@@ -1576,11 +1650,17 @@ mod tests {
         for _ in 0..14 {
             g.reinforce(a, b, ENCOUNTER_GAIN);
         }
-        assert!(g.affinity(a, b) >= BOND_THRESHOLD, "14 rencontres doivent franchir le seuil de lien");
+        assert!(
+            g.affinity(a, b) >= BOND_THRESHOLD,
+            "14 rencontres doivent franchir le seuil de lien"
+        );
         for _ in 0..500 {
             g.reinforce(a, b, ENCOUNTER_GAIN);
         }
-        assert!(g.affinity(a, b) < 1.0 && g.affinity(a, b) > 0.99, "sature sous 1,0, ne l'atteint jamais");
+        assert!(
+            g.affinity(a, b) < 1.0 && g.affinity(a, b) > 0.99,
+            "sature sous 1,0, ne l'atteint jamais"
+        );
     }
 
     #[test]
@@ -1605,7 +1685,11 @@ mod tests {
         for _ in 0..400 {
             g.decay(DAILY_DECAY, FORGET_THRESHOLD);
         }
-        assert_eq!(g.affinity(a, b), 0.0, "le lien doit avoir été oublié (retiré de la carte)");
+        assert_eq!(
+            g.affinity(a, b),
+            0.0,
+            "le lien doit avoir été oublié (retiré de la carte)"
+        );
     }
 
     #[test]
@@ -1622,13 +1706,23 @@ mod tests {
             // ici chacun n'a qu'un seul lien, donc c'est trivialement son n°1.
         }
         g.cap_bonds(MAX_BONDS_PER_AGENT);
-        let degree = g.bonds.keys().filter(|&&(a, b)| a == hub.0 || b == hub.0).count();
-        assert_eq!(degree, MAX_BONDS_PER_AGENT, "le hub ne doit garder que ses liens les plus forts");
+        let degree = g
+            .bonds
+            .keys()
+            .filter(|&&(a, b)| a == hub.0 || b == hub.0)
+            .count();
+        assert_eq!(
+            degree, MAX_BONDS_PER_AGENT,
+            "le hub ne doit garder que ses liens les plus forts"
+        );
         assert!(
             g.affinity(hub, AgentId(20)) == 0.0,
             "le lien le plus faible du hub doit avoir été coupé"
         );
-        assert!(g.affinity(hub, AgentId(1)) > 0.0, "le lien le plus fort doit rester");
+        assert!(
+            g.affinity(hub, AgentId(1)) > 0.0,
+            "le lien le plus fort doit rester"
+        );
     }
 
     use cairn_core::WorldSeed;
@@ -1646,13 +1740,23 @@ mod tests {
             g.bonds.insert(SocialGraph::key(b, AgentId(i)), 0.95);
         }
         g.cap_bonds(MAX_BONDS_PER_AGENT);
-        assert_eq!(g.affinity(a, b), 0.0, "lien non mutuel dans le top : doit être coupé");
+        assert_eq!(
+            g.affinity(a, b),
+            0.0,
+            "lien non mutuel dans le top : doit être coupé"
+        );
     }
 
     use crate::demography::{HumanView, Sex};
 
     fn human_at(id: u64, x: f64, y: f64) -> HumanView {
-        HumanView { id: AgentId(id), pos: (x, y), sex: Sex::Female, adult: true, clan: None }
+        HumanView {
+            id: AgentId(id),
+            pos: (x, y),
+            sex: Sex::Female,
+            adult: true,
+            clan: None,
+        }
     }
 
     type SocialFixture = (BTreeSet<u64>, BTreeMap<(u64, u64), f32>, Vec<HumanView>);
@@ -1678,7 +1782,10 @@ mod tests {
             // de COHESION_THRESHOLD).
             for k in 1..=3u64 {
                 for i in 0..(10 - k) {
-                    bonds.insert(SocialGraph::key(AgentId(base + i), AgentId(base + i + k)), 0.9);
+                    bonds.insert(
+                        SocialGraph::key(AgentId(base + i), AgentId(base + i + k)),
+                        0.9,
+                    );
                 }
             }
         }
@@ -1707,19 +1814,41 @@ mod tests {
             "les 20 pris en bloc ne doivent PAS passer le seuil de cohésion (c'est le point de départ du test)"
         );
 
-        let result = resolve_cluster(members, &bonds, &edges, &humans, &[], &mut ClanDiagnostics::default());
-        assert_eq!(result.len(), 2, "doit se scinder en exactement deux clans filles");
+        let result = resolve_cluster(
+            members,
+            &bonds,
+            &edges,
+            &humans,
+            &[],
+            &mut ClanDiagnostics::default(),
+        );
+        assert_eq!(
+            result.len(),
+            2,
+            "doit se scinder en exactement deux clans filles"
+        );
         for (cluster, _) in &result {
-            assert_eq!(cluster.len(), 10, "chaque fille doit retrouver sa moitié complète");
+            assert_eq!(
+                cluster.len(),
+                10,
+                "chaque fille doit retrouver sa moitié complète"
+            );
         }
         let mut all_members: BTreeSet<AgentId> = BTreeSet::new();
         for (cluster, _) in &result {
             all_members.extend(cluster.iter().copied());
         }
-        assert_eq!(all_members.len(), 20, "aucun membre perdu ni dupliqué pendant la scission");
+        assert_eq!(
+            all_members.len(),
+            20,
+            "aucun membre perdu ni dupliqué pendant la scission"
+        );
         let (a, _) = &result[0];
         let (b, _) = &result[1];
-        assert!(a.is_disjoint(b), "les deux clans filles ne doivent partager aucun membre");
+        assert!(
+            a.is_disjoint(b),
+            "les deux clans filles ne doivent partager aucun membre"
+        );
     }
 
     /// D2 (mesuré au banc `clans`) : la composante jugée est le réseau des liens
@@ -1743,18 +1872,30 @@ mod tests {
             humans.push(human_at(id, 10_000.0 + k as f64 * 20.0, 0.0));
             // Chacun garde trois liens forts avec la bande (connus il y a peu).
             for b in 0..3u64 {
-                bonds.insert(SocialGraph::key(AgentId(id), AgentId((k * 2 + b) % 10)), 0.9);
+                bonds.insert(
+                    SocialGraph::key(AgentId(id), AgentId((k * 2 + b) % 10)),
+                    0.9,
+                );
             }
         }
         humans.sort_by_key(|h| h.id.0);
         let members: BTreeSet<u64> = (0..15).collect();
         let edges: Vec<(u64, u64)> = bonds.keys().copied().collect();
         assert!(
-            matches!(validate_cluster(&members, &humans), Err(ClanReject::Scattered { .. })),
+            matches!(
+                validate_cluster(&members, &humans),
+                Err(ClanReject::Scattered { .. })
+            ),
             "point de départ : les 15 pris en bloc ne co-résident pas"
         );
-        let result =
-            resolve_cluster(members, &bonds, &edges, &humans, &[], &mut ClanDiagnostics::default());
+        let result = resolve_cluster(
+            members,
+            &bonds,
+            &edges,
+            &humans,
+            &[],
+            &mut ClanDiagnostics::default(),
+        );
         assert_eq!(result.len(), 1, "la bande doit être reconnue");
         let band: BTreeSet<AgentId> = (0..10).map(AgentId).collect();
         assert_eq!(result[0].0, band, "la bande, et elle seule");
@@ -1766,7 +1907,9 @@ mod tests {
     #[test]
     fn une_expedition_de_chasse_ne_fait_pas_sortir_de_la_bande() {
         let mut sim = Sim::new(WorldSeed(1), 64);
-        let ids: Vec<AgentId> = (0..10).map(|i| sim.spawn_agent(i as f64 * 20.0, 0.0)).collect();
+        let ids: Vec<AgentId> = (0..10)
+            .map(|i| sim.spawn_agent(i as f64 * 20.0, 0.0))
+            .collect();
         for (i, a) in ids.iter().enumerate() {
             for b in &ids[i + 1..] {
                 sim.social.bonds.insert(SocialGraph::key(*a, *b), 0.95);
@@ -1776,7 +1919,11 @@ mod tests {
         for _ in 0..14 {
             daily(&mut sim);
         }
-        assert_eq!(sim.clans.len(), 1, "point de départ : la bande est reconnue");
+        assert_eq!(
+            sim.clans.len(),
+            1,
+            "point de départ : la bande est reconnue"
+        );
         let clan = sim.clans[0].id;
         // Quatre chasseurs partent trois nuits à 10 km.
         let hunters: BTreeSet<u64> = ids[..4].iter().map(|a| a.0).collect();
@@ -1822,8 +1969,14 @@ mod tests {
         // pas un groupe trop lâche. C'est le changement de conception mesuré à
         // l'`example diagnose` — voir « Une ligne de faille, pas un seuil de
         // taille » en tête de module.
-        let result =
-            resolve_cluster(members, &bonds, &edges, &humans, &[], &mut ClanDiagnostics::default());
+        let result = resolve_cluster(
+            members,
+            &bonds,
+            &edges,
+            &humans,
+            &[],
+            &mut ClanDiagnostics::default(),
+        );
         assert_eq!(result.len(), 1, "l'anneau doit former un seul clan");
         assert_eq!(result[0].0.len(), 20, "et n'y perdre personne");
     }
@@ -1932,9 +2085,15 @@ mod tests {
         let fusionne = |retrouves: usize, effectif: usize| {
             retrouves * MERGE_NUM_DEN >= effectif * MERGE_NUM_NUM
         };
-        assert!(fusionne(10, 20), "la moitié d'un peuple sous une bannière : une fusion");
+        assert!(
+            fusionne(10, 20),
+            "la moitié d'un peuple sous une bannière : une fusion"
+        );
         assert!(fusionne(20, 20), "tous : une fusion, évidemment");
-        assert!(!fusionne(3, 20), "trois rescapés qui trouvent refuge : pas une fusion");
+        assert!(
+            !fusionne(3, 20),
+            "trois rescapés qui trouvent refuge : pas une fusion"
+        );
     }
 
     /// Le cœur du volet « identité » : un peuple qui **grandit** reste lui-même.
@@ -1952,7 +2111,10 @@ mod tests {
         let (overlap, old_size, new_size) = (5usize, 10usize, 100usize);
         let core = overlap * IDENTITY_CORE_DEN >= old_size * IDENTITY_CORE_NUM;
         let share = overlap * IDENTITY_SHARE_DEN >= new_size * IDENTITY_SHARE_NUM;
-        assert!(core && !share, "5 rescapés noyés dans 100 ne donnent pas leur nom au tout");
+        assert!(
+            core && !share,
+            "5 rescapés noyés dans 100 ne donnent pas leur nom au tout"
+        );
     }
 
     /// Deux clans synthétiques de 10 membres chacun, positionnés à distance
@@ -1999,17 +2161,30 @@ mod tests {
     fn deux_clans_voisins_sur_une_ressource_rare_entrent_en_tension() {
         let mut sim = two_clans_and_one_herd(CONTACT_RADIUS_TILES - 500.0, 10.0);
         let (a, b) = (ClanId(1), ClanId(2));
-        assert_eq!(sim.clan_relations.tension_between(a, b), 0.0, "aucune tension avant toute mesure");
+        assert_eq!(
+            sim.clan_relations.tension_between(a, b),
+            0.0,
+            "aucune tension avant toute mesure"
+        );
 
         let mut previous = 0.0;
         for day in 0..20 {
             update_relations(&mut sim);
             let tension = sim.clan_relations.tension_between(a, b);
-            assert!(tension > previous, "jour {day} : la tension doit strictement monter tant que c'est rare");
-            assert!(tension < 1.0, "jour {day} : la tension sature sous 1,0, ne l'atteint jamais");
+            assert!(
+                tension > previous,
+                "jour {day} : la tension doit strictement monter tant que c'est rare"
+            );
+            assert!(
+                tension < 1.0,
+                "jour {day} : la tension sature sous 1,0, ne l'atteint jamais"
+            );
             previous = tension;
         }
-        assert!(previous > 0.6, "après 20 jours de disette partagée, la tension doit être clairement établie");
+        assert!(
+            previous > 0.6,
+            "après 20 jours de disette partagée, la tension doit être clairement établie"
+        );
     }
 
     /// Contre-épreuve n°1 : les deux mêmes clans, mêmes foyers, mais un
@@ -2053,7 +2228,9 @@ mod tests {
         Clan {
             id: ClanId(id),
             founded_tick: 0,
-            members: (0..members as u64).map(|m| AgentId(id * 1000 + m)).collect(),
+            members: (0..members as u64)
+                .map(|m| AgentId(id * 1000 + m))
+                .collect(),
             home,
             stock: 0.0,
             chief: AgentId(id * 1000),
@@ -2067,7 +2244,10 @@ mod tests {
     #[test]
     fn un_point_au_foyer_est_revendique_par_son_clan() {
         let clan = synthetic_clan(1, (100.0, 200.0), 10);
-        assert_eq!(claim_at((100.0, 200.0), std::slice::from_ref(&clan)), Some(clan.id));
+        assert_eq!(
+            claim_at((100.0, 200.0), std::slice::from_ref(&clan)),
+            Some(clan.id)
+        );
     }
 
     /// Le champ lu depuis les instantanés de la délibération doit rendre le
@@ -2076,8 +2256,10 @@ mod tests {
     /// modèle le dit chez autrui.
     #[test]
     fn le_territoire_vu_par_la_deliberation_est_le_meme_que_le_vrai() {
-        let clans =
-            vec![synthetic_clan(1, (0.0, 0.0), 10), synthetic_clan(2, (2000.0, 0.0), 10)];
+        let clans = vec![
+            synthetic_clan(1, (0.0, 0.0), 10),
+            synthetic_clan(2, (2000.0, 0.0), 10),
+        ];
         let views: BTreeMap<ClanId, ClanView> = clans
             .iter()
             .map(|c| {
@@ -2093,7 +2275,13 @@ mod tests {
             })
             .collect();
         // De part et d'autre de la frontière, et au-delà de toute portée.
-        for point in [(0.0, 0.0), (500.0, 0.0), (1500.0, 0.0), (2000.0, 0.0), (60_000.0, 0.0)] {
+        for point in [
+            (0.0, 0.0),
+            (500.0, 0.0),
+            (1500.0, 0.0),
+            (2000.0, 0.0),
+            (60_000.0, 0.0),
+        ] {
             assert_eq!(
                 claim_from_views(point, &views),
                 claim_at(point, &clans),
@@ -2108,7 +2296,11 @@ mod tests {
     fn un_point_hors_de_portee_de_tout_clan_reste_libre() {
         let clan = synthetic_clan(1, (0.0, 0.0), 10);
         let far = (RESIDENCE_RADIUS_TILES * 2.0, 0.0);
-        assert_eq!(claim_at(far, &[clan]), None, "hors du rayon de territoire, personne ne revendique le point");
+        assert_eq!(
+            claim_at(far, &[clan]),
+            None,
+            "hors du rayon de territoire, personne ne revendique le point"
+        );
     }
 
     /// Le cœur de la diffusion : entre deux clans de même effectif, un point
@@ -2149,7 +2341,11 @@ mod tests {
         let b = synthetic_clan(2, (1000.0, 0.0), 10);
         let midpoint = (500.0, 0.0);
         assert_eq!(claim_at(midpoint, &[a.clone(), b.clone()]), Some(ClanId(1)));
-        assert_eq!(claim_at(midpoint, &[b, a]), Some(ClanId(1)), "le résultat ne doit pas dépendre de l'ordre du slice");
+        assert_eq!(
+            claim_at(midpoint, &[b, a]),
+            Some(ClanId(1)),
+            "le résultat ne doit pas dépendre de l'ordre du slice"
+        );
     }
 
     fn oratory_of(sim: &Sim, id: AgentId) -> f32 {
@@ -2173,7 +2369,10 @@ mod tests {
         for _ in 0..30 {
             encounter(&mut sim);
         }
-        assert!(oratory_of(&sim, a) > before, "trente occasions de parler doivent faire progresser l'oratoire");
+        assert!(
+            oratory_of(&sim, a) > before,
+            "trente occasions de parler doivent faire progresser l'oratoire"
+        );
     }
 
     /// Contre-épreuve : un agent isolé, jamais à portée de qui que ce soit,
@@ -2188,12 +2387,17 @@ mod tests {
         for _ in 0..30 {
             encounter(&mut sim);
         }
-        assert_eq!(oratory_of(&sim, lonely), before, "sans personne à portée, l'oratoire ne doit pas bouger");
+        assert_eq!(
+            oratory_of(&sim, lonely),
+            before,
+            "sans personne à portée, l'oratoire ne doit pas bouger"
+        );
     }
 
     fn set_scores(sim: &mut Sim, id: AgentId, oratory: f32, prestige: f32) {
         for (_, (agent_id, skills, agent_prestige)) in
-            sim.agents.query_mut::<(&AgentId, &mut Skills, &mut Prestige)>()
+            sim.agents
+                .query_mut::<(&AgentId, &mut Skills, &mut Prestige)>()
         {
             if agent_id.0 == id.0 {
                 skills.oratory = oratory;
@@ -2227,7 +2431,10 @@ mod tests {
 
         elect_chiefs(&mut sim);
 
-        assert_eq!(sim.clans[0].chief, high, "le membre au produit oratoire×prestige le plus élevé doit être élu");
+        assert_eq!(
+            sim.clans[0].chief, high,
+            "le membre au produit oratoire×prestige le plus élevé doit être élu"
+        );
     }
 
     /// Égalité stricte de score : départagée par le plus petit `AgentId`,
@@ -2253,6 +2460,9 @@ mod tests {
 
         elect_chiefs(&mut sim);
 
-        assert_eq!(sim.clans[0].chief, a, "égalité stricte : le plus petit AgentId doit l'emporter");
+        assert_eq!(
+            sim.clans[0].chief, a,
+            "égalité stricte : le plus petit AgentId doit l'emporter"
+        );
     }
 }

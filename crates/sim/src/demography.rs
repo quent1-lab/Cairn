@@ -25,11 +25,12 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use cairn_core::{DAYS_PER_YEAR, Pcg32, TICKS_PER_DAY, TICKS_PER_YEAR, WorldSeed, km_to_tiles, splitmix64};
+use cairn_core::{
+    DAYS_PER_YEAR, Pcg32, TICKS_PER_DAY, TICKS_PER_YEAR, WorldSeed, km_to_tiles, splitmix64,
+};
 
 use crate::agent::{
-    Activity, AgentId, Behavior, DeathCause, Physiology, Position,
-    THIRST_PER_TICK,
+    Activity, AgentId, Behavior, DeathCause, Physiology, Position, THIRST_PER_TICK,
 };
 use crate::salt;
 use crate::sim::{BirthRecord, DeathRecord, Sim};
@@ -105,7 +106,11 @@ pub const MILK_DEPLETION_LOSS: f32 = 0.3;
 /// le corps.
 pub fn milk_flow(mother: &Physiology) -> f32 {
     let buffered = 1.0 - MILK_DEPLETION_LOSS * mother.depletion();
-    if mother.reserves_kcal > 0.0 { buffered } else { buffered * mother.health.clamp(0.0, 1.0) }
+    if mother.reserves_kcal > 0.0 {
+        buffered
+    } else {
+        buffered * mother.health.clamp(0.0, 1.0)
+    }
 }
 /// Le lait coûte aussi de l'eau.
 pub const NURSING_THIRST_PER_TICK: f32 = THIRST_PER_TICK * 0.3;
@@ -161,9 +166,7 @@ impl Traits {
 
     /// Traits d'un fondateur : centrés, dispersion naturelle, sans extrêmes.
     pub fn sample(rng: &mut Pcg32) -> Self {
-        let mut draw = |_: f32, _: f32| {
-            (0.5 + 0.15 * rng.next_normal() as f32).clamp(0.05, 0.95)
-        };
+        let mut draw = |_: f32, _: f32| (0.5 + 0.15 * rng.next_normal() as f32).clamp(0.05, 0.95);
         Self::map2(&Self::default(), &Self::default(), &mut draw)
     }
 
@@ -263,11 +266,19 @@ pub fn work_capacity(age_years: f64) -> f32 {
 /// 16–40 ans, sexe et traits tirés de la seed — même seed, même peuplade.
 pub(crate) fn founder(seed: WorldSeed, id: u64, tick: u64) -> (Demographics, Traits) {
     let mut rng = Pcg32::new(seed.derive(salt::DEMOGRAPHY), id);
-    let sex = if rng.next_u32() & 1 == 0 { Sex::Female } else { Sex::Male };
+    let sex = if rng.next_u32() & 1 == 0 {
+        Sex::Female
+    } else {
+        Sex::Male
+    };
     let age_years = 16.0 + rng.next_f64() * 24.0;
     let born_tick = tick as i64 - (age_years * TICKS_PER_YEAR as f64) as i64;
     (
-        Demographics { sex, born_tick, pregnancy: None },
+        Demographics {
+            sex,
+            born_tick,
+            pregnancy: None,
+        },
         Traits::sample(&mut rng),
     )
 }
@@ -295,7 +306,10 @@ pub(crate) fn nurse_infants(sim: &mut Sim) {
         .filter(|(_, (_, demo, _))| demo.is_infant(tick))
         .map(|(entity, (id, _, kin))| {
             let mother = kin.mother.map(|m| m.0).filter(|m| index.contains_key(m));
-            (entity, mother.or_else(|| sim.fosters.get(&id.0).map(|f| f.0)))
+            (
+                entity,
+                mother.or_else(|| sim.fosters.get(&id.0).map(|f| f.0)),
+            )
         })
         .collect();
 
@@ -307,14 +321,26 @@ pub(crate) fn nurse_infants(sim: &mut Sim) {
             let pos = sim.agents.get::<&Position>(entity).ok()?;
             let phys = sim.agents.get::<&Physiology>(entity).ok()?;
             let behavior = sim.agents.get::<&Behavior>(entity).ok()?;
-            let carrying = sim.agents.get::<&crate::agent::Carrying>(entity).map(|c| c.0).unwrap_or(0.0);
+            let carrying = sim
+                .agents
+                .get::<&crate::agent::Carrying>(entity)
+                .map(|c| c.0)
+                .unwrap_or(0.0);
             // A-t-elle vraiment bu ? À une eau qui n'est pas douce, elle « boit »
             // sans être désaltérée (`sim::execute`) : son enfant non plus.
             let quenched = behavior.activity == Activity::Drinking && phys.thirst == 0.0;
-            Some(((pos.x, pos.y), behavior.activity, milk_flow(&phys), carrying, quenched))
+            Some((
+                (pos.x, pos.y),
+                behavior.activity,
+                milk_flow(&phys),
+                carrying,
+                quenched,
+            ))
         });
 
-        let Some(((mx, my), mother_activity, milk, mother_carrying, mother_quenched)) = mother_state else {
+        let Some(((mx, my), mother_activity, milk, mother_carrying, mother_quenched)) =
+            mother_state
+        else {
             continue; // orphelin : cloué sur place, les besoins montent
         };
         // La part du lait, et ce qu'il apporte par heure passé l'allaitement
@@ -335,9 +361,12 @@ pub(crate) fn nurse_infants(sim: &mut Sim) {
         let mut milk_kcal = 0.0f64;
         let mut given_points = 0.0f32;
         let has_milk = milk > 0.0;
-        if let Ok((pos, phys, behavior, illness)) = sim
-            .agents
-            .query_one_mut::<(&mut Position, &mut Physiology, &mut Behavior, &mut crate::disease::Illness)>(infant)
+        if let Ok((pos, phys, behavior, illness)) = sim.agents.query_one_mut::<(
+            &mut Position,
+            &mut Physiology,
+            &mut Behavior,
+            &mut crate::disease::Illness,
+        )>(infant)
         {
             // Les anticorps passent avec le lait.
             illness.milk = has_milk;
@@ -361,7 +390,10 @@ pub(crate) fn nurse_infants(sim: &mut Sim) {
                 let (offered, quench) = if share >= 1.0 {
                     (NURSE_RELIEF * milk * phys.scale, NURSE_RELIEF * milk)
                 } else {
-                    (share * milk * hourly_need_points, share * milk * crate::agent::THIRST_PER_TICK)
+                    (
+                        share * milk * hourly_need_points,
+                        share * milk * crate::agent::THIRST_PER_TICK,
+                    )
                 };
                 let drunk = phys.eat_points(offered);
                 crate::food_stats::fed(crate::food_stats::Source::Milk, drunk);
@@ -381,12 +413,14 @@ pub(crate) fn nurse_infants(sim: &mut Sim) {
         // ~+505 kcal/j en allaitement exclusif), et son eau ; et la nourriture
         // donnée — prise sur ce qu'elle porte d'abord, sur sa faim sinon.
         if let Some(entity) = mother_entity
-            && let Ok((phys, carrying)) =
-                sim.agents.query_one_mut::<(&mut Physiology, &mut crate::agent::Carrying)>(entity)
+            && let Ok((phys, carrying)) = sim
+                .agents
+                .query_one_mut::<(&mut Physiology, &mut crate::agent::Carrying)>(entity)
         {
             if has_milk {
                 phys.hunger = (phys.hunger + phys.hunger_of_kcal(milk_kcal as f32)).min(1.0);
-                phys.thirst = (phys.thirst + NURSING_THIRST_PER_TICK * milk * share.min(1.0)).min(1.0);
+                phys.thirst =
+                    (phys.thirst + NURSING_THIRST_PER_TICK * milk * share.min(1.0)).min(1.0);
             }
             if given_points > 0.0 {
                 let from_load = given_points.min(carrying.0);
@@ -453,7 +487,14 @@ pub(crate) fn adopt_orphans(sim: &mut Sim) {
     }
     let views: BTreeMap<u64, V> = sim
         .agents
-        .query::<(&AgentId, &Position, &Physiology, &Demographics, &Kinship, &crate::social::ClanMembership)>()
+        .query::<(
+            &AgentId,
+            &Position,
+            &Physiology,
+            &Demographics,
+            &Kinship,
+            &crate::social::ClanMembership,
+        )>()
         .iter()
         .map(|(_, (id, pos, phys, demo, kin, clan))| {
             (
@@ -474,11 +515,17 @@ pub(crate) fn adopt_orphans(sim: &mut Sim) {
         views.get(child).is_some_and(|v| v.infant) && views.contains_key(&woman.0)
     });
     // Qui allaite : les mères d'un nourrisson vivant, et celles qui en ont pris un.
-    let mut nursing: BTreeSet<u64> =
-        views.values().filter(|v| v.infant).filter_map(|v| v.mother).collect();
+    let mut nursing: BTreeSet<u64> = views
+        .values()
+        .filter(|v| v.infant)
+        .filter_map(|v| v.mother)
+        .collect();
     nursing.extend(sim.fosters.values().map(|w| w.0));
-    let parents: BTreeMap<u64, (u64, u64)> =
-        sim.births.iter().map(|b| (b.child.0, (b.mother.0, b.father.0))).collect();
+    let parents: BTreeMap<u64, (u64, u64)> = sim
+        .births
+        .iter()
+        .map(|b| (b.child.0, (b.mother.0, b.father.0)))
+        .collect();
     let seed = sim.world.seed();
     let orphans: Vec<u64> = views
         .iter()
@@ -497,7 +544,8 @@ pub(crate) fn adopt_orphans(sim: &mut Sim) {
             .filter(|(_, v)| {
                 v.female_adult
                     && v.milk >= MILK_TO_SPARE
-                    && (v.pos.0 - c.pos.0).hypot(v.pos.1 - c.pos.1) <= crate::social::RESIDENCE_RADIUS_TILES
+                    && (v.pos.0 - c.pos.0).hypot(v.pos.1 - c.pos.1)
+                        <= crate::social::RESIDENCE_RADIUS_TILES
             })
             .map(|(w, v)| {
                 let kin = kin_closeness(&parents, w, child);
@@ -548,16 +596,28 @@ pub(crate) fn daily(sim: &mut Sim) {
     }
     for (mother, pos, mother_traits, pregnancy) in due {
         let mut rng = Pcg32::new(seed.derive(salt::HEREDITY) ^ splitmix64(tick), mother.0);
-        let sex = if rng.next_u32() & 1 == 0 { Sex::Female } else { Sex::Male };
+        let sex = if rng.next_u32() & 1 == 0 {
+            Sex::Female
+        } else {
+            Sex::Male
+        };
         let traits = Traits::inherit(&mother_traits, &pregnancy.father_traits, &mut rng);
         let child = sim.spawn_child(
             pos.0,
             pos.1,
             sex,
             traits,
-            Kinship { mother: Some(mother), father: Some(pregnancy.father) },
+            Kinship {
+                mother: Some(mother),
+                father: Some(pregnancy.father),
+            },
         );
-        sim.births.push(BirthRecord { tick, mother, father: pregnancy.father, child });
+        sim.births.push(BirthRecord {
+            tick,
+            mother,
+            father: pregnancy.father,
+            child,
+        });
     }
 
     // 2. Aménorrhée de lactation : les mères d'un nourrisson vivant.
@@ -584,9 +644,9 @@ pub(crate) fn daily(sim: &mut Sim) {
         .map(|(_, (id, pos, _, traits, _))| ((pos.x, pos.y), *id, *traits))
         .collect();
 
-    for (_, (id, pos, phys, demo)) in sim
-        .agents
-        .query_mut::<(&AgentId, &Position, &Physiology, &mut Demographics)>()
+    for (_, (id, pos, phys, demo)) in
+        sim.agents
+            .query_mut::<(&AgentId, &Position, &Physiology, &mut Demographics)>()
     {
         let fertile = demo.sex == Sex::Female
             && FEMALE_FERTILE_YEARS.contains(&demo.age_years(tick))
@@ -638,7 +698,12 @@ pub(crate) fn daily(sim: &mut Sim) {
     for (entity, agent, pos) in dead {
         let _ = sim.agents.despawn(entity);
         sim.routes.remove(&agent.0);
-        sim.deaths.push(DeathRecord { tick, agent, cause: DeathCause::OldAge, pos });
+        sim.deaths.push(DeathRecord {
+            tick,
+            agent,
+            cause: DeathCause::OldAge,
+            pos,
+        });
     }
 
     // 5. Allomaternage : les orphelins que quelqu'un peut allaiter.
@@ -651,8 +716,14 @@ mod tests {
 
     #[test]
     fn l_heredite_moyenne_les_parents_et_mute() {
-        let mother = Traits { curiosity: 0.2, ..Default::default() };
-        let father = Traits { curiosity: 0.8, ..Default::default() };
+        let mother = Traits {
+            curiosity: 0.2,
+            ..Default::default()
+        };
+        let father = Traits {
+            curiosity: 0.8,
+            ..Default::default()
+        };
         let mut rng = Pcg32::new(7, 0);
         let mut sum = 0.0;
         let mut min: f32 = 1.0;
@@ -675,8 +746,16 @@ mod tests {
 
     #[test]
     fn l_heredite_est_deterministe() {
-        let a = Traits::inherit(&Traits::default(), &Traits::default(), &mut Pcg32::new(9, 1));
-        let b = Traits::inherit(&Traits::default(), &Traits::default(), &mut Pcg32::new(9, 1));
+        let a = Traits::inherit(
+            &Traits::default(),
+            &Traits::default(),
+            &mut Pcg32::new(9, 1),
+        );
+        let b = Traits::inherit(
+            &Traits::default(),
+            &Traits::default(),
+            &mut Pcg32::new(9, 1),
+        );
         assert_eq!(a, b);
     }
 
@@ -685,19 +764,48 @@ mod tests {
     /// en donne moins (Prentice), et plus du tout si son corps s'effondre.
     #[test]
     fn le_lait_suit_les_reserves_pas_la_maladie() {
-        let sick = Physiology { health: 0.3, reserves_kcal: 30_000.0, reserve_target: 30_000.0, ..Physiology::default() };
-        assert!((milk_flow(&sick) - 1.0).abs() < 1e-6, "mère malade : {}", milk_flow(&sick));
-        let lean = Physiology { health: 1.0, reserves_kcal: 1.0, reserve_target: 30_000.0, ..Physiology::default() };
-        assert!((0.65..0.75).contains(&milk_flow(&lean)), "réserves presque vides : {}", milk_flow(&lean));
-        let wasted = Physiology { health: 0.1, reserves_kcal: 0.0, reserve_target: 30_000.0, ..Physiology::default() };
+        let sick = Physiology {
+            health: 0.3,
+            reserves_kcal: 30_000.0,
+            reserve_target: 30_000.0,
+            ..Physiology::default()
+        };
+        assert!(
+            (milk_flow(&sick) - 1.0).abs() < 1e-6,
+            "mère malade : {}",
+            milk_flow(&sick)
+        );
+        let lean = Physiology {
+            health: 1.0,
+            reserves_kcal: 1.0,
+            reserve_target: 30_000.0,
+            ..Physiology::default()
+        };
+        assert!(
+            (0.65..0.75).contains(&milk_flow(&lean)),
+            "réserves presque vides : {}",
+            milk_flow(&lean)
+        );
+        let wasted = Physiology {
+            health: 0.1,
+            reserves_kcal: 0.0,
+            reserve_target: 30_000.0,
+            ..Physiology::default()
+        };
         assert!(milk_flow(&wasted) < 0.1);
     }
 
     #[test]
     fn la_mortalite_croit_avec_l_age() {
-        assert!(annual_mortality(20.0) < 0.002, "à 20 ans, la vieillesse ne tue pas");
+        assert!(
+            annual_mortality(20.0) < 0.002,
+            "à 20 ans, la vieillesse ne tue pas"
+        );
         assert!(annual_mortality(60.0) > 0.02);
-        assert!(annual_mortality(80.0) > 0.3, "à 80 ans, chaque année est un pari");
+        assert!(
+            annual_mortality(80.0) > 0.3,
+            "à 80 ans, chaque année est un pari"
+        );
         for age in 1..100 {
             assert!(
                 annual_mortality(age as f64) <= annual_mortality(age as f64 + 1.0),
@@ -723,7 +831,11 @@ mod tests {
             pregnancy: None,
         };
         assert!(infant.is_infant(tick) && !infant.is_adult(tick));
-        let elder = Demographics { sex: Sex::Male, born_tick: -(60 * TICKS_PER_YEAR as i64), pregnancy: None };
+        let elder = Demographics {
+            sex: Sex::Male,
+            born_tick: -(60 * TICKS_PER_YEAR as i64),
+            pregnancy: None,
+        };
         assert!(elder.is_adult(tick));
         assert!((elder.age_years(tick) - 70.0).abs() < 0.01);
     }
