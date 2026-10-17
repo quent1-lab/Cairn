@@ -384,3 +384,21 @@ Prédictions, acceptation 5 ans appariée contre `main` (MOR-4 + correctif de l'
 2. Mortalité < 1 an inchangée (les < 6 mois orphelins restent sans lait) ; 1-4 ans en baisse.
 3. Porteurs : faim légèrement plus haute (ils nourrissent l'enfant).
 Réfuterait 1 : aucune baisse sur ≥ 5/8 (peu d'orphelins sevrés, ou recueil trop lent à 5 %/j).
+
+### Mesures du débat — résultats (2026-10-17)
+
+Banc `soif` (3 ans, 8 runs), `main` (MOR-4 + correctif) : 348 heures-enfant en soif saturée
+(441 avant MOR-4 ; prédit ≤ 300 : **réfuté de peu**) ; **99 % sans mère** (prédit ≥ 60 % :
+tenu) — la voie « mère affamée » est fermée, il ne reste que les orphelins (→ MOR-4b).
+Cueillette + MOR-4 : 354 heures, 100 % sans mère.
+
+Acceptation 5 ans (8 runs, départ j135), mortalité 1-4 ans (‰/an), appariée :
+| run | t42 | t7 | t1337 | t2024 | f42 | f7 | f1337 | f2024 |
+|---|---|---|---|---|---|---|---|---|
+| `main` | 45 | 188 | 128 | 161 | 240 | 202 | 64 | 154 |
+| cueillette | 100 | 105 | 128 | 358 | 197 | 556 | 220 | 172 |
+En hausse sur **5/8**, en baisse sur 2, égal sur 1 : sous le seuil de blocage écrit (≥ 6/8),
+mais l'agrégat monte (144 → 213 ‰ ; morts 1-4 ans 55 → 72, dont froid 2 → 8, soif 16 → 19,
+maladie 37 → 43 ; mourir avant 15 ans 58 → 69 %). Marche −4 à −6 km/j et faim des mères en
+baisse sur 8/8. **Sans direction commune, et pas assez de puissance** (débat, point 3) :
+quatre seeds de plus (11, 23, 99, 314) avant de trancher.
