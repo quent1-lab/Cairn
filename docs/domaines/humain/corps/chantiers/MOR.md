@@ -696,3 +696,20 @@ des diarrhées d'eau vient peut-être de la seule taille des camps (non séparé
 **Suite, MOR-5c2** (piste 1 de l'utilisateur, appuyée pour la seule voie respiratoire) : la
 contagiosité respiratoire suit la charge (gravité) ; la digestive non (excrétion de semaines,
 maximale après les symptômes).
+
+## MOR-5c2 — la contagiosité respiratoire suit la charge (2026-10-18)
+Changement (`disease::daily`) : pour la seule voie respiratoire, la chance par nuit est
+multipliée par min(1, gravité / gravité d'apparition) ; la digestive est inchangée. Test
+`la_contagion_respiratoire_suit_la_charge`, vu rouge (charge 0,02 : 9,7 % par nuit au lieu
+de ≤ 3,5 %). Choix non sourcé en chiffres : la charge pleine dès l'apparition (le pic grippal
+est aux jours 1-2, la gravité du modèle part de 0,1 et décroît chez un hôte qui l'emporte).
+Calcul : chez un adulte qui guérit (gravité ÷ 10 en ~3,3 j), la contagiosité moyenne de
+l'épisode tombe à ~0,4 ; chez un enfant dont la gravité monte, peu de changement.
+Prédictions, acceptation 5 ans × 8 runs contre MOR-5c1 :
+1. Adultes 15-39 : respiratoires ≤ 2,5/an (4,6) ; part contagieuse ≤ 70 % (86 %).
+   Réfuterait : ≥ 3,5/an.
+2. Maladie 15-39 ans ≤ 15 ‰ (24).
+3. Diarrhées adultes inchangées à ±15 % (4,8) — la digestive n'est pas touchée (à part par
+   moins de malades affaiblis).
+4. Mourir avant 15 ans : en baisse, mais moins que les adultes (contagion d'enfant à gravité
+   montante) ; 1-4 ans en baisse sur ≥ 5/8 runs.

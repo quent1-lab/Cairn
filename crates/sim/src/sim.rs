@@ -3230,6 +3230,45 @@ mod tests {
     }
 
     #[test]
+    fn la_contagion_respiratoire_suit_la_charge() {
+        // MOR-5c2 : un malade respiratoire qui guérit (charge basse) ne
+        // contamine presque plus ; la digestive s'excrète bien après les
+        // symptômes et ne suit pas la charge.
+        let taux = |route: disease::Route, severity: f32| -> f64 {
+            let (mut sim, home) = scenario_setup(42, 0, 0);
+            let (x, y) = (home.0 as f64 + 0.5, home.1 as f64 + 0.5);
+            let sick = sim.spawn_agent(x, y);
+            let child =
+                sim.spawn_child(x, y, Sex::Male, Traits::default(), Kinship { mother: Some(sick), father: None });
+            let mut infected = 0;
+            let nights = 4000;
+            for n in 0..nights {
+                sim.time.tick = (n + 1) * TICKS_PER_DAY;
+                for (_, (id, ill)) in sim.agents.query_mut::<(&AgentId, &mut Illness)>() {
+                    *ill = Illness::default();
+                    if *id == sick {
+                        ill.active[route as usize] = Some(disease::Infection { severity, virulence: 0.0, contagion: false });
+                    }
+                }
+                disease::daily(&mut sim);
+                infected += sim
+                    .agents
+                    .query::<(&AgentId, &Illness)>()
+                    .iter()
+                    .filter(|(_, (id, ill))| **id == child && ill.is_sick(route))
+                    .count();
+            }
+            infected as f64 / nights as f64
+        };
+        let poumon_fort = taux(disease::Route::Lung, 0.1);
+        let poumon_faible = taux(disease::Route::Lung, 0.02);
+        let ventre_faible = taux(disease::Route::Gut, 0.02);
+        assert!((0.08..0.12).contains(&poumon_fort), "au début de la maladie, 10 %/nuit : {poumon_fort}");
+        assert!(poumon_faible < 0.035, "en guérison, la charge tombe : {poumon_faible}");
+        assert!((0.035..0.065).contains(&ventre_faible), "la digestive s'excrète encore : {ventre_faible}");
+    }
+
+    #[test]
     fn la_contagion_de_nuit_suit_le_lien() {
         // MOR-5c1 : un malade couché à côté contamine son foyer à plein, les
         // autres selon le lien qui les unit, un inconnu presque pas.

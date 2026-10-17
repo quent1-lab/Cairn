@@ -80,7 +80,11 @@ pub const SOIL_RADIUS_TILES: f64 = km_to_tiles(0.1);
 const CONTACT_RADIUS_TILES: f64 = km_to_tiles(0.01);
 const GUT_CONTACT_P: f64 = 0.05;
 /// Respiratoire : la contagion par l'air porte plus loin dans le sommeil
-/// partagé que les mains sales.
+/// partagé que les mains sales. MOR-5c2 : elle suit la charge du malade —
+/// pleine au début des symptômes (`ONSET_SEVERITY`) et au-delà, elle retombe
+/// avec la gravité quand il guérit (grippe : excrétion maximale aux jours 1-2,
+/// contagieuse jusqu'à J4-6). La digestive ne la suit pas : norovirus et
+/// Shigella s'excrètent des semaines, souvent plus après les symptômes.
 const LUNG_CONTACT_P: f64 = 0.10;
 /// Respiratoire, par heure : le portage (des germes que chacun héberge sans
 /// mal) devient maladie, d'autant plus que le corps a froid. Choix : une fois
@@ -226,12 +230,19 @@ pub(crate) fn daily(sim: &mut Sim) {
             }
     };
     for (route, beta) in [(Route::Gut, GUT_CONTACT_P), (Route::Lung, LUNG_CONTACT_P)] {
-        let sick: Vec<(AgentId, f64, f64)> = sim
+        // (malade, position, part de la contagiosité pleine).
+        let sick: Vec<(AgentId, f64, f64, f64)> = sim
             .agents
             .query::<(&AgentId, &Position, &Illness)>()
             .iter()
-            .filter(|(_, (_, _, ill))| ill.is_sick(route))
-            .map(|(_, (id, pos, _))| (*id, pos.x, pos.y))
+            .filter_map(|(_, (id, pos, ill))| {
+                let inf = ill.active[route as usize]?;
+                let load = match route {
+                    Route::Lung => f64::from((inf.severity / ONSET_SEVERITY).min(1.0)),
+                    _ => 1.0,
+                };
+                Some((*id, pos.x, pos.y, load))
+            })
             .collect();
         if sick.is_empty() {
             continue;
@@ -244,12 +255,12 @@ pub(crate) fn daily(sim: &mut Sim) {
                 continue;
             }
             let mut escape = 1.0;
-            for &(s, x, y) in &sick {
+            for &(s, x, y, load) in &sick {
                 if (pos.x - x).powi(2) + (pos.y - y).powi(2) > r2 {
                     continue;
                 }
                 let contact = if household(*id, s) { 1.0 } else { f64::from(social.affinity(*id, s)) };
-                escape *= 1.0 - beta * contact;
+                escape *= 1.0 - beta * contact * load;
             }
             let p = 1.0 - escape;
             if p <= 0.0 {
