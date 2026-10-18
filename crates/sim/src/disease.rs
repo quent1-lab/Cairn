@@ -67,13 +67,25 @@ const IMMUNE_DAYS: u64 = 30;
 /// Épisodes déjà vécus par un fondateur adulte : il a un passé.
 const FOUNDER_EPISODES: u8 = 10;
 
-/// Digestive, par gorgée : souillure de fond (faune) et charge par humain
-/// présent à `SOIL_RADIUS` de l'eau. Choix : une source de camp de trente
-/// personnes rend malade un enfant quelques fois par an (ordre de grandeur
-/// des épisodes diarrhéiques en milieu sans assainissement).
+/// Digestive, par gorgée : souillure de fond (faune) et souillure laissée par
+/// les humains qui boivent au même endroit (`WaterSoil`).
 const WATER_BACKGROUND_P: f64 = 0.002;
-const WATER_PER_HUMAN_P: f64 = 0.0002;
-pub const SOIL_RADIUS_TILES: f64 = km_to_tiles(0.1);
+/// Maille du point d'eau : on souille les abords de là où l'on boit.
+pub const SOIL_CELL_TILES: f64 = km_to_tiles(0.1);
+/// Décroissance de la souillure : T90 des bactéries fécales dans l'eau de
+/// surface ~1-2 j à faible lumière, ~6 j en plein soleil (sources du domaine) ;
+/// 2 j retenus, soit une constante de temps T90 / ln 10 ≈ 0,87 j.
+const SOIL_T90_DAYS: f64 = 2.0;
+/// Souillure déposée par gorgée. Dimensionnée pour garder l'ordre de grandeur
+/// choisi au départ (une source de camp de trente personnes rend malade un
+/// enfant quelques fois par an : 0,0002 par gorgée et par usager) : à
+/// l'équilibre, un usager qui boit `g` gorgées par jour pèse g × dépôt × τ ;
+/// g ≈ 2,2 gorgées par personne et par jour, mesuré (banc d'acceptation,
+/// 1 an, 8 runs, ec20933).
+const G_REF: f64 = 2.2;
+const SOIL_PER_DRINK: f64 = 0.0002 / (G_REF * SOIL_T90_DAYS / std::f64::consts::LN_10);
+/// Sous ce niveau, la souillure d'un point d'eau est oubliée (mémoire bornée).
+const SOIL_FORGET: f64 = 1e-6;
 /// Contagion de nuit : distance d'un dormeur à un malade, chance par nuit et
 /// par malade **du foyer** (voie digestive : mains, nourriture partagée). Hors
 /// du foyer, la chance suit le lien (MOR-5c1, voir [`daily`]).
@@ -187,10 +199,46 @@ pub fn defense(age_years: f64, milk: bool, hunger: f32, cold: f32) -> f32 {
     maturity * (1.0 - 0.5 * hunger) * (1.0 - 0.3 * cold)
 }
 
-/// Probabilité qu'une gorgée rende malade, selon les humains présents autour
-/// de l'eau (la souillure d'un camp).
-pub fn water_risk(humans_near: usize) -> f64 {
-    WATER_BACKGROUND_P + WATER_PER_HUMAN_P * humans_near as f64
+/// La souillure des points d'eau par ceux qui y boivent (2026-10-18, décision
+/// de l'utilisateur) : un **état** de chaque point d'eau, qui s'accumule à
+/// chaque gorgée et s'efface avec la mort des germes, plutôt que le seul
+/// nombre d'humains présents à l'instant. Une source quittée reste dangereuse
+/// quelques jours ; une source neuve est propre. Coût : une entrée par maille
+/// de 100 m où l'on a bu récemment, décrue calculée à la lecture.
+#[derive(Debug, Clone, Default)]
+pub struct WaterSoil {
+    /// Maille → (souillure, tick de la dernière mise à jour).
+    cells: BTreeMap<(i64, i64), (f64, u64)>,
+}
+
+impl WaterSoil {
+    fn cell(pos: (f64, f64)) -> (i64, i64) {
+        ((pos.0 / SOIL_CELL_TILES).floor() as i64, (pos.1 / SOIL_CELL_TILES).floor() as i64)
+    }
+
+    fn decayed(soil: f64, since: u64, tick: u64) -> f64 {
+        let days = tick.saturating_sub(since) as f64 / TICKS_PER_DAY as f64;
+        soil * (-days * std::f64::consts::LN_10 / SOIL_T90_DAYS).exp()
+    }
+
+    /// Une gorgée bue en `pos` : renvoie la probabilité qu'elle rende malade,
+    /// puis y laisse la souillure de l'usager.
+    pub fn drink(&mut self, pos: (f64, f64), tick: u64) -> f64 {
+        let entry = self.cells.entry(Self::cell(pos)).or_insert((0.0, tick));
+        let soil = Self::decayed(entry.0, entry.1, tick);
+        *entry = (soil + SOIL_PER_DRINK, tick);
+        WATER_BACKGROUND_P + soil
+    }
+
+    /// Le risque d'une gorgée en `pos`, sans boire.
+    pub fn risk(&self, pos: (f64, f64), tick: u64) -> f64 {
+        WATER_BACKGROUND_P + self.cells.get(&Self::cell(pos)).map_or(0.0, |&(s, t)| Self::decayed(s, t, tick))
+    }
+
+    /// Oublie les points d'eau redevenus propres.
+    pub fn forget(&mut self, tick: u64) {
+        self.cells.retain(|_, &mut (s, t)| Self::decayed(s, t, tick) > SOIL_FORGET);
+    }
 }
 
 /// Probabilité horaire que le portage respiratoire devienne maladie.
@@ -222,6 +270,7 @@ fn gaussian(rng: &mut Pcg32) -> f32 {
 pub(crate) fn daily(sim: &mut Sim) {
     let tick = sim.time.tick;
     let seed = sim.world.seed();
+    sim.water_soil.forget(tick);
     let kinship: BTreeMap<u64, Kinship> =
         sim.agents.query::<(&AgentId, &Kinship)>().iter().map(|(_, (id, k))| (id.0, *k)).collect();
     // Les couples : les deux parents connus d'un même enfant.
@@ -326,6 +375,31 @@ mod tests {
             }
         }
         deaths as f64 / trials as f64
+    }
+
+    #[test]
+    fn la_souillure_d_un_point_d_eau_s_accumule_et_s_efface() {
+        // Trente usagers boivent dix jours au même endroit, puis partent.
+        let mut soil = WaterSoil::default();
+        let spring = (1000.0, 1000.0);
+        let gulps = (30.0 * G_REF).round() as u64;
+        let mut tick = 0;
+        for _ in 0..10 {
+            for k in 0..gulps {
+                soil.drink(spring, tick + k * TICKS_PER_DAY / gulps);
+            }
+            tick += TICKS_PER_DAY;
+        }
+        let used = soil.risk(spring, tick) - WATER_BACKGROUND_P;
+        assert!((0.0045..0.0075).contains(&used), "trente usagers : ~0,0002 chacun : {used}");
+        let fresh = soil.risk((1000.0 + km_to_tiles(1.0), 1000.0), tick) - WATER_BACKGROUND_P;
+        assert!(fresh == 0.0, "une source neuve est propre");
+        let later = soil.risk(spring, tick + 10 * TICKS_PER_DAY) - WATER_BACKGROUND_P;
+        assert!(later < 0.0001, "dix jours après le départ, presque propre : {later}");
+        let soon = soil.risk(spring, tick + TICKS_PER_DAY) - WATER_BACKGROUND_P;
+        assert!(soon > 0.25 * used, "le lendemain, encore souillée (T90 de 2 j : ~0,32) : {soon}");
+        soil.forget(tick + 40 * TICKS_PER_DAY);
+        assert!(soil.cells.is_empty(), "un point d'eau redevenu propre est oublié");
     }
 
     #[test]

@@ -308,6 +308,8 @@ pub struct Sim {
     pub(crate) routes: BTreeMap<u64, Route>,
     /// Le graphe d'affinités entre agents (Phase 4, voir `social`).
     pub social: SocialGraph,
+    /// La souillure des points d'eau par ceux qui y boivent (voir `disease`).
+    pub water_soil: disease::WaterSoil,
     /// Les clans détectés — reconstruit en entier chaque jour, jamais
     /// modifié à la main : voir `social::daily`.
     pub clans: Vec<Clan>,
@@ -526,6 +528,7 @@ impl Sim {
             shelter_ticks: 0,
             routes: BTreeMap::new(),
             social: SocialGraph::default(),
+            water_soil: disease::WaterSoil::default(),
             clans: Vec::new(),
             clan_events: Vec::new(),
             clan_relations: ClanRelations::default(),
@@ -1226,10 +1229,6 @@ impl Sim {
             .filter(|s| s.kind == StructureKind::Hut)
             .map(|s| (s.pos.0, s.pos.1, s.clan))
             .collect();
-        // Instantané des positions humaines : la souillure d'une eau se lit
-        // aux humains présents autour (voir `disease`).
-        let humans_at: Vec<(f64, f64)> =
-            self.agents.query::<(&Position, &AgentId)>().iter().map(|(_, (p, _))| (p.x, p.y)).collect();
         let disease_seed = self.world.seed().derive(crate::salt::DISEASE) ^ splitmix64(time.tick);
         // Les nourrissons portés : leur masse alourdit la marche de qui les
         // porte (la mère, ou celle qui l'a recueilli).
@@ -1300,13 +1299,9 @@ impl Sim {
             // infecter ; toute
             // infection en cours ronge la santé selon la lutte de l'heure.
             if behavior.activity == Activity::Drinking {
-                let r2 = disease::SOIL_RADIUS_TILES * disease::SOIL_RADIUS_TILES;
-                let near = humans_at
-                    .iter()
-                    .filter(|(hx, hy)| (pos.x - hx).powi(2) + (pos.y - hy).powi(2) <= r2)
-                    .count();
+                let risk = self.water_soil.drink((pos.x, pos.y), time.tick);
                 let mut rng = Pcg32::new(disease_seed, id.0);
-                if rng.next_f64() < disease::water_risk(near) {
+                if rng.next_f64() < risk {
                     illness.infect(disease::Route::Gut, time.tick, &mut rng);
                 }
             }

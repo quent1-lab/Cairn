@@ -845,3 +845,28 @@ Prédictions, acceptation 1 an × 8 runs contre MOR-5c2 (même scène, mesures d
 Le mécanisme compte pour les rencontres entre bandes (deux foyers de départ, migrants) : c'est
 la run longue qui le verra.
 Instrument ajouté : gorgées par personne et par jour (dimensionne la souillure de l'eau).
+
+### MOR-5c4 — mesuré (acceptation 1 an, 8 runs, ec20933) contre MOR-5c2 (12270ce, même instrument)
+Adultes 15-39 : diarrhées 3,96 → 3,91/an, respiratoires 1,58 → 1,57 ; morts de maladie 7 → 8
+(8 runs). Prédiction (±5 %) : **tenue**. Gorgées : **2,2 par personne et par jour**.
+
+## MOR-5c5 — la souillure de l'eau devient un état du point d'eau (2026-10-18)
+Décision de l'utilisateur (réalisme, sans coût de débit). Avant : risque par gorgée =
+0,002 + 0,0002 × humains présents à 100 m à l'instant (un instantané de toutes les positions
+chaque heure, parcouru à chaque gorgée). Après (`disease::WaterSoil`) : chaque maille de 100 m
+où l'on boit garde une souillure qui monte à chaque gorgée et décroît avec un T90 de 2 j
+(bactéries fécales en eau de surface : 1-2 j à faible lumière, ~6 j au soleil) ; dépôt
+dimensionné pour garder l'ordre choisi au départ (0,0002 par usager à l'équilibre, avec 2,2
+gorgées par jour). Une source quittée reste souillée quelques jours, une source neuve est
+propre ; ce qui compte, ce sont ceux qui **boivent là**, plus ceux qui passent. Coût : une
+entrée par maille bue récemment (oubliée sous 10⁻⁶), plus d'instantané des positions.
+Test `la_souillure_d_un_point_d_eau_s_accumule_et_s_efface` (rouge au sens où l'état n'existait
+pas : l'ancienne fonction ne pouvait pas l'exprimer). Non modélisés : la température (les
+germes vivent plus longtemps au froid), la pluie (qui augmente la souillure par ruissellement),
+la dilution par le débit (aucune formule sourcée).
+Prédictions, acceptation 5 ans × 8 runs, MOR-5c5 contre MOR-5c4 (lancés ensemble) :
+1. Diarrhées d'eau des adultes à ±30 % (sens non prédit : les usagers d'un même point qui
+   vivent à plus de 100 m comptent désormais, ceux qui boivent à des points distincts non).
+   Réfuterait : écart > 30 %.
+2. Elles montent encore avec la taille du camp (les grands camps boivent aux mêmes points).
+3. Débit : tps par année ≥ celui de MOR-5c4 (plus d'instantané).
