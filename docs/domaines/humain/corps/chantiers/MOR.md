@@ -749,3 +749,34 @@ hasard, la contagion transmet celui du malade) ; l'immunité se garde **par germ
 durée propre à la voie ; la convalescence de 30 j reste (fatigue, défense). Constantes à
 décider : K digestive (6, GEMS) et durée (~2,5 ans ?), K respiratoire (grand : l'immunité par
 germe y compte peu) — elles se tirent des sources, ne se règlent pas sur la mortalité.
+
+## Débat (2026-10-18, contre-lecture de MOR-5, contradicteur Opus, un tour)
+1. *< 1 an −49 % contre −21 % chez l'adulte : la prédiction 4 de MOR-5c2 (« les enfants
+   baissent moins ») est contredite et non relevée.* — **Retenu** : prédiction 4 **réfutée** sur
+   sa première moitié. Action : tracer la source de chaque infection (âge, lien du malade).
+2. *5/8 arrive une fois sur trois par hasard ; « mourir avant 15 ans 33 % » n'est pas établi.* —
+   **Retenu.** Seul MOR-5c1 sur les 1-4 ans (8/8) est solide. Action : 4 seeds de plus.
+3. *`water_risk` croît linéairement avec les humains à 100 m, sans plafond : toute baisse de
+   mortalité grossit les camps et ramène des diarrhées (boucle compensatrice) ; MOR-5c3 la
+   masquerait.* — **Retenu**, en amont de MOR-5c3. Action : diarrhées d'eau par adulte selon la
+   taille du camp ; référence physique à sourcer (souillure d'un point d'eau : accumulation,
+   lessivage, débit). Question de mécanisme à l'utilisateur.
+4. *19 ‰ pour ~6,8 épisodes : ~0,28 % par épisode, le double du calcul nourri ; H3 (faim de
+   l'heure) jamais jugée.* — **Retenu.** Action : faim au décès contre faim à l'infection.
+5. *L'affinité monte avec l'ancienneté du camp (contagion non stationnaire) ; un inconnu vaut 0 :
+   aucune contagion par un arrivant, porte tout ou rien sans impossibilité physique (règle 10).*
+   — **Retenu.** Action : affinité des voisins de nuit par année ; question à l'utilisateur (un
+   inconnu couché à côté doit pouvoir contaminer).
+6. *Témoin non apparié au sens fort : écarts par run énormes, des sommes sur 8 runs ne séparent
+   pas 20 %.* — **Retenu en partie** : les seeds et scènes sont les mêmes, mais les trajectoires
+   divergent. Action : grandeurs rapportées à la population run par run.
+7. *Instrument : `defense(age, false, …)` ignore le lait (défense des < 1 an biaisée vers le
+   bas, H2 jugée en partie là-dessus) ; létalité des enfants biaisée par sélection.* —
+   **Retenu.** Action : compter le lait (posé avant la physiologie, lisible à l'heure) ;
+   létalité par rang d'épisode.
+8. *MOR-5c3 : une immunité de ~2,5 ans est de l'ordre de l'horizon (règle 8) ; fondateurs naïfs
+   par germe ; risque de passer sous la référence.* — **Retenu** pour MOR-5c3 : prédictions aux
+   deux bouts, run longue ≥ 15 ans sur 4 seeds.
+Ordre qui en sort : instrument (source de l'infection, faim au décès, lait, rang d'épisode,
+eau selon la taille du camp, affinité par an) → mesure sur 8 + 4 seeds → décisions de
+l'utilisateur sur l'eau et l'inconnu → MOR-5c3.
