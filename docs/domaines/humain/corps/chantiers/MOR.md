@@ -713,3 +713,39 @@ Prédictions, acceptation 5 ans × 8 runs contre MOR-5c1 :
    moins de malades affaiblis).
 4. Mourir avant 15 ans : en baisse, mais moins que les adultes (contagion d'enfant à gravité
    montante) ; 1-4 ans en baisse sur ≥ 5/8 runs.
+
+### MOR-5c2 — mesuré (acceptation 5 ans, 8 runs, fa42221) contre MOR-5c1
+| | MOR-5c1 | MOR-5c2 |
+|---|---|---|
+| adultes 15-39 : diarrhées ; respiratoires /an | 4,8 ; 4,6 | 4,8 ; **2,0** |
+| part venue d'un malade (dig. ; resp.), adultes | 49 % ; 86 % | 49 % ; 56 % |
+| maladie 15-39 ans (‰/an) | 24 | **19** (dig. 19 morts, resp. 11) |
+| mortalité 15-39 ans toutes causes (‰/an) | 38 | 39 (maladie 30, violence 16, faim 7, soif 6) |
+| mortalité < 1 an ; 1-4 ans (‰/an) | 249 ; 77 | **127** ; 70 |
+| 1-4 ans par run | 19, 85, 56, 221, 118, 121, 40, 29 | 18, 48, 18, 111, 86, 122, 52, 98 |
+| mourir avant 15 ans | 43 % | **33 %** |
+| morts de maladie ; de soif (8 runs) | 113 ; 21 | 84 ; 16 |
+1. Respiratoires ≤ 2,5/an, part contagieuse ≤ 70 % : **tenue** (2,0 ; 56 %).
+2. Maladie 15-39 ≤ 15 ‰ : **réfutée** (19 ; la digestive en fait désormais les deux tiers).
+3. Diarrhées inchangées : **tenue** (4,8). 4. 1-4 ans en baisse sur ≥ 5/8 : **tenue de justesse**
+   (5/8 ; f1337 et f2024 en hausse, f7 égal).
+**L'autre bout** : la mortalité < 1 an (127 ‰) passe **sous** le réel (~200 ‰, Gurven et Kaplan)
+et mourir avant 15 ans (33 %) sous ~40 % — à lire comme un manque d'autres causes (accidents,
+accouchement, infanticide : MOR-6, MOR-7), pas comme une raison de rendre la maladie plus
+forte (règle 10). Les adultes restent à ~39 ‰ toutes causes contre ~10 réels : maladie
+digestive (4,8 épisodes/an contre ~2-3), violence (16 morts), faim.
+**Suite** : piste 3 (plusieurs germes par voie, immunité propre à chacun) — vise la diarrhée de
+l'adulte, qui se réinfecte dès ses 30 j de convalescence. Choix de forme et de constantes à
+valider avec l'utilisateur (ci-dessous).
+
+## MOR-5c3 — plusieurs germes par voie (proposition, 2026-10-18)
+Lecture : une voie = un germe ; après un épisode, 30 j d'immunité contre **toute** la voie, puis
+plus rien (`IMMUNE_DAYS`) ; l'expérience (`episodes`) aguerrit la défense, pas l'exposition.
+Réel : ~6 germes principaux de la diarrhée (GEMS) ; immunité de génotype ~2,5 ans
+(norovirus, 4-8 ans homotypique), courte pour le rotavirus (anticorps 100-150 j) mais qui
+protège de la forme sévère ; ~160 rhinovirus.
+Forme proposée : chaque infection porte un germe tiré parmi K de sa voie (l'eau en tire un au
+hasard, la contagion transmet celui du malade) ; l'immunité se garde **par germe**, pour une
+durée propre à la voie ; la convalescence de 30 j reste (fatigue, défense). Constantes à
+décider : K digestive (6, GEMS) et durée (~2,5 ans ?), K respiratoire (grand : l'immunité par
+germe y compte peu) — elles se tirent des sources, ne se règlent pas sur la mortalité.
