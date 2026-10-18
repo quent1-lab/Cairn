@@ -1323,6 +1323,7 @@ impl Sim {
                 }
             }
             let defense = disease::defense(age, illness.milk, phys.hunger, phys.cold);
+            illness.nursed = illness.milk;
             illness.milk = false;
             let sick = illness.course(defense, time.tick);
             if sick > 0.0 {
@@ -3247,7 +3248,7 @@ mod tests {
                 for (_, (id, ill)) in sim.agents.query_mut::<(&AgentId, &mut Illness)>() {
                     *ill = Illness::default();
                     if *id == sick {
-                        ill.active[route as usize] = Some(disease::Infection { severity, virulence: 0.0, contagion: false });
+                        ill.active[route as usize] = Some(disease::Infection { severity, virulence: 0.0, source: None });
                     }
                 }
                 disease::daily(&mut sim);
@@ -3292,7 +3293,7 @@ mod tests {
                     *ill = Illness::default();
                     if *id == sick {
                         ill.active[disease::Route::Lung as usize] =
-                            Some(disease::Infection { severity: 0.5, virulence: 0.0, contagion: false });
+                            Some(disease::Infection { severity: 0.5, virulence: 0.0, source: None });
                     }
                 }
                 disease::daily(&mut sim);

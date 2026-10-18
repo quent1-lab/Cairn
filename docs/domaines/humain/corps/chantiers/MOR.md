@@ -780,3 +780,18 @@ germe y compte peu) — elles se tirent des sources, ne se règlent pas sur la m
 Ordre qui en sort : instrument (source de l'infection, faim au décès, lait, rang d'épisode,
 eau selon la taille du camp, affinité par an) → mesure sur 8 + 4 seeds → décisions de
 l'utilisateur sur l'eau et l'inconnu → MOR-5c3.
+
+### Mesures du débat de MOR-5 — prédictions (2026-10-18, avant le banc)
+Instrument : la source de chaque contagion (`Infection::source`, un malade tiré selon sa part
+de l'exposition, après l'infection et sans effet sur elle), le lait compté dans la défense
+(`Illness::nursed`), la faim au décès, la létalité par rang d'épisode (< 5 ans), les
+diarrhées d'eau des adultes selon la taille du camp (humains à 500 m), l'affinité par année.
+Acceptation 5 ans, seeds 42, 7, 1337, 2024 (contrôle : morts de maladie par run identiques à
+MOR-5c2) et 11, 23, 99, 314 (puissance).
+1. < 1 an : ≥ 70 % des contagions viennent du foyer (la mère) ; adultes : ≤ 30 %.
+2. Faim au décès de maladie (adultes) ≥ 0,5 en moyenne (0,30 à l'infection) : H3. Réfuterait :
+   ≤ 0,35.
+3. Enfants : létalité au rang 0 ≥ 2 × celle du rang 3+ (sélection).
+4. Diarrhées d'eau des adultes : camp de 60+ ≥ 2 × camp de < 10.
+5. Affinité hors foyer des voisins de nuit en hausse de l'an 1 à l'an 5.
+6. Défense des < 1 an, lait compté : ≥ 0,45 (0,33 sans).

@@ -102,9 +102,9 @@ pub struct Infection {
     pub severity: f32,
     /// Croissance du pathogène, par jour.
     pub virulence: f32,
-    /// Venue d'un malade (contagion de nuit) plutôt que de l'eau, du portage
-    /// ou d'une plaie : un relevé pour les bancs, sans effet sur la lutte.
-    pub contagion: bool,
+    /// Le malade qui l'a transmise (contagion de nuit) ; `None` : l'eau, le
+    /// portage ou une plaie. Un relevé pour les bancs, sans effet sur la lutte.
+    pub source: Option<AgentId>,
 }
 
 /// L'état infectieux d'un humain.
@@ -118,6 +118,9 @@ pub struct Illness {
     /// Allaité cette heure : les anticorps du lait (posé par
     /// `demography::nurse_infants`, consommé par la physiologie).
     pub milk: bool,
+    /// Allaité à l'heure écoulée : `milk` gardé après sa consommation, un
+    /// relevé pour les bancs.
+    pub nursed: bool,
 }
 
 impl Illness {
@@ -138,7 +141,7 @@ impl Illness {
             return false;
         }
         let virulence = VIRULENCE_MEDIAN * (VIRULENCE_SIGMA * gaussian(rng)).exp();
-        self.active[r] = Some(Infection { severity: ONSET_SEVERITY, virulence, contagion: false });
+        self.active[r] = Some(Infection { severity: ONSET_SEVERITY, virulence, source: None });
         true
     }
 
@@ -255,12 +258,14 @@ pub(crate) fn daily(sim: &mut Sim) {
                 continue;
             }
             let mut escape = 1.0;
+            let mut exposures: Vec<(AgentId, f64)> = Vec::new();
             for &(s, x, y, load) in &sick {
                 if (pos.x - x).powi(2) + (pos.y - y).powi(2) > r2 {
                     continue;
                 }
                 let contact = if household(*id, s) { 1.0 } else { f64::from(social.affinity(*id, s)) };
                 escape *= 1.0 - beta * contact * load;
+                exposures.push((s, beta * contact * load));
             }
             let p = 1.0 - escape;
             if p <= 0.0 {
@@ -268,8 +273,16 @@ pub(crate) fn daily(sim: &mut Sim) {
             }
             let mut rng = Pcg32::new(stream, id.0);
             if rng.next_f64() < p && ill.infect(route, tick, &mut rng) {
+                // Le relevé de la source : un malade tiré selon sa part de
+                // l'exposition (tirage après l'infection, sans effet sur elle).
+                let total: f64 = exposures.iter().map(|e| e.1).sum();
+                let mut pick = rng.next_f64() * total;
+                let source = exposures.iter().find(|e| {
+                    pick -= e.1;
+                    pick <= 0.0
+                });
                 if let Some(inf) = ill.active[route as usize].as_mut() {
-                    inf.contagion = true;
+                    inf.source = source.or(exposures.last()).map(|e| e.0);
                 }
             }
         }

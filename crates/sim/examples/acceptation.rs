@@ -121,6 +121,22 @@ struct Report {
     near_kin: u64,
     near_affinity: f64,
     near_sick: u64,
+    // Débat MOR-5 : par année, nuits, voisins, voisins hors foyer, affinité de ceux-ci.
+    near_by_year: Vec<[f64; 4]>,
+    // Source des infections venues d'un malade, par âge de l'infecté et par
+    // voie : du foyer ; d'un enfant (< 15 ans).
+    from_household: [[u64; disease::ROUTES]; AGE_CLASSES.len()],
+    from_child: [[u64; disease::ROUTES]; AGE_CLASSES.len()],
+    // Faim à l'heure d'avant une mort de maladie, par âge : somme, morts, dont > 0,5.
+    death_hunger: [(f64, u64, u64); AGE_CLASSES.len()],
+    // Enfants < 5 ans, toutes voies : infections et morts selon le rang de
+    // l'épisode (épisodes déjà surmontés sur la voie : 0, 1, 2, 3 et plus).
+    rank_onsets: [u64; 4],
+    rank_fatal: [u64; 4],
+    // Adultes : diarrhées venues de l'eau selon la taille du camp (humains à
+    // 500 m à minuit : < 10, 10-29, 30-59, 60 et plus), jours-personnes.
+    camp_days: [u64; 4],
+    camp_water: [u64; 4],
     // Énergie, par classe (femmes adultes, hommes adultes, < 3 ans, 3-13 ans) :
     // kcal dépensées, métabolisme de base cumulé, heures vécues, heures de marche.
     burn: [f64; 4],
@@ -263,7 +279,13 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
     // Portée de la contagion de nuit (`disease`, 10 m).
     let contact_radius = km_to_tiles(0.01);
     // MOR-5a : classe d'âge et gravité de chaque infection en cours, à l'heure d'avant.
-    let mut prev_ill: BTreeMap<u64, (usize, [Option<f32>; disease::ROUTES])> = BTreeMap::new();
+    let mut prev_ill: BTreeMap<u64, (usize, [Option<(f32, u8)>; disease::ROUTES])> = BTreeMap::new();
+    // Recalculés à minuit : la filiation, les couples (parents d'un même
+    // enfant), l'âge et la taille du camp de chacun.
+    let mut kin_of: BTreeMap<u64, cairn_sim::demography::Kinship> = BTreeMap::new();
+    let mut couples: BTreeSet<(u64, u64)> = BTreeSet::new();
+    let mut adult_of: BTreeMap<u64, bool> = BTreeMap::new();
+    let mut camp_of: BTreeMap<u64, usize> = BTreeMap::new();
     let total_days = years * 360;
     let mut year_started = std::time::Instant::now();
     for day in 1..=total_days {
@@ -328,18 +350,25 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                     r.deaths_by_age[age_class(age)][cause_index(d.cause)] += 1;
                 }
                 if let Some((k, active)) = prev_ill.get(&d.agent.0) {
-                    let mut worst: Option<(usize, f32)> = None;
-                    for (route, sev) in active.iter().enumerate() {
-                        let Some(sev) = *sev else { continue };
+                    let mut worst: Option<(usize, f32, u8)> = None;
+                    for (route, inf) in active.iter().enumerate() {
+                        let Some((sev, rank)) = *inf else { continue };
                         r.died_sick[*k][route] += 1;
-                        if worst.is_none_or(|(_, w)| sev > w) {
-                            worst = Some((route, sev));
+                        if worst.is_none_or(|(_, w, _)| sev > w) {
+                            worst = Some((route, sev, rank));
                         }
                     }
                     if d.cause == cairn_sim::DeathCause::Disease
-                        && let Some((route, _)) = worst
+                        && let Some((route, _, rank)) = worst
                     {
                         r.fatal[*k][route] += 1;
+                        if *k < 2 {
+                            r.rank_fatal[usize::from(rank.min(3))] += 1;
+                        }
+                        let h = prev_hunger.get(&d.agent.0).copied().unwrap_or(0.0);
+                        r.death_hunger[*k].0 += f64::from(h);
+                        r.death_hunger[*k].1 += 1;
+                        r.death_hunger[*k].2 += u64::from(h > 0.5);
                     }
                 }
                 if d.cause == cairn_sim::DeathCause::Disease {
@@ -451,15 +480,39 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                 let mut active = [None; disease::ROUTES];
                 for route in 0..disease::ROUTES {
                     let Some(inf) = ill.active[route] else { continue };
-                    active[route] = Some(inf.severity);
+                    let rank = before[route].map_or(ill.episodes[route], |(_, rk)| rk);
+                    active[route] = Some((inf.severity, rank));
                     if before[route].is_none() {
                         r.onsets[a][route] += 1;
                         r.onset_defense[a][route] += f64::from(
-                            disease::defense(age, false, phys.hunger, phys.cold)
+                            disease::defense(age, ill.nursed, phys.hunger, phys.cold)
                                 * disease::experience(ill.episodes[route]),
                         );
                         r.onset_hunger[a][route] += f64::from(phys.hunger);
-                        r.onsets_contagion[a][route] += u64::from(inf.contagion);
+                        r.onsets_contagion[a][route] += u64::from(inf.source.is_some());
+                        if a < 2 {
+                            r.rank_onsets[usize::from(rank.min(3))] += 1;
+                        }
+                        if let Some(src) = inf.source {
+                            let household = couples.contains(&(id.0.min(src.0), id.0.max(src.0)))
+                                || match (kin_of.get(&id.0), kin_of.get(&src.0)) {
+                                    (Some(ka), Some(kb)) => {
+                                        ka.mother == Some(src)
+                                            || ka.father == Some(src)
+                                            || kb.mother == Some(*id)
+                                            || kb.father == Some(*id)
+                                            || (ka.mother.is_some() && ka.mother == kb.mother)
+                                            || (ka.father.is_some() && ka.father == kb.father)
+                                    }
+                                    _ => false,
+                                };
+                            r.from_household[a][route] += u64::from(household);
+                            r.from_child[a][route] += u64::from(adult_of.get(&src.0) == Some(&false));
+                        } else if route == 0 && demo.is_adult(sim.time.tick) {
+                            if let Some(&c) = camp_of.get(&id.0) {
+                                r.camp_water[c] += 1;
+                            }
+                        }
                     }
                 }
                 if active.iter().any(Option::is_some) {
@@ -516,16 +569,51 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                 .iter()
                 .map(|(_, (id, p, k, ill))| (*id, (p.x, p.y), *k, ill.active.iter().any(Option::is_some)))
                 .collect();
+            kin_of = people.iter().map(|(id, _, k, _)| (id.0, *k)).collect();
+            couples = people
+                .iter()
+                .filter_map(|(_, _, k, _)| Some((k.mother?.0, k.father?.0)))
+                .map(|(m, f)| (m.min(f), m.max(f)))
+                .collect();
+            adult_of = sim
+                .agents
+                .query::<(&AgentId, &cairn_sim::Demographics)>()
+                .iter()
+                .map(|(_, (id, d))| (id.0, d.is_adult(sim.time.tick)))
+                .collect();
+            let camp_r2 = km_to_tiles(0.5) * km_to_tiles(0.5);
+            camp_of.clear();
+            let year = ((day - 1) / 360) as usize;
+            if r.near_by_year.len() <= year {
+                r.near_by_year.resize(year + 1, [0.0; 4]);
+            }
             let r2 = contact_radius * contact_radius;
             for (i, (a, pa, ka, _)) in people.iter().enumerate() {
                 r.nights += 1;
+                r.near_by_year[year][0] += 1.0;
+                let camp = people
+                    .iter()
+                    .filter(|(_, pb, _, _)| (pa.0 - pb.0).powi(2) + (pa.1 - pb.1).powi(2) <= camp_r2)
+                    .count();
+                let bucket = match camp {
+                    0..10 => 0,
+                    10..30 => 1,
+                    30..60 => 2,
+                    _ => 3,
+                };
+                camp_of.insert(a.0, bucket);
+                if adult_of.get(&a.0) == Some(&true) {
+                    r.camp_days[bucket] += 1;
+                }
                 for (j, (b, pb, kb, sick)) in people.iter().enumerate() {
                     if i == j || (pa.0 - pb.0).powi(2) + (pa.1 - pb.1).powi(2) > r2 {
                         continue;
                     }
                     r.near += 1;
+                    r.near_by_year[year][1] += 1.0;
                     r.near_sick += u64::from(*sick);
-                    let kin = ka.mother == Some(*b)
+                    let kin = couples.contains(&(a.0.min(b.0), a.0.max(b.0)))
+                        || ka.mother == Some(*b)
                         || ka.father == Some(*b)
                         || kb.mother == Some(*a)
                         || kb.father == Some(*a)
@@ -534,7 +622,10 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                     if kin {
                         r.near_kin += 1;
                     } else {
-                        r.near_affinity += f64::from(sim.social.affinity(*a, *b));
+                        let w = f64::from(sim.social.affinity(*a, *b));
+                        r.near_affinity += w;
+                        r.near_by_year[year][2] += 1.0;
+                        r.near_by_year[year][3] += w;
                     }
                 }
             }
@@ -683,6 +774,67 @@ fn print_episodes(rs: &[Report]) {
         per(kin as f64),
         if near > kin { aff / (near - kin) as f64 } else { 0.0 },
         per(sick as f64),
+    );
+    let years = rs.iter().map(|r| r.near_by_year.len()).max().unwrap_or(0);
+    for y in 0..years {
+        let sum = |i: usize| rs.iter().filter_map(|r| r.near_by_year.get(y)).map(|v| v[i]).sum::<f64>();
+        println!(
+            "  an {} : {:.1} voisins, affinité hors foyer {:.2}",
+            y + 1,
+            sum(1) / sum(0).max(1.0),
+            sum(3) / sum(2).max(1.0)
+        );
+    }
+    println!("Source des contagions (part venue du foyer ; part venue d'un enfant), par âge de l'infecté :");
+    for (k, (_, name)) in AGE_CLASSES.iter().enumerate() {
+        for (route, rname) in ["digestive", "respiratoire"].iter().enumerate() {
+            let n: u64 = rs.iter().map(|r| r.onsets_contagion[k][route]).sum();
+            if n == 0 {
+                continue;
+            }
+            let hh: u64 = rs.iter().map(|r| r.from_household[k][route]).sum();
+            let ch: u64 = rs.iter().map(|r| r.from_child[k][route]).sum();
+            println!(
+                "  {name:<6}{rname:<14}{n:>7} : foyer {:>3.0} % ; enfant {:>3.0} %",
+                100.0 * hh as f64 / n as f64,
+                100.0 * ch as f64 / n as f64
+            );
+        }
+    }
+    println!("Faim l'heure d'avant une mort de maladie (moyenne ; part > 0,5), contre faim à l'infection :");
+    for (k, (_, name)) in AGE_CLASSES.iter().enumerate() {
+        let (h, n, hi) = rs.iter().fold((0.0, 0, 0), |acc, r| {
+            (acc.0 + r.death_hunger[k].0, acc.1 + r.death_hunger[k].1, acc.2 + r.death_hunger[k].2)
+        });
+        if n == 0 {
+            continue;
+        }
+        let onsets: u64 = rs.iter().map(|r| r.onsets[k].iter().sum::<u64>()).sum();
+        let onset_h: f64 = rs.iter().map(|r| r.onset_hunger[k].iter().sum::<f64>()).sum();
+        println!(
+            "  {name:<6}{n:>5} morts : {:.2} ; {:.0} %   (infection : {:.2})",
+            h / n as f64,
+            100.0 * hi as f64 / n as f64,
+            onset_h / onsets.max(1) as f64
+        );
+    }
+    let ro: Vec<u64> = (0..4).map(|i| rs.iter().map(|r| r.rank_onsets[i]).sum()).collect();
+    let rf: Vec<u64> = (0..4).map(|i| rs.iter().map(|r| r.rank_fatal[i]).sum()).collect();
+    println!(
+        "Enfants < 5 ans, létalité par rang d'épisode (0, 1, 2, 3+) : {}",
+        (0..4)
+            .map(|i| format!("{:.2} % ({}/{})", 100.0 * rf[i] as f64 / ro[i].max(1) as f64, rf[i], ro[i]))
+            .collect::<Vec<_>>()
+            .join(" ; ")
+    );
+    let cd: Vec<u64> = (0..4).map(|i| rs.iter().map(|r| r.camp_days[i]).sum()).collect();
+    let cw: Vec<u64> = (0..4).map(|i| rs.iter().map(|r| r.camp_water[i]).sum()).collect();
+    println!(
+        "Adultes, diarrhées d'eau par an selon le camp (< 10, 10-29, 30-59, 60+ à 500 m) : {}",
+        (0..4)
+            .map(|i| format!("{:.2} ({:.0} a-p)", 360.0 * cw[i] as f64 / cd[i].max(1) as f64, cd[i] as f64 / 360.0))
+            .collect::<Vec<_>>()
+            .join(" ; ")
     );
 }
 
