@@ -990,3 +990,19 @@ l'an 18 (jour 6 620, 5 h de calcul) : la tendance ne changeait plus.
 - **Faune en croissance continue** : 19 600 têtes (an 3) → 44 800 (an 18), 714 troupeaux — à
   lire (proie sans borne ? coût du débit ?).
 Relancée à **6 km** le 2026-10-18 à 15 h 45 (`out/longue/deuxfoyers/t42_2x80_6km_3c0fe52.*`).
+
+### À 6 km (3c0fe52) — point à l'an 17 (2026-10-18, 17 h 41 ; run toujours en cours)
+- **Rencontre dès le jour 3** ; 45 liens A-B au jour 30. Mais la tension entre les deux clans
+  monte à 0,95 au jour 60 et reste **saturée à 1,0 de 4 mois à 3 ans**.
+- **Une guerre lente puis un massacre** : morts de violence A/B 5/3 (j120), 24/6 (j500), 63/21
+  (j1040), puis **23 A tués en 7 jours** (j1050-1057) ; le clan A (32) disparaît, ses 5 survivants
+  rejoignent B (un seul clan, mixte, ~70-90 depuis).
+- Violence : **107 morts** sur ~225 (≈ 47 %), contre ~10 % visés par le BRIEF et quelques pour
+  mille par an chez les Hadza ou les !Kung — D13.
+- Population 160 → 68 (an 3), puis ~86 stable jusqu'à l'an 17 (à 20 km : ~245). La technique
+  de conservation est perdue (`techs` vide).
+- Après la fusion : 1 126 contagions entre origines (un seul camp), 17 naissances mixtes.
+- Débit 15-30 tps, mémoire 1,1 Go.
+À lire (D13) : pourquoi la tension sature et ne redescend jamais pendant des années de
+contacts quotidiens et de liens (45-75 liens A-B) ; pourquoi la violence ne s'arrête qu'à
+l'anéantissement d'un clan.
