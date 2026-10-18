@@ -3286,7 +3286,7 @@ mod tests {
                 sim.social.bonds.insert((sick.0.min(other.0), sick.0.max(other.0)), 0.5);
             }
             let mut infected = 0;
-            let nights = 2000;
+            let nights = 20000;
             for n in 0..nights {
                 sim.time.tick = (n + 1) * TICKS_PER_DAY;
                 for (_, (id, ill)) in sim.agents.query_mut::<(&AgentId, &mut Illness)>() {
@@ -3309,7 +3309,9 @@ mod tests {
         let (enfant, ami, inconnu) = (taux("enfant"), taux("ami"), taux("inconnu"));
         assert!((0.07..0.13).contains(&enfant), "le foyer à plein (10 %/nuit) : {enfant}");
         assert!((0.03..0.07).contains(&ami), "un lien de 0,5 : moitié moins : {ami}");
-        assert!(inconnu < 0.01, "un inconnu presque pas : {inconnu}");
+        // MOR-5c4 : dormir côte à côte suffit à un contact minimal (~1/100 du
+        // foyer) : 0,1 %/nuit.
+        assert!((0.0004..0.0025).contains(&inconnu), "un inconnu couché à côté, un peu : {inconnu}");
     }
 
     #[test]

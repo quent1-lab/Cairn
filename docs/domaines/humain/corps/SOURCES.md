@@ -55,3 +55,22 @@ par (moi, sous-agent `sourceur`) · lu en entier ou de seconde main.
   40/41, ETEC, Cryptosporidium, Campylobacter. Kotloff et al. 2013 ; fiche GEMS.
 - **Non trouvé** : attaque hors foyer pour la diarrhée ; part foyer/hors foyer chez des
   chasseurs-cueilleurs ; courbes d'excrétion VRS, rotavirus.
+
+## Contagion hors foyer et souillure de l'eau (sous-agent `sourceur`, 2026-10-18)
+- Norovirus (Changsha, hiver 2014, 539 personnes, 237 foyers) : attaque secondaire en foyer
+  33 % (7-84 % selon taille et milieu) ; **entre foyers 0,2-0,6 %** — rapport ~50-150. Tsang
+  et al. 2018, https://pmc.ncbi.nlm.nih.gov/articles/PMC6066449 — lu en entier.
+- VRS (Kilifi, Kenya rural, 493 personnes, 47 foyers) : 32-53 % des transmissions dans le
+  foyer, le reste dans la communauté. Kombe et al. 2019, https://pmc.ncbi.nlm.nih.gov/articles/PMC6543068 — lu en entier.
+- Shigella, foyer (villages du Guatemala) : 30-37 %. Gangarosa et al. 1970, de seconde main.
+- Grippe : casernes et navires, attaque 10-65 % liée à la proximité des couchettes ;
+  rhinovirus, concentration forte dans un cône de ~2,8 m. De seconde main, sans rapport chiffré.
+- Bactéries fécales dans l'eau de surface : T90 ≈ 1-2 j à faible lumière, ~6 j en plein
+  soleil (rivière ; estuaire tropical ~1 j). Une phase de croissance possible les premières
+  24 h. De seconde main.
+- Pluie : E. coli ×10 à ×1 000 après une pluie (ruissellement), ~90 % de l'export en 48 h ;
+  aucune formule de dilution par le débit trouvée.
+- Kystes de Giardia : survie 6 j à 37 °C, 26 j à 21 °C, 77 j à 8 °C ; Cryptosporidium plus
+  résistant. De seconde main.
+- **Non trouvé** : relation nombre d'usagers d'un point d'eau → risque ; durée du danger d'une
+  mare naturelle après le départ des usagers ; données de chasseurs-cueilleurs.

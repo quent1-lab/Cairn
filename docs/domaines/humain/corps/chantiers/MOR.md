@@ -828,3 +828,20 @@ de MOR-5c1 + 5c2 sur les 1-4 ans ne va pas dans le même sens partout ; seul MOR
 maladie : 1 mort de maladie).
 En attente : décisions de l'utilisateur sur l'eau (souillure comme état du point d'eau) et sur
 l'inconnu (contact minimal de qui dort à côté) ; puis MOR-5c3.
+
+## Décisions de l'utilisateur (2026-10-18)
+1. Eau : « pour cet ajout de réalisme, à dimensionner pour ne pas impacter les performances ».
+2. Inconnus : « une contagion minimale doit être appliquée s'ils dorment proches ».
+3. Ensuite, une run longue arrêtée quand le débit tombe à 1 tps, avec deux foyers de départ
+   plus ou moins proches et plus d'humains.
+
+## MOR-5c4 — le contact minimal de qui dort à côté (2026-10-18)
+Changement : contact = max(affinité, 0,01) hors foyer (norovirus : attaque entre foyers
+~1/100 de celle du foyer, Tsang 2018 ; même part faute de mieux pour la voie respiratoire).
+Test `la_contagion_de_nuit_suit_le_lien` étendu, vu rouge (inconnu : 0 au lieu de ~0,1 %/nuit).
+Prédictions, acceptation 1 an × 8 runs contre MOR-5c2 (même scène, mesures du débat) :
+1. Effet presque nul dans une bande (les voisins de nuit ont une affinité moyenne de 0,3) :
+   épisodes par âge et morts de maladie à ±5 %. Réfuterait : > 15 %.
+Le mécanisme compte pour les rencontres entre bandes (deux foyers de départ, migrants) : c'est
+la run longue qui le verra.
+Instrument ajouté : gorgées par personne et par jour (dimensionne la souillure de l'eau).

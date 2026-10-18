@@ -137,6 +137,8 @@ struct Report {
     // 500 m à minuit : < 10, 10-29, 30-59, 60 et plus), jours-personnes.
     camp_days: [u64; 4],
     camp_water: [u64; 4],
+    // Heures passées à boire (chacune une gorgée exposée à l'eau), toutes personnes.
+    drink_h: u64,
     // Énergie, par classe (femmes adultes, hommes adultes, < 3 ans, 3-13 ans) :
     // kcal dépensées, métabolisme de base cumulé, heures vécues, heures de marche.
     burn: [f64; 4],
@@ -298,6 +300,7 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
                         && behavior.task.is_some_and(|t| kinds.contains(&t.kind))
                 };
                 let drinking = behavior.activity == Activity::Drinking || walking_to(&[TaskKind::Drink]);
+                r.drink_h += u64::from(behavior.activity == Activity::Drinking);
                 let eating = matches!(behavior.activity, Activity::Eating | Activity::Hunting)
                     || walking_to(&[
                         TaskKind::Forage,
@@ -827,6 +830,9 @@ fn print_episodes(rs: &[Report]) {
             .collect::<Vec<_>>()
             .join(" ; ")
     );
+    let lived: u64 = rs.iter().map(|r| r.lived_h.iter().sum::<u64>()).sum();
+    let drunk: u64 = rs.iter().map(|r| r.drink_h).sum();
+    println!("Gorgées (heures à boire) par personne et par jour : {:.2}", 24.0 * drunk as f64 / lived.max(1) as f64);
     let cd: Vec<u64> = (0..4).map(|i| rs.iter().map(|r| r.camp_days[i]).sum()).collect();
     let cw: Vec<u64> = (0..4).map(|i| rs.iter().map(|r| r.camp_water[i]).sum()).collect();
     println!(

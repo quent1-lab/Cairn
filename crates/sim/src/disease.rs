@@ -86,6 +86,11 @@ const GUT_CONTACT_P: f64 = 0.05;
 /// contagieuse jusqu'à J4-6). La digestive ne la suit pas : norovirus et
 /// Shigella s'excrètent des semaines, souvent plus après les symptômes.
 const LUNG_CONTACT_P: f64 = 0.10;
+/// Contact minimal de deux dormeurs proches sans lien (MOR-5c4) : l'air, le
+/// sol, les objets partagés. Norovirus : attaque secondaire entre foyers
+/// 0,2-0,6 % contre 7-84 % dans le foyer, un rapport de ~1/100 (Tsang et al.
+/// 2018). Faute de mieux, la même part pour la voie respiratoire.
+const STRANGER_CONTACT: f64 = 0.01;
 /// Respiratoire, par heure : le portage (des germes que chacun héberge sans
 /// mal) devient maladie, d'autant plus que le corps a froid. Choix : une fois
 /// par an au chaud, cinq fois par an transi en permanence.
@@ -212,7 +217,7 @@ fn gaussian(rng: &mut Pcg32) -> f32 {
 /// **contact** qui transmet — mains, nourriture, enfant porté. Le foyer
 /// (parents directs, et les deux parents d'un même enfant) y est exposé à
 /// plein ; les autres dormeurs à proportion de leur lien (`SocialGraph`), un
-/// inconnu presque pas. L'attaque secondaire réelle en foyer, 15-38 % par
+/// inconnu au contact minimal de qui dort à côté (`STRANGER_CONTACT`). L'attaque secondaire réelle en foyer, 15-38 % par
 /// épisode, est l'ordre de `GUT_CONTACT_P` et `LUNG_CONTACT_P` sur 3-4 nuits.
 pub(crate) fn daily(sim: &mut Sim) {
     let tick = sim.time.tick;
@@ -263,7 +268,11 @@ pub(crate) fn daily(sim: &mut Sim) {
                 if (pos.x - x).powi(2) + (pos.y - y).powi(2) > r2 {
                     continue;
                 }
-                let contact = if household(*id, s) { 1.0 } else { f64::from(social.affinity(*id, s)) };
+                let contact = if household(*id, s) {
+                    1.0
+                } else {
+                    f64::from(social.affinity(*id, s)).max(STRANGER_CONTACT)
+                };
                 escape *= 1.0 - beta * contact * load;
                 exposures.push((s, beta * contact * load));
             }
