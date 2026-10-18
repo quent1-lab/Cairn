@@ -870,3 +870,21 @@ Prédictions, acceptation 5 ans × 8 runs, MOR-5c5 contre MOR-5c4 (lancés ensem
    Réfuterait : écart > 30 %.
 2. Elles montent encore avec la taille du camp (les grands camps boivent aux mêmes points).
 3. Débit : tps par année ≥ celui de MOR-5c4 (plus d'instantané).
+
+### MOR-5c5 — mesuré (acceptation 5 ans, 8 runs, b4d55a4) contre MOR-5c4 (ec20933), lancés ensemble
+| | MOR-5c4 | MOR-5c5 |
+|---|---|---|
+| diarrhées d'eau des adultes /an (4,75 × 51 % ; 5,48 × 59 %) | ~2,4 | **~3,2** |
+| idem selon le camp < 10 ; 10-29 ; 30-59 ; 60+ | 1,84 ; 2,35 ; 2,80 ; 3,04 | 2,25 ; 2,99 ; 3,88 ; 4,36 |
+| diarrhées 1-4 ans /an ; létalité | 4,1 ; 0,64 % | 5,1 ; 1,01 % |
+| 1-4 ans par run (‰/an) | 58, 48, 17, 151, 64, 106, 87, 78 | 83, 88, 75, 159, 82, 576, 79, 13 (**6/8 en hausse**) |
+| mourir avant 15 ans | 35 % | 43 % |
+| débit plancher annuel, moyenne des 8 runs (tps) | 37,5 | 36,5 |
+1. Diarrhées d'eau à ±30 % : **réfutée de peu, vers le haut** (+33 %) : compter les usagers d'un
+   point d'eau (ceux qui y boivent, même logés à plus de 100 m) et une souillure qui dure ~1 j
+   pèse plus que l'instantané des présents. 2. Montée avec la taille du camp : **tenue** (×1,9).
+3. Débit ≥ : **ni tenu ni réfuté** — moyennes égales, runs divergentes ; aucun coût visible.
+Froid 7 sous MOR-5c5 : 60 → 25, 38 morts de violence (16 sous MOR-5c4) — un tirage de violence
+à lire (D13), pas la maladie (12 morts).
+Décision de l'utilisateur appliquée (réalisme) : MOR-5c5 reste sur `main`. Reste : les adultes
+à ~5,5 diarrhées/an contre ~2-3 réelles → MOR-5c3 (plusieurs germes, immunité par germe).
