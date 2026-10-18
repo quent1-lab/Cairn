@@ -888,3 +888,7 @@ Froid 7 sous MOR-5c5 : 60 → 25, 38 morts de violence (16 sous MOR-5c4) — un 
 à lire (D13), pas la maladie (12 morts).
 Décision de l'utilisateur appliquée (réalisme) : MOR-5c5 reste sur `main`. Reste : les adultes
 à ~5,5 diarrhées/an contre ~2-3 réelles → MOR-5c3 (plusieurs germes, immunité par germe).
+
+## À faire plus tard (décision de l'utilisateur, 2026-10-18)
+Faire varier la maladie selon la météo (froid, humidité, saison) — après MOR-5c3, pas avant.
+Aujourd'hui seul le portage respiratoire lit le froid du corps (`LUNG_COLD_FACTOR`).
