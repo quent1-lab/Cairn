@@ -28,6 +28,8 @@ use cairn_sim::{Activity, AgentId, Behavior, ClanEventKind, ClanMembership, Deat
 use cairn_worldgen::Biome;
 
 const STOP_TPS: f64 = 1.0;
+/// Plafond mémoire par défaut (deux runs sur la machine) ; un argument le relève
+/// pour une run seule.
 const STOP_RSS_KB: u64 = 1_400_000;
 const WINDOW_DAYS: usize = 30;
 /// Côté des mailles qui comptent l'aire occupée par la faune (comme `derive`).
@@ -51,10 +53,17 @@ fn main() {
     let start_day: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(135);
     let scene = if cold { "froid" } else { "tempere" };
     let out = args.next().unwrap_or_else(|| format!("out/longue_{scene}_{seed}.csv"));
-    let horizon_days: Option<u64> = args.next().and_then(|s| s.parse::<u64>().ok()).map(|y| y * 360);
+    let horizon_days: Option<u64> =
+        args.next().and_then(|s| s.parse::<u64>().ok()).filter(|&y| y > 0).map(|y| y * 360);
+    // Options (2026-10-18, demande de l'utilisateur : deux foyers de départ plus
+    // ou moins proches, plus d'humains) : agents par foyer, distance du second
+    // foyer en km (0 : un seul), plafond mémoire en Mo.
+    let agents_arg: Option<usize> = args.next().and_then(|s| s.parse().ok()).filter(|&n| n > 0);
+    let second_km: f64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+    let stop_rss_kb: u64 = args.next().and_then(|s| s.parse::<u64>().ok()).map_or(STOP_RSS_KB, |mo| mo * 1000);
 
     // Même scène que `acceptation`.
-    let n_agents = if cold { 60 } else { 40 };
+    let n_agents = agents_arg.unwrap_or(if cold { 60 } else { 40 });
     let mut sim = Sim::new(WorldSeed(seed), 16384);
     scenario::start_on_day(&mut sim, start_day);
     let seed_point = (km_to_tiles(1500.0) as i64, km_to_tiles(2100.0) as i64);
@@ -69,16 +78,33 @@ fn main() {
     } else {
         scenario::find_home(&mut sim, seed_point)
     };
-    scenario::populate(&mut sim, home, n_agents, 2);
-    for i in 0..4i64 {
-        let angle = i as f64 * 1.57;
-        let (x, y) = (
-            home.0 + (angle.cos() * km_to_tiles(4.0)) as i64,
-            home.1 + (angle.sin() * km_to_tiles(4.0)) as i64,
-        );
-        if sim.world.tile(x, y).is_walkable() {
-            sim.spawn_pack(x as f64, y as f64, fauna::PACK_START);
+    let mut homes = vec![home];
+    if second_km > 0.0 {
+        let point = (home.0 + km_to_tiles(second_km) as i64, home.1);
+        let second = if cold {
+            scenario::find_home_where(&mut sim, point, 1.0..=5.0, &[Biome::TemperateForest, Biome::Taiga, Biome::Grassland])
+                .unwrap_or_else(|| scenario::find_home(&mut sim, point))
+        } else {
+            scenario::find_home(&mut sim, point)
+        };
+        homes.push(second);
+    }
+    for &home in &homes {
+        scenario::populate(&mut sim, home, n_agents, 2);
+        for i in 0..4i64 {
+            let angle = i as f64 * 1.57;
+            let (x, y) = (
+                home.0 + (angle.cos() * km_to_tiles(4.0)) as i64,
+                home.1 + (angle.sin() * km_to_tiles(4.0)) as i64,
+            );
+            if sim.world.tile(x, y).is_walkable() {
+                sim.spawn_pack(x as f64, y as f64, fauna::PACK_START);
+            }
         }
+    }
+    if homes.len() == 2 {
+        let d = ((homes[0].0 - homes[1].0) as f64).hypot((homes[0].1 - homes[1].1) as f64);
+        println!("# deux foyers à {:.1} km l'un de l'autre", tiles_to_km(d));
     }
 
     let mut csv = std::fs::File::create(&out).expect("fichier CSV");
@@ -90,8 +116,8 @@ fn main() {
         causes_head.join(",")
     )
     .unwrap();
-    println!("# longue — seed {seed}, scène {scene}, départ jour {start_day}, {n_agents} agents ; CSV {out}");
-    println!("# arrêt : débit < {STOP_TPS} tps sur {WINDOW_DAYS} j, mémoire > {} Mo, ou extinction", STOP_RSS_KB / 1000);
+    println!("# longue — seed {seed}, scène {scene}, départ jour {start_day}, {n_agents} agents par foyer ; CSV {out}");
+    println!("# arrêt : débit < {STOP_TPS} tps sur {WINDOW_DAYS} j, mémoire > {} Mo, ou extinction", stop_rss_kb / 1000);
 
     let started = std::time::Instant::now();
     let mut window: VecDeque<f64> = VecDeque::new(); // secondes par jour de jeu
@@ -313,7 +339,7 @@ fn main() {
         if window.len() == WINDOW_DAYS && tps_win < STOP_TPS {
             break "débit sous le seuil";
         }
-        if rss_kb > STOP_RSS_KB {
+        if rss_kb > stop_rss_kb {
             break "mémoire au-delà du seuil";
         }
         if horizon_days.is_some_and(|h| day >= h) {
