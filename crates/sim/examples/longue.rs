@@ -89,8 +89,14 @@ fn main() {
         };
         homes.push(second);
     }
-    for &home in &homes {
+    // L'origine de chacun : 0 et 1 les deux foyers, 2 un enfant de parents
+    // d'origines différentes (la rencontre des foyers, 2026-10-18).
+    let mut origin: BTreeMap<u64, u8> = BTreeMap::new();
+    for (k, &home) in homes.iter().enumerate() {
         scenario::populate(&mut sim, home, n_agents, 2);
+        for (_, id) in sim.agents.query::<&AgentId>().iter() {
+            origin.entry(id.0).or_insert(k as u8);
+        }
         for i in 0..4i64 {
             let angle = i as f64 * 1.57;
             let (x, y) = (
@@ -112,7 +118,7 @@ fn main() {
     let causes_head: Vec<String> = CAUSES.iter().map(|c| format!("morts_{c:?}")).collect();
     writeln!(
         csv,
-        "jour,an,pop,naissances,morts,{},clans,en_clan,taille_med,taille_max,clans_formes,clans_dissous,clans_absorbes,liens_med,tension_max,paires_tendues,faim_moy,faim_p90,expo_feu,expo_cuivre,techs_vivantes,decouvertes,oublis,troupeaux,tetes,meutes,predateurs,mailles_faune,chunks,tps_jour,tps_30j,rss_mo,morts_nourrissons,morts_enfants,age_med_deces_10a,age_med_vivants,disp_med_km,disp_max_km,tailles_clans,chasse_tetes,marche_h_adulte,noir_dormi,troupeaux_10km,foyers_km_jour,foyer_depart_km,inter_clans_km,huttes_chef",
+        "jour,an,pop,naissances,morts,{},clans,en_clan,taille_med,taille_max,clans_formes,clans_dissous,clans_absorbes,liens_med,tension_max,paires_tendues,faim_moy,faim_p90,expo_feu,expo_cuivre,techs_vivantes,decouvertes,oublis,troupeaux,tetes,meutes,predateurs,mailles_faune,chunks,tps_jour,tps_30j,rss_mo,morts_nourrissons,morts_enfants,age_med_deces_10a,age_med_vivants,disp_med_km,disp_max_km,tailles_clans,chasse_tetes,marche_h_adulte,noir_dormi,troupeaux_10km,foyers_km_jour,foyer_depart_km,inter_clans_km,huttes_chef,pop_A,pop_B,pop_mixte,morts_A,morts_B,morts_violence_A,morts_violence_B,morts_maladie_A,morts_maladie_B,dist_AB_km,contacts_AB_100m,liens_AB,clans_mixtes,naissances_mixtes,contagions_AB",
         causes_head.join(",")
     )
     .unwrap();
@@ -129,6 +135,14 @@ fn main() {
     let (mut dead_infants, mut dead_children) = (0usize, 0usize);
     let mut death_ages: VecDeque<(u64, f64)> = VecDeque::new(); // (jour, âge) sur 10 ans
     let mut day = 0u64;
+    // La rencontre des foyers : morts par origine (toutes, violence, maladie),
+    // naissances mixtes, contagions d'une origine à l'autre (infections
+    // nouvelles du jour dont le malade source est de l'autre origine).
+    let mut deaths_by_origin = [[0usize; 3]; 3];
+    let mut mixed_births = 0usize;
+    let mut cross_contagions = 0usize;
+    let mut seen_births = 0usize;
+    let mut infected_yesterday: BTreeSet<(u64, usize)> = BTreeSet::new();
     let reason = loop {
         let t0 = std::time::Instant::now();
         // La chasse, la marche et la nuit (CHA, MAR) : relevées heure par heure.
@@ -171,7 +185,23 @@ fn main() {
         }
         seen_events = sim.clan_events.len();
 
+        for b in &sim.births[seen_births..] {
+            let (m, f) = (origin.get(&b.mother.0).copied(), origin.get(&b.father.0).copied());
+            let o = match (m, f) {
+                (Some(m), Some(f)) if m == f => m,
+                (Some(m), None) => m,
+                _ => 2,
+            };
+            mixed_births += usize::from(o == 2);
+            origin.insert(b.child.0, o);
+        }
+        seen_births = sim.births.len();
         for d in &sim.deaths[seen_deaths..] {
+            if let Some(&o) = origin.get(&d.agent.0) {
+                deaths_by_origin[o as usize][0] += 1;
+                deaths_by_origin[o as usize][1] += usize::from(d.cause == DeathCause::Violence);
+                deaths_by_origin[o as usize][2] += usize::from(d.cause == DeathCause::Disease);
+            }
             if let Some(&b) = born.get(&d.agent.0) {
                 let age = (d.tick as i64 - b) as f64 / (360.0 * TICKS_PER_DAY as f64);
                 dead_infants += usize::from(age < 3.0);
@@ -293,9 +323,77 @@ fn main() {
             }
         }
         let chief_huts = sim.structures.iter().filter(|s| s.kind == cairn_sim::StructureKind::ChiefHut).count();
+
+        // La rencontre des foyers.
+        let people: Vec<(u64, u8, (f64, f64))> = sim
+            .agents
+            .query::<(&AgentId, &Position)>()
+            .iter()
+            .map(|(_, (id, p))| (id.0, origin.get(&id.0).copied().unwrap_or(2), (p.x, p.y)))
+            .collect();
+        let mut pop_by = [0usize; 3];
+        let mut centre = [(0.0, 0.0); 2];
+        for (_, o, p) in &people {
+            pop_by[*o as usize] += 1;
+            if *o < 2 {
+                centre[*o as usize].0 += p.0;
+                centre[*o as usize].1 += p.1;
+            }
+        }
+        let dist_ab = if pop_by[0] > 0 && pop_by[1] > 0 {
+            let a = (centre[0].0 / pop_by[0] as f64, centre[0].1 / pop_by[0] as f64);
+            let b = (centre[1].0 / pop_by[1] as f64, centre[1].1 / pop_by[1] as f64);
+            tiles_to_km((a.0 - b.0).hypot(a.1 - b.1))
+        } else {
+            f64::NAN
+        };
+        let r100 = km_to_tiles(0.1);
+        let mut contacts_ab = 0usize;
+        for (i, (_, oa, pa)) in people.iter().enumerate() {
+            for (_, ob, pb) in &people[i + 1..] {
+                if (*oa, *ob) != (0, 1) && (*oa, *ob) != (1, 0) {
+                    continue;
+                }
+                contacts_ab += usize::from((pa.0 - pb.0).hypot(pa.1 - pb.1) <= r100);
+            }
+        }
+        let origin_of = |id: u64| origin.get(&id).copied().unwrap_or(2);
+        let links_ab = sim
+            .social
+            .bonds
+            .iter()
+            .filter(|&(&(a, b), &w)| {
+                w >= BOND_THRESHOLD && {
+                    let (oa, ob) = (origin_of(a), origin_of(b));
+                    oa != ob && oa < 2 && ob < 2
+                }
+            })
+            .count();
+        let mixed_clans = sim
+            .clans
+            .iter()
+            .filter(|c| {
+                let o: BTreeSet<u8> = c.members.iter().map(|m| origin_of(m.0)).collect();
+                o.contains(&0) && o.contains(&1) || o.contains(&2) && o.len() > 1
+            })
+            .count();
+        let mut infected_today = BTreeSet::new();
+        for (_, (id, ill)) in sim.agents.query::<(&AgentId, &cairn_sim::Illness)>().iter() {
+            for (route, inf) in ill.active.iter().enumerate() {
+                let Some(inf) = inf else { continue };
+                infected_today.insert((id.0, route));
+                if !infected_yesterday.contains(&(id.0, route))
+                    && let Some(src) = inf.source
+                    && origin_of(src.0) != origin_of(id.0)
+                {
+                    cross_contagions += 1;
+                }
+            }
+        }
+        infected_yesterday = infected_today;
         writeln!(
             csv,
-            "{day},{:.3},{pop},{},{},{},{},{in_clan},{},{},{formed},{dissolved},{merged},{},{tension_max:.3},{tense},{hunger_mean:.3},{hunger_p90:.3},{fire},{copper},{},{disc},{forgot},{herds},{heads:.0},{packs},{predators:.0},{},{},{tps_day:.1},{tps_win:.1},{},{dead_infants},{dead_children},{:.1},{:.1},{:.2},{:.2},{},{hunted_day:.2},{walk_per_adult:.2},{dark_slept:.3},{near_herds},{camp_step_km:.3},{:.2},{inter:.2},{chief_huts}",
+            "{day},{:.3},{pop},{},{},{},{},{in_clan},{},{},{formed},{dissolved},{merged},{},{tension_max:.3},{tense},{hunger_mean:.3},{hunger_p90:.3},{fire},{copper},{},{disc},{forgot},{herds},{heads:.0},{packs},{predators:.0},{},{},{tps_day:.1},{tps_win:.1},{},{dead_infants},{dead_children},{:.1},{:.1},{:.2},{:.2},{},{hunted_day:.2},{walk_per_adult:.2},{dark_slept:.3},{near_herds},{camp_step_km:.3},{:.2},{inter:.2},{chief_huts},{},{},{},{},{},{},{},{},{},{dist_ab:.2},{contacts_ab},{links_ab},{mixed_clans},{mixed_births},{cross_contagions}",
             day as f64 / 360.0,
             sim.births.len(),
             sim.deaths.len(),
@@ -314,6 +412,15 @@ fn main() {
             dist.last().copied().unwrap_or(0.0),
             sizes_str.join(";"),
             from_start.get(from_start.len() / 2).copied().unwrap_or(f64::NAN),
+            pop_by[0],
+            pop_by[1],
+            pop_by[2],
+            deaths_by_origin[0][0],
+            deaths_by_origin[1][0],
+            deaths_by_origin[0][1],
+            deaths_by_origin[1][1],
+            deaths_by_origin[0][2],
+            deaths_by_origin[1][2],
         )
         .unwrap();
         csv.flush().unwrap();
@@ -332,6 +439,12 @@ fn main() {
                 techs,
                 rss_kb / 1000,
             );
+            if homes.len() == 2 {
+                println!(
+                    "       foyers : A {} · B {} · mixtes {} · écart {dist_ab:.1} km · contacts à 100 m {contacts_ab} · liens A-B {links_ab} · clans mixtes {mixed_clans} · contagions A↔B {cross_contagions} · violence A {} / B {}",
+                    pop_by[0], pop_by[1], pop_by[2], deaths_by_origin[0][1], deaths_by_origin[1][1],
+                );
+            }
         }
         if pop == 0 {
             break "extinction de la population";
