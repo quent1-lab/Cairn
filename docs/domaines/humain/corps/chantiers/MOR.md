@@ -795,3 +795,36 @@ MOR-5c2) et 11, 23, 99, 314 (puissance).
 4. Diarrhées d'eau des adultes : camp de 60+ ≥ 2 × camp de < 10.
 5. Affinité hors foyer des voisins de nuit en hausse de l'an 1 à l'an 5.
 6. Défense des < 1 an, lait compté : ≥ 0,45 (0,33 sans).
+
+### Mesures du débat de MOR-5 — résultats (acceptation 5 ans, 12270ce ; a = 42, 7, 1337, 2024 ; b = 11, 23, 99, 314)
+Contrôle : série a identique à MOR-5c2 run par run (morts de maladie 3, 6, 4, 12, 14, 18, 11,
+16) — l'instrument ne touche pas la simulation.
+| | a | b |
+|---|---|---|
+| contagions venues du foyer : < 1 an ; 1-4 ; adultes | 45-51 % ; 42 % ; 10-14 % | 44-50 % ; 40-44 % ; 11-14 % |
+| contagions venues d'un enfant : < 1 an ; adultes | 20-29 % ; 20-34 % | 18-27 % ; 21-36 % |
+| faim au décès de maladie, 15-39 (à l'infection) | 0,44, 27 % > 0,5 (0,30) | 0,45, 37 % > 0,5 (0,32) |
+| létalité < 5 ans par rang 0 ; 1 ; 2 ; 3+ | 2,9 ; 2,5 ; 0,0 ; 0,9 % | 4,1 ; 2,1 ; 1,6 ; 0,3 % |
+| diarrhées d'eau des adultes /an, camp < 10 ; 10-29 ; 30-59 ; 60+ | 1,76 ; 2,38 ; 2,84 ; 3,14 | 1,80 ; 2,18 ; 2,76 ; 3,16 |
+| affinité hors foyer des voisins de nuit, an 1 → an 5 | 0,40 → 0,30 | 0,41 → 0,33 |
+| défense des < 1 an, lait compté | 0,52-0,57 (0,33 sans) | 0,52-0,56 |
+| mourir avant 15 ans ; mortalité 15-39 (‰/an) | 33 % ; 39 | 39 % ; 93 (froid 99 éteint : 50 morts de froid) |
+1. < 1 an ≥ 70 % du foyer : **réfutée** (~50 % ; un quart vient d'autres enfants) ; adultes
+   ≤ 30 % : **tenue** (10-14 %). Les enfants transmettent un quart à un tiers des contagions.
+2. Faim au décès ≥ 0,5 : **ni tenue ni réfutée** (0,44-0,45, contre 0,30 à l'infection) : un
+   effet de la faim pendant l'épisode, modéré ; H3 reste ouverte.
+3. Rang 0 ≥ 2 × rang 3+ : **tenue** (3-12 fois) — la létalité moyenne des enfants est tirée vers
+   le bas par les survivants aguerris.
+4. Eau : camp de 60+ ≥ 2 × camp de < 10 : **réfutée de peu** (×1,8), mais la hausse est monotone
+   sur les deux séries : la boucle « population → diarrhées » existe.
+5. Affinité en hausse : **réfutée** — elle baisse puis se stabilise dès l'an 2 : la contagion
+   par le lien est stationnaire sur 5 ans.
+6. Défense des < 1 an ≥ 0,45 lait compté : **tenue** (0,52-0,57) ; H2 avait été jugée sur un
+   chiffre biaisé (0,33), le jugement « pas trop létal par épisode » n'en est que renforcé.
+Série b contre l'ancienne mesure des mêmes seeds (cueillette + MOR-4, avant MOR-5) : 1-4 ans
+302 → 86, 24 → 57, 150 → 98, 132 → 77, 244 → 91, 81 → 101, 91 → 107 : **4/7 en baisse** — l'effet
+de MOR-5c1 + 5c2 sur les 1-4 ans ne va pas dans le même sens partout ; seul MOR-5c1 sur la série a
+(8/8) est établi. Froid 99 s'éteint (50 morts de froid, adultes) : voisin à lire (non lié à la
+maladie : 1 mort de maladie).
+En attente : décisions de l'utilisateur sur l'eau (souillure comme état du point d'eau) et sur
+l'inconnu (contact minimal de qui dort à côté) ; puis MOR-5c3.
