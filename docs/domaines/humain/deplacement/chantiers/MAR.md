@@ -977,3 +977,16 @@ l'utilisateur. Les runs longues de (a'') tournent (`queue13`), résultats dans
   faire. » → chantier mémoire des lieux (ce qu'un lieu a rendu), pour tous, avant de
   reprendre la règle de départ ; vérifier aussi le régime et l'horizon des mesures du camp.
 - Règle des sous-agents : validée.
+
+## Run longue à deux foyers (2026-10-18, demande de l'utilisateur ; `longue` 7452bc3, `main` 6dfd3ea)
+Tempéré, seed 42, deux foyers de 80 à **20 km**, arrêt prévu à 1 tps ; arrêtée à la main à
+l'an 18 (jour 6 620, 5 h de calcul) : la tendance ne changeait plus.
+- **Aucune rencontre en 18 ans** : centres à 19,7-22,4 km tout du long, 0 contact à 100 m, 0
+  lien, 0 clan ni naissance mixte, 0 contagion entre foyers. Les camps ne bougent pas (MAR-6b,
+  MEM-3) : à 20 km, aucune sortie quotidienne n'atteint l'autre pays.
+- Population stable ~235-250 (A 118, B 129) ; 285 naissances, 199 morts, dont 170 de maladie,
+  0 de violence ; clans 117, 118 et 12 (BAN).
+- Débit 26 → 6-7 tps (30 j) ; mémoire stable ~1,1 Go.
+- **Faune en croissance continue** : 19 600 têtes (an 3) → 44 800 (an 18), 714 troupeaux — à
+  lire (proie sans borne ? coût du débit ?).
+Relancée à **6 km** le 2026-10-18 à 15 h 45 (`out/longue/deuxfoyers/t42_2x80_6km_3c0fe52.*`).
