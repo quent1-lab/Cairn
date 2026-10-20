@@ -1123,3 +1123,13 @@ a vu du gibier, jusqu'à ×4) l'écrase ; les runs qui dérivent sont celles qui
 troupeaux. Le gibier compte déjà dans la mémoire (les kcal de chasse d'un lieu) : le facteur le
 compte deux fois, et l'information « gibier vu ces trois derniers jours » pèse plus que tout ce
 qu'on sait du pays. Question à l'utilisateur avant l'étape 2.
+
+### Choix 1 de l'utilisateur (2026-10-20) : le gibier vu ne pèse plus sur la destination
+Le score d'une source candidate devient mémoire × trajet ; la chasse y entre par les kcal
+tirées du lieu. Test `le_gibier_vu_ne_l_emporte_pas_sur_ce_dont_on_se_souvient`, vu rouge
+(1 000 contre 600 kcal/h, un troupeau près du second : l'ancien score choisissait le second).
+Prédictions, banc `marche` 90 j × 8 runs, contre l'étape 1 :
+1. Aucune run au-delà de 30 km de déplacement net du foyer en 90 j (étape 1 : 42, 45, 80).
+2. Chemin du foyer de 70 à 300 km/an sur ≥ 6/8 runs (réel ~160-175).
+3. Destinations jugées sur la mémoire ≥ 41 % ; retours vers un ancien camp ≥ 11 %.
+Réfuterait 1 : une run au-delà de 40 km.

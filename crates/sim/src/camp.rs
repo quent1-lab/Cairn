@@ -13,9 +13,9 @@
 //! membres (`Yields::habit`). Sous l'habitude, il lève le camp vers une source
 //! d'eau que connaît l'un d'eux, hors du pays déjà battu, là où **la bande se
 //! souvient** que la subsistance rendait le mieux (MEM-3 : la carte vécue de
-//! ses membres, `Memory::places`, et non plus le stock réel des plantes) et où l'on a
-//! vu du gibier ces derniers jours — le trajet pesé à l'échelle d'une journée
-//! de marche. Un lieu dont personne ne se souvient assez vaut ce que rendent
+//! ses membres, `Memory::places`, et non plus le stock réel des plantes) — le
+//! trajet pesé à l'échelle d'une journée de marche ; la chasse y entre par ce
+//! qu'on a tiré du lieu, pas par le gibier vu ces derniers jours. Un lieu dont personne ne se souvient assez vaut ce que rendent
 //! en moyenne les lieux connus : ni préféré, ni écarté. Rien ne dit
 //! « partez » : sans source connue hors du pays, la bande reste.
 //!
@@ -165,8 +165,8 @@ pub(crate) fn daily(sim: &mut Sim) {
 
 /// Le lieu du prochain camp : une source connue hors du pays battu (au-delà
 /// du rayon de résidence), là où la bande se souvient que la subsistance
-/// rendait le mieux par heure, et près du gibier vu, pesée par le trajet à
-/// l'échelle d'une journée de marche.
+/// rendait le mieux par heure, pesée par le trajet à l'échelle d'une journée
+/// de marche.
 fn choose_destination(home: (f64, f64), band: &BandDay) -> Option<((f64, f64), CampMove)> {
     let (all_kcal, all_h) = band.places.values().fold((0.0, 0.0), |a, p| (a.0 + p.0, a.1 + p.1));
     if all_h < PLACE_EVIDENCE_HOURS {
@@ -194,7 +194,12 @@ fn choose_destination(home: (f64, f64), band: &BandDay) -> Option<((f64, f64), C
             .filter(|z| ((z.0 as f64 + 0.5) * side - p.0).hypot((z.1 as f64 + 0.5) * side - p.1) <= GAME_NEAR_TILES)
             .count();
         let day = 1.0 / (1.0 + d / (WALK_TILES_PER_TICK * 24.0));
-        let score = remembered * (1.0 + game as f64) * day;
+        // Le gibier vu ne s'y ajoute pas (décision de l'utilisateur, 2026-10-20) :
+        // la chasse compte déjà dans ce que la bande se souvient d'y avoir tiré,
+        // et un troupeau vu ces trois derniers jours pesait plus que tout ce
+        // qu'on savait du pays (étape 1 : gibier au lieu retenu 91 %, ×3,9).
+        // Il reste relevé (`CampMove::game`).
+        let score = remembered * day;
         if score > 0.0 && best.is_none_or(|(b, _, _)| score > b) {
             let choice = CampMove {
                 tick: 0,
@@ -242,22 +247,21 @@ mod tests {
         assert_eq!(place_of(dest), at(rich), "vers le lieu qui rendait");
     }
 
-    /// Un troupeau vu par trente adultes reste un troupeau : il ne fait pas
-    /// préférer le lieu pauvre où il paît au lieu riche.
+    /// Le gibier vu ces derniers jours ne fait pas préférer un lieu : la
+    /// chasse compte déjà dans ce que la bande se souvient d'y avoir tiré
+    /// (décision de l'utilisateur, 2026-10-20, choix 1).
     #[test]
-    fn un_troupeau_vu_par_tous_compte_une_fois() {
+    fn le_gibier_vu_ne_l_emporte_pas_sur_ce_dont_on_se_souvient() {
         let home = (0.0, 0.0);
         let d = 2.5 * PLACE_TILES;
         let (rich, poor) = ((d as i64, 0), (-d as i64, 0));
         let mut band = BandDay::default();
         band.springs.extend([rich, poor]);
         let at = |s: (i64, i64)| place_of((s.0 as f64 + 0.5, s.1 as f64 + 0.5));
-        band.places.insert(at(rich), (200_000.0, 100.0)); // 2 000 kcal/h
-        band.places.insert(at(poor), (10_000.0, 100.0)); // 100 kcal/h
-        for k in 0..30 {
-            band.see_game((poor.0 + k, poor.1)); // le même troupeau, trente témoins
-        }
+        band.places.insert(at(rich), (100_000.0, 100.0)); // 1 000 kcal/h
+        band.places.insert(at(poor), (60_000.0, 100.0)); // 600 kcal/h
+        band.see_game(poor); // un troupeau vu près du lieu le moins bon
         let (dest, _) = choose_destination(home, &band).expect("une destination");
-        assert_eq!(place_of(dest), at(rich), "le gibier compte par troupeau, pas par témoin");
+        assert_eq!(place_of(dest), at(rich), "on va où le pays rendait, pas où l'on a vu passer un troupeau");
     }
 }
