@@ -10,7 +10,8 @@
 //! Ici, chaque nuit, le clan relève ce que ses adultes ont tiré du pays
 //! (`Yields::take_day`) dans le registre de son camp (`CampLedger`, demi-vie
 //! de quelques jours, remis à zéro au départ) et le compare à l'habitude de ses
-//! membres (`Yields::habit`). Sous l'habitude, il lève le camp vers une source
+//! membres (`Yields::habit`), **hors chasse** l'un et l'autre : ce sont les
+//! plantes qui s'épuisent autour d'un camp. Sous l'habitude, il lève le camp vers une source
 //! d'eau que connaît l'un d'eux, hors du pays déjà battu, là où **la bande se
 //! souvient** que la subsistance rendait le mieux (MEM-3 : la carte vécue de
 //! ses membres, `Memory::places`, et non plus le stock réel des plantes) — le
@@ -173,14 +174,19 @@ pub(crate) fn daily(sim: &mut Sim) {
         clan.camp.net = clan.camp.net * keep + band.day_net;
         clan.camp.net_hunt = clan.camp.net_hunt * keep + band.day_net_hunt;
         let evidence = band.adults as f32 * RECENT_EVIDENCE_HOURS / 24.0;
-        if clan.camp.h < evidence || band.habit_h < 2.0 * evidence || band.habit_net <= 0.0 {
+        // Hors chasse, de part et d'autre (décision de l'utilisateur,
+        // 2026-10-20) : ce qui s'épuise autour d'un camp, ce sont les plantes ;
+        // le gibier bouge, et une prise de 60 000 kcal dans l'habitude du mois
+        // faisait paraître épuisé tout camp sans prise récente.
+        let habit_gather = band.habit_net - band.habit_net_hunt;
+        if clan.camp.h < evidence || band.habit_h < 2.0 * evidence || habit_gather <= 0.0 {
             continue;
         }
-        let now = clan.camp.net / clan.camp.h;
-        let habit = band.habit_net / band.habit_h;
-        if now >= habit {
+        let now_gather = (clan.camp.net - clan.camp.net_hunt) / clan.camp.h;
+        if now_gather >= habit_gather / band.habit_h {
             continue;
         }
+        let (now, habit) = (clan.camp.net / clan.camp.h, band.habit_net / band.habit_h);
         if let Some((dest, mut choice)) = choose_destination(clan.home, band) {
             choice.tick = tick;
             choice.clan = clan.id.0;

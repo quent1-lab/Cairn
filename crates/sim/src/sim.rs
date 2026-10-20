@@ -2536,6 +2536,63 @@ mod tests {
     /// MAR-6b : la valeur marginale juge par jour, trajets compris. Une bande
     /// dont le camp rend autant par jour que d'habitude, mais au prix de plus
     /// d'heures de travail, ne part pas — par heure, elle partirait.
+    /// Le camp se juge hors chasse (décision de l'utilisateur, 2026-10-20) :
+    /// une grosse prise dans l'habitude du mois ne fait pas paraître épuisé un
+    /// camp où la cueillette rend comme d'habitude.
+    #[test]
+    fn une_grosse_prise_passee_ne_fait_pas_lever_le_camp() {
+        let (mut sim, home) = scenario_au_foyer(5, 4, 0);
+        sim.time.tick = 135 * cairn_core::TICKS_PER_DAY;
+        let source = land_near(&mut sim, home, cairn_core::km_to_tiles(6.0));
+        let ids: Vec<AgentId> = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).collect();
+        let camp = (home.0 as f64 + 0.5, home.1 as f64 + 0.5);
+        for (_, (yields, mem, membership)) in
+            sim.agents.query_mut::<(&mut crate::yields::Yields, &mut Memory, &mut ClanMembership)>()
+        {
+            membership.0 = Some(social::ClanId(1));
+            // Un mois : 3 000 kcal de cueillette par jour, et une bête de 60 000 kcal.
+            for d in 0..30u64 {
+                for h in 0..6u64 {
+                    yields.spend_hour(crate::yields::Pursuit::Gather, 0.0);
+                    mem.live_hour(camp, d * 24 + h, Some(crate::yields::Pursuit::Gather), [500.0, 0.0], Some(100), false, false);
+                }
+                yields.gain(crate::yields::Pursuit::Gather, 3_000.0);
+                if d == 10 {
+                    yields.spend_hour(crate::yields::Pursuit::Hunt, 0.0);
+                    yields.gain(crate::yields::Pursuit::Hunt, 60_000.0);
+                }
+                yields.take_day();
+            }
+            mem.springs.push((source.0 as i64, source.1 as i64));
+            let there = (source.0 as f64 + 0.5, source.1 as f64 + 0.5);
+            for h in 0..4u64 {
+                mem.live_hour(there, 31 * 24 + h, None, [0.0; 2], Some(100), false, false);
+            }
+        }
+        sim.clans.push(Clan {
+            id: social::ClanId(1),
+            founded_tick: 0,
+            members: ids.iter().copied().collect(),
+            home: camp,
+            stock: 0.0,
+            chief: ids[0],
+            desired: None,
+            rivalry: 0.0,
+            camp: Default::default(),
+        });
+        // Cinq jours au camp : la cueillette rend comme d'habitude, aucune prise.
+        for _ in 0..5 {
+            for (_, yields) in sim.agents.query_mut::<&mut crate::yields::Yields>() {
+                for _ in 0..6 {
+                    yields.spend_hour(crate::yields::Pursuit::Gather, 0.0);
+                }
+                yields.gain(crate::yields::Pursuit::Gather, 3_000.0);
+            }
+            crate::camp::daily(&mut sim);
+        }
+        assert_eq!(sim.clans[0].home, camp, "la cueillette rend comme d'habitude : la bête du mois passé ne fait pas partir");
+    }
+
     #[test]
     fn une_bande_qui_tire_autant_par_jour_ne_leve_pas_le_camp() {
         let (mut sim, home) = scenario_au_foyer(5, 4, 0);
