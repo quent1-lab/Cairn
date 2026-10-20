@@ -187,16 +187,14 @@ Relecture du 2026-10-17 (demande de l'utilisateur : « vérifier qu'un chantier 
 - **MEM-3** (les choix lisent la mémoire) retire deux omnisciences (`brain::edible_share` sur les mailles voisines jamais vues ; la destination du camp de MAR-6b) et donne pour la première fois un **gain** à l'exploration : aujourd'hui explorer ne sert à rien de ce qu'on apprend (score 0,15 × curiosité), ce qui peut suffire à expliquer **CUR**. MEM-3 est aussi le préalable de **MAR-6b** et de **BAN** (une bande se scinde quand le pays qu'elle connaît ne la nourrit plus).
 - **MEM-2** (les lieux se racontent) touche **D2** (des survivants sans clan qui ne savent où aller) — à vérifier, pas acquis.
 
-1. **MOR-5** — MOR-5a instrumenter, puis la correction que la mesure désigne ; puis reprendre **MOR-4c** (`exp/anticorps`).
-2. **Orphelins** (`exp/orphelins`) — instrumenter la soif à mère présente (banc `soif`), puis décider de MOR-4b/4b'.
-3. **MEM-1**, **MEM-4**, **MEM-3**, **MEM-2** ; remesurer **MAR-5** et **CUR** après MEM-4 et MEM-3 avant de leur ouvrir un chantier propre.
-4. **MAR-6b** lever le camp, sur la mémoire ; récit du gibier (`exp/raconter-seul`) après.
+Révision du 2026-10-20 (run longue à deux foyers, 197 ans : le camp ne bouge jamais, ne se scinde jamais ; rien de neuf n'est vu, aucune technique, la maladie régule une population immobile ; décision de l'utilisateur : la mobilité et la scission avant MOR-5c3).
+1. **MEM-1** la carte vécue, **MEM-4** l'oubli par l'usage (sources comprises), **MEM-3** les choix lisent la mémoire ; remesurer **MAR-5** et **CUR** après.
+2. **MAR-6b** lever le camp, sur la mémoire ; **BAN** la scission des bandes ; puis **MEM-2** (ce qu'on se raconte) ; run longue à deux foyers à refaire.
+3. **MOR-5c3** plusieurs germes par voie ; **MOR-4c** (`exp/anticorps`) ; **orphelins** (`exp/orphelins`, instrumenter la soif à mère présente) ; plus tard la maladie selon la météo.
+4. **D13** violence (run à 6 km : tension saturée 3 ans, un clan anéanti, 47 % des morts).
 5. **MAR-8**, **MAR-7**, **CHA-3**, **MAR-5** (s'il reste un écart), **MAR-3** ; **CHA-4** quand le gibier boira.
-6. **ENE-4** — remesurer l'alimentation (D10) une fois marche et eau corrigées.
-7. **MOR-6**, **MOR-7** ; **ENE-5** si la mesure le demande.
-8. **BAN** — taille des bandes (après MEM-3 et MAR-6b).
-9. **D13** — violence (prototype R1).
-10. **D2** (remesurer après MEM-2), **D9** ; **D7** avant la phase 6 ; **PERF** ; **D1/D3** bloqués (500 ans).
+6. **ENE-4** ; **MOR-6**, **MOR-7** ; **ENE-5** si la mesure le demande.
+7. **D2** (remesurer après MEM-2), **D9** ; **D7** avant la phase 6 ; **PERF** (~10 tps pour 170 humains et 30 000 têtes) ; **D1/D3** bloqués.
 
 ### 5.3 Tableau historique
 
