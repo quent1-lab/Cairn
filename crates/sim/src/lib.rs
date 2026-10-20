@@ -20,6 +20,7 @@
 
 pub mod agent;
 pub mod brain;
+pub mod camp;
 pub mod chronicle;
 pub mod chunk;
 pub mod combat;
