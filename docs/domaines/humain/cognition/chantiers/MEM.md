@@ -132,3 +132,20 @@ l'ordre d'un territoire de chasse baka (205 km²) ; il est vécu, pas exploité 
 dans 10 mailles. Mémoire : +0,6 Mo sur 1,09 Go.
 Ce que j'ai pu manquer : 1 an seulement (le pays connu d'une vie n'est pas vu) ; les enfants ne
 sont pas comptés ; « dormi » compte toute heure de sommeil, sieste comprise.
+
+## MEM-4a — les sources s'oublient par l'usage (branche `exp/mem4a`, 2026-10-20)
+Ordre de MEM : MEM-4 avant MEM-3 pour les sources (la soif, les trajets d'eau). Changement
+(`memory`) : chaque source connue porte une force de souvenir — renfort de 0,2 vue, 0,1
+entendue, 0,5 bue (une fois par jour : un jour d'usage) ; effacement de constante 60 j vers un
+plancher usage / (usage + 10) ; oubli sous 0,02 ; plafond porté de 16 à 64 (Nyae Nyae : ~40
+points d'eau), la plus faible part la première, **plus la plus lointaine**. Constantes non
+sourcées (forme validée par l'utilisateur). Test `une_source_s_oublie_par_l_usage_pas_par_la_distance`
+(remplace `les_sources_lointaines_s_oublient`, qui fixait l'ancien comportement).
+**Voisin** : `les_curieux_explorent_plus_loin` (CUR) échoue sur la seed 1337 (64,9 cellules
+contre 66,3 ; il passait à 1,03-1,30 selon les seeds) — critère déjà fragile, lu dans CUR ; la
+branche n'est pas reportée tant que la mesure n'a pas tranché.
+Prédictions, banc `marche` 90 j × 8 runs puis acceptation 1 an × 8, contre `main` (MEM-1) :
+1. Heures de marche vers l'eau en baisse de 10-30 % (on ne perd plus les sources du pays en
+   s'éloignant). Réfuterait : baisse < 5 % ou hausse.
+2. Sources retenues par adulte : médiane 20-64 (16 avant, plafond).
+3. Morts de soif à 1 an : égales ou en baisse (8 runs).

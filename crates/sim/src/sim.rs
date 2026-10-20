@@ -1096,6 +1096,7 @@ impl Sim {
             // « improductif » se paie. Le savoir-faire, lui, vit dans `Skills`.
             let before = (pos.x, pos.y);
             let kcal_before = ledger.kcal;
+            let drink_target = behavior.task.filter(|t| t.kind == TaskKind::Drink).map(|t| t.target);
             let sight = crate::climate::sight(self.climate.light(pos.tile().1, time));
             let work = demography::work_capacity(demo.age_years(time.tick))
                 * (1.0 - WOUND_WORK_PENALTY * wound.0);
@@ -1151,6 +1152,12 @@ impl Sim {
             }
             // Où que la tâche l'ait mené, l'agent note où il a mis les pieds.
             mem.note_visit(pos.tile());
+            // MEM-4a : la source où l'on a bu se renforce.
+            if behavior.activity == Activity::Drinking
+                && let Some(spring) = drink_target
+            {
+                mem.use_spring(spring, time.tick);
+            }
             // MEM-1 : et ce que le lieu a été pour lui cette heure.
             let gained = [0, 1].map(|i| ledger.kcal[i] - kcal_before[i]);
             mem.live_hour(
@@ -3602,7 +3609,7 @@ mod tests {
         let secret = (123_456, -654_321); // n'importe où : on teste le canal
         for (_, (id, mem)) in sim.agents.query_mut::<(&AgentId, &mut Memory)>() {
             if *id == ids[0] {
-                mem.remember_spring(secret, (0.0, 0.0));
+                mem.remember_spring(secret, 0, crate::memory::SPRING_HEARD);
             }
         }
         crate::memory::exchange_knowledge(&mut sim);
@@ -4569,7 +4576,9 @@ mod tests {
         assert_ne!(proche, autre);
         for (_, (phys, mem, behavior)) in sim.agents.query_mut::<(&mut Physiology, &mut Memory, &mut Behavior)>() {
             phys.thirst = 0.9;
-            mem.springs = vec![proche, autre];
+            *mem = Memory::default();
+            mem.remember_spring(proche, 0, crate::memory::SPRING_SEEN);
+            mem.remember_spring(autre, 0, crate::memory::SPRING_SEEN);
             behavior.task = None;
             behavior.stuck_on = Some(proche); // la marche vers elle vient d'échouer
         }

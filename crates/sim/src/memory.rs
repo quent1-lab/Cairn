@@ -28,9 +28,53 @@ use crate::sim::Sim;
 /// « explorer » ait un sens local, assez gros pour que la carte d'une vie
 /// tienne en quelques milliers d'entrées.
 pub const MEMORY_CELL_TILES: i64 = 256;
-/// Sources retenues au plus : les plus proches restent, les lointaines
-/// s'oublient — une mémoire, pas un atlas.
-pub const MAX_KNOWN_SPRINGS: usize = 16;
+/// Sources retenues au plus (MEM-4a : ~40 points d'eau d'usage historique à
+/// Nyae Nyae, chez les Ju/'hoansi). Au-delà, la moins forte s'oublie.
+pub const MAX_KNOWN_SPRINGS: usize = 64;
+/// MEM-4a, la force du souvenir d'une source (forme validée par
+/// l'utilisateur le 2026-10-18, constantes non sourcées, à mesurer) : chaque
+/// fois qu'on la voit, qu'on en entend parler ou qu'on y boit, elle se
+/// renforce d'une part de ce qui lui manque ; elle s'efface ensuite avec une
+/// constante de temps `SPRING_TAU_DAYS` vers un **plancher qui monte avec
+/// l'usage** (jours où l'on y a bu : `uses / (uses + SPRING_FLOOR_USES)`). Une
+/// source vue une fois s'oublie en quelques mois ; celle où l'on boit souvent
+/// se garde à vie.
+const SPRING_TAU_DAYS: f64 = 60.0;
+const SPRING_FLOOR_USES: f32 = 10.0;
+pub const SPRING_SEEN: f32 = 0.2;
+pub const SPRING_HEARD: f32 = 0.1;
+const SPRING_USED: f32 = 0.5;
+/// Sous cette force, la source est oubliée.
+const SPRING_FORGET: f32 = 0.02;
+
+/// Le souvenir d'une source : force à la dernière mise à jour, jours d'usage,
+/// tick de la mise à jour, dernier jour où l'on y a bu.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpringTrace {
+    pub strength: f32,
+    pub uses: u16,
+    pub at: u64,
+    last_use_day: u64,
+}
+
+impl SpringTrace {
+    fn floor(&self) -> f32 {
+        f32::from(self.uses) / (f32::from(self.uses) + SPRING_FLOOR_USES)
+    }
+
+    /// La force au tick `tick`.
+    pub fn strength_at(&self, tick: u64) -> f32 {
+        let days = tick.saturating_sub(self.at) as f64 / cairn_core::TICKS_PER_DAY as f64;
+        let f = self.floor();
+        f + (self.strength - f) * (-days / SPRING_TAU_DAYS).exp() as f32
+    }
+
+    fn reinforce(&mut self, tick: u64, boost: f32) {
+        let s = self.strength_at(tick);
+        self.strength = s + boost * (1.0 - s);
+        self.at = tick;
+    }
+}
 /// Plafond de cellules mémorisées (~1 000 km² vécus). Au-delà, on ne note
 /// plus : la borne mémoire prime sur l'exhaustivité du souvenir.
 pub const MAX_KNOWN_CELLS: usize = 4096;
@@ -55,6 +99,8 @@ pub fn cell_of(tile: (i64, i64)) -> (i64, i64) {
 pub struct Memory {
     /// Sources d'eau connues (tuiles), vues soi-même ou apprises d'autrui.
     pub springs: Vec<(i64, i64)>,
+    /// La force du souvenir de chacune, dans le même ordre (MEM-4a).
+    pub spring_traces: Vec<SpringTrace>,
     /// Cellules où l'agent a mis les pieds. Jamais transmises.
     pub known: BTreeSet<(i64, i64)>,
     /// Le dernier troupeau aperçu : tuile et tick. Un seul souvenir, le plus
@@ -122,24 +168,52 @@ impl Memory {
         }
     }
 
-    /// Mémorise une source. Au-delà du plafond, la plus lointaine de `from`
-    /// est oubliée : on retient l'eau *utile*.
-    pub fn remember_spring(&mut self, spring: (i64, i64), from: (f64, f64)) {
-        if self.springs.contains(&spring) {
+    /// Mémorise une source, vue (`SPRING_SEEN`) ou entendue (`SPRING_HEARD`),
+    /// ou renforce son souvenir. Au-delà du plafond, la moins forte s'oublie
+    /// (MEM-4a : par l'usage, plus par la distance).
+    pub fn remember_spring(&mut self, spring: (i64, i64), tick: u64, boost: f32) {
+        if let Some(i) = self.springs.iter().position(|s| *s == spring) {
+            self.spring_traces[i].reinforce(tick, boost);
             return;
         }
         self.springs.push(spring);
+        self.spring_traces.push(SpringTrace { strength: boost, uses: 0, at: tick, last_use_day: u64::MAX });
         if self.springs.len() > MAX_KNOWN_SPRINGS {
-            let d2 = |s: &(i64, i64)| {
-                (s.0 as f64 + 0.5 - from.0).powi(2) + (s.1 as f64 + 0.5 - from.1).powi(2)
-            };
-            let (farthest, _) = self
-                .springs
+            let (weakest, _) = self
+                .spring_traces
                 .iter()
                 .enumerate()
-                .max_by(|(_, a), (_, b)| d2(a).total_cmp(&d2(b)))
+                .min_by(|(_, a), (_, b)| a.strength_at(tick).total_cmp(&b.strength_at(tick)))
                 .expect("liste non vide");
-            self.springs.swap_remove(farthest);
+            self.springs.swap_remove(weakest);
+            self.spring_traces.swap_remove(weakest);
+        }
+    }
+
+    /// On a bu à cette source : un jour d'usage de plus (une fois par jour),
+    /// et un fort renfort.
+    pub fn use_spring(&mut self, spring: (i64, i64), tick: u64) {
+        self.remember_spring(spring, tick, SPRING_USED);
+        let day = tick / cairn_core::TICKS_PER_DAY;
+        if let Some(i) = self.springs.iter().position(|s| *s == spring) {
+            let t = &mut self.spring_traces[i];
+            if t.last_use_day != day {
+                t.last_use_day = day;
+                t.uses = t.uses.saturating_add(1);
+            }
+        }
+    }
+
+    /// Oublie les sources dont le souvenir est trop faible.
+    pub fn forget_springs(&mut self, tick: u64) {
+        let mut i = 0;
+        while i < self.springs.len() {
+            if self.spring_traces[i].strength_at(tick) < SPRING_FORGET {
+                self.springs.swap_remove(i);
+                self.spring_traces.swap_remove(i);
+            } else {
+                i += 1;
+            }
         }
     }
 
@@ -231,6 +305,10 @@ impl Memory {
 /// ne dépende pas de l'ordre de traitement des paires.
 pub(crate) fn exchange_knowledge(sim: &mut Sim) {
     use crate::yields::{PURSUITS, Yields};
+    let tick = sim.time.tick;
+    for (_, mem) in sim.agents.query_mut::<&mut Memory>() {
+        mem.forget_springs(tick);
+    }
     type Shown = ([f32; PURSUITS], [f32; PURSUITS]);
     struct View {
         entity: hecs::Entity,
@@ -293,7 +371,7 @@ pub(crate) fn exchange_knowledge(sim: &mut Sim) {
         }
         if let Ok(mem) = sim.agents.query_one_mut::<&mut Memory>(view.entity) {
             for spring in learned {
-                mem.remember_spring(spring, view.pos);
+                mem.remember_spring(spring, tick, SPRING_HEARD);
             }
         }
     }
@@ -328,32 +406,40 @@ mod tests {
     }
 
     #[test]
-    fn les_sources_lointaines_s_oublient() {
+    fn une_source_s_oublie_par_l_usage_pas_par_la_distance() {
+        use cairn_core::TICKS_PER_DAY;
         let mut mem = Memory::default();
-        let home = (0.0, 0.0);
-        // Une source très lointaine, puis un plein d'autres proches.
-        mem.remember_spring((100_000, 0), home);
+        // La source du pays, à 20 km, où l'on a bu trente jours.
+        let home_spring = (10_000, 0);
+        for d in 0..30 {
+            mem.use_spring(home_spring, d * TICKS_PER_DAY);
+        }
+        // Puis un voyage : on voit en passant un plein de sources proches.
+        let t = 40 * TICKS_PER_DAY;
         for i in 0..MAX_KNOWN_SPRINGS as i64 {
-            mem.remember_spring((i * 10, 5), home);
+            mem.remember_spring((i * 10, 5), t + i as u64, SPRING_SEEN);
         }
         assert_eq!(mem.springs.len(), MAX_KNOWN_SPRINGS);
-        assert!(
-            !mem.springs.contains(&(100_000, 0)),
-            "la source à 200 km doit être la première oubliée"
-        );
+        assert!(mem.springs.contains(&home_spring), "la source du pays reste, loin ou pas");
         // Dédoublonnage.
         let len = mem.springs.len();
-        mem.remember_spring((0, 5), home);
+        mem.remember_spring((0, 5), t, SPRING_SEEN);
         assert_eq!(mem.springs.len(), len);
+        // Un an plus tard, les sources vues en passant sont oubliées ; celle du
+        // pays tient sur son plancher (30 jours d'usage : 0,75).
+        mem.forget_springs(t + 360 * TICKS_PER_DAY);
+        assert_eq!(mem.springs, vec![home_spring]);
+        let s = mem.spring_traces[0].strength_at(t + 360 * TICKS_PER_DAY);
+        assert!((0.7..0.8).contains(&s), "plancher de l'usage : {s}");
     }
 
     #[test]
     fn la_source_connue_la_plus_proche() {
         let mut mem = Memory::default();
         assert_eq!(mem.nearest_known_spring((0.0, 0.0)), None);
-        mem.remember_spring((100, 0), (0.0, 0.0));
-        mem.remember_spring((10, 0), (0.0, 0.0));
-        mem.remember_spring((-500, 0), (0.0, 0.0));
+        mem.remember_spring((100, 0), 0, SPRING_SEEN);
+        mem.remember_spring((10, 0), 0, SPRING_SEEN);
+        mem.remember_spring((-500, 0), 0, SPRING_SEEN);
         assert_eq!(mem.nearest_known_spring((0.0, 0.0)), Some((10, 0)));
         assert_eq!(mem.nearest_known_spring((-400.0, 0.0)), Some((-500, 0)));
     }
