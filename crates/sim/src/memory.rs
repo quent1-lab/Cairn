@@ -103,6 +103,12 @@ pub struct Place {
     /// date de `last`.
     pub recent_kcal: f32,
     pub recent_h: f32,
+    /// Ce qu'on y a vu pousser : le fourrage de la tuile où l'on se tenait,
+    /// en moyenne sur les heures de jour passées là (lu en passant, à la
+    /// chasse comme en explorant : voir, c'est connaître ; la nuit, on ne voit
+    /// pas les plantes), et ces heures.
+    pub seen_forage: f32,
+    pub seen_h: u32,
     /// Heures à y boire.
     pub drinks: u16,
     /// Nuits à y dormir.
@@ -237,6 +243,7 @@ impl Memory {
         tick: u64,
         pursuit: Option<crate::yields::Pursuit>,
         kcal: [f64; crate::yields::PURSUITS],
+        forage: Option<u8>,
         drank: bool,
         slept: bool,
     ) {
@@ -258,6 +265,10 @@ impl Memory {
         place.recent_kcal += kcal.iter().sum::<f64>() as f32;
         place.last = tick;
         place.hours = place.hours.saturating_add(1);
+        if let Some(f) = forage {
+            place.seen_h += 1;
+            place.seen_forage += (f32::from(f) - place.seen_forage) / place.seen_h as f32;
+        }
         if let Some(p) = pursuit {
             place.pursuit_hours[p as usize] += 1.0;
         }
@@ -409,10 +420,10 @@ mod tests {
         let camp = (10.0, 10.0);
         let bush = (10.0 + PLACE_TILES * 3.0, 10.0);
         for h in 0..10 {
-            mem.live_hour(bush, h, Some(Pursuit::Gather), [500.0, 0.0], false, false);
+            mem.live_hour(bush, h, Some(Pursuit::Gather), [500.0, 0.0], Some(100), false, false);
         }
-        mem.live_hour(camp, 10, None, [0.0; 2], true, false);
-        mem.live_hour(camp, 11, None, [0.0; 2], false, true);
+        mem.live_hour(camp, 10, None, [0.0; 2], Some(50), true, false);
+        mem.live_hour(camp, 11, None, [0.0; 2], Some(50), false, true);
         assert_eq!(mem.places.len(), 2, "deux lieux de 2 km distincts");
         let b = mem.places[&place_of(bush)];
         assert_eq!((b.first, b.last, b.hours), (0, 9, 10));
@@ -433,7 +444,7 @@ mod tests {
         for (days, kcal) in [(60, 1000.0), (30, 100.0)] {
             for _ in 0..days {
                 for _ in 0..6 {
-                    mem.live_hour(spot, t, Some(Pursuit::Gather), [kcal, 0.0], false, false);
+                    mem.live_hour(spot, t, Some(Pursuit::Gather), [kcal, 0.0], Some(100), false, false);
                     t += 1;
                 }
                 t += TICKS_PER_DAY - 6;

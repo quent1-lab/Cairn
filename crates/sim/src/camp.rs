@@ -40,9 +40,6 @@ const GAME_NEAR_TILES: f64 = km_to_tiles(3.0);
 /// Fraîcheur d'un troupeau vu, pour qu'il compte dans le choix d'un lieu :
 /// le gibier bouge (même échelle que `brain::GAME_MEMORY_DAYS`).
 const GAME_FRESH_TICKS: u64 = 3 * TICKS_PER_DAY;
-/// En deçà de ces heures de subsistance vécues sur un lieu, la bande ne le
-/// juge pas encore (même seuil que `yields::EVIDENCE_HOURS`).
-const PLACE_EVIDENCE_HOURS: f64 = crate::yields::EVIDENCE_HOURS as f64;
 
 /// Une levée du camp, relevée pour les bancs (pré-mortem de MEM-3) : où, et
 /// sur quoi le choix s'est fait.
@@ -53,11 +50,12 @@ pub struct CampMove {
     pub from: (f64, f64),
     pub to: (f64, f64),
     /// Sources candidates hors du pays battu, dont celles dont le lieu est
-    /// jugé sur la mémoire (assez d'heures vécues).
+    /// connu (un membre y est passé de jour : comparable).
     pub candidates: u32,
     pub known: u32,
-    /// Le lieu retenu est-il jugé sur la mémoire ? Ses trois facteurs, et la
-    /// valeur par défaut des lieux inconnus.
+    /// Le lieu retenu a-t-il été travaillé (sinon : seulement vu) ? Ce qu'on en
+    /// attend, les kcal/h qu'apprend une unité de fourrage vu, le gibier vu
+    /// alentour (relevé, sans poids) et le facteur du trajet.
     pub chosen_known: bool,
     pub remembered: f64,
     pub prior: f64,
@@ -79,9 +77,26 @@ struct BandDay {
     /// Le gibier vu récemment, par maille de 2 km : un troupeau vu par dix
     /// adultes reste un troupeau.
     game: BTreeSet<(i64, i64)>,
-    /// MEM-3 : ce que ses membres attendent de chaque lieu de 2 km (kcal par
-    /// heure, pesées par les heures qu'ils y ont vécues) : (somme pesée, heures).
-    places: BTreeMap<(i64, i64), (f64, f64)>,
+    /// MEM-3 : ce que ses membres savent de chaque lieu de 2 km où l'un d'eux
+    /// est passé.
+    places: BTreeMap<(i64, i64), BandPlace>,
+}
+
+/// Ce que la bande sait d'un lieu : ce qu'on en attend, pesé par les heures de
+/// subsistance qu'on y a vécues ; le fourrage qu'on y a vu, pesé par les heures
+/// de jour qu'on y a passées.
+#[derive(Debug, Clone, Copy, Default)]
+struct BandPlace {
+    worked_value: f64,
+    worked_h: f64,
+    seen_sum: f64,
+    seen_h: f64,
+}
+
+impl BandPlace {
+    fn seen_mean(&self) -> f64 {
+        if self.seen_h > 0.0 { self.seen_sum / self.seen_h } else { 0.0 }
+    }
 }
 
 impl BandDay {
@@ -119,12 +134,12 @@ pub(crate) fn daily(sim: &mut Sim) {
         band.habit_net += hn;
         band.springs.extend(mem.springs.iter().copied());
         for (key, place) in &mem.places {
+            let e = band.places.entry(*key).or_default();
             let h = f64::from(place.work_hours());
-            if h > 0.0 {
-                let e = band.places.entry(*key).or_default();
-                e.0 += place.expected(tick) * h;
-                e.1 += h;
-            }
+            e.worked_value += place.expected(tick) * h;
+            e.worked_h += h;
+            e.seen_sum += f64::from(place.seen_forage) * f64::from(place.seen_h);
+            e.seen_h += f64::from(place.seen_h);
         }
         if let Some((spot, seen)) = mem.game
             && tick.saturating_sub(seen) < GAME_FRESH_TICKS
@@ -168,11 +183,13 @@ pub(crate) fn daily(sim: &mut Sim) {
 /// rendait le mieux par heure, pesée par le trajet à l'échelle d'une journée
 /// de marche.
 fn choose_destination(home: (f64, f64), band: &BandDay) -> Option<((f64, f64), CampMove)> {
-    let (all_kcal, all_h) = band.places.values().fold((0.0, 0.0), |a, p| (a.0 + p.0, a.1 + p.1));
-    if all_h < PLACE_EVIDENCE_HOURS {
-        return None; // la bande ne sait encore rien de ce que rendent les lieux
-    }
-    let prior = all_kcal / all_h;
+    // Ce que vaut, en kcal par heure, une unité de fourrage vu : appris sur les
+    // lieux que la bande a à la fois vus et travaillés. C'est ce qui permet de
+    // comparer un lieu seulement vu (en chassant, en explorant) à un lieu exploité.
+    let (num, den) = band.places.values().filter(|p| p.worked_h > 0.0 && p.seen_h > 0.0).fold((0.0, 0.0), |a, p| {
+        (a.0 + p.worked_value, a.1 + p.seen_mean() * p.worked_h)
+    });
+    let per_forage = (den > 0.0).then(|| num / den);
     let mut best: Option<(f64, (f64, f64), CampMove)> = None;
     let (mut candidates, mut known) = (0u32, 0u32);
     for &spring in &band.springs {
@@ -181,12 +198,21 @@ fn choose_destination(home: (f64, f64), band: &BandDay) -> Option<((f64, f64), C
         if d < RESIDENCE_RADIUS_TILES {
             continue; // le pays qu'on quitte
         }
-        let (remembered, is_known) = match band.places.get(&crate::memory::place_of(p)) {
-            Some(&(kcal, h)) if h >= PLACE_EVIDENCE_HOURS => (kcal / h, true),
-            _ => (prior, false),
-        };
         candidates += 1;
-        known += u32::from(is_known);
+        // On ne compare que ce qu'on connaît (décision de l'utilisateur,
+        // 2026-10-20) : une source dont on a seulement entendu parler, dans un
+        // pays où personne n'est allé, n'a pas de valeur — ni bonne ni moyenne.
+        let Some(place) = band.places.get(&crate::memory::place_of(p)) else { continue };
+        let (remembered, worked) = if place.worked_h > 0.0 {
+            (place.worked_value / place.worked_h, true)
+        } else if let Some(k) = per_forage
+            && place.seen_h > 0.0
+        {
+            (k * place.seen_mean(), false)
+        } else {
+            continue; // passé de nuit seulement : rien vu
+        };
+        known += 1;
         let side = crate::fauna::RANGE_ZONE_TILES;
         let game = band
             .game
@@ -208,9 +234,9 @@ fn choose_destination(home: (f64, f64), band: &BandDay) -> Option<((f64, f64), C
                 to: p,
                 candidates: 0,
                 known: 0,
-                chosen_known: is_known,
+                chosen_known: worked,
                 remembered,
-                prior,
+                prior: per_forage.unwrap_or(0.0),
                 game: game as u32,
                 day,
             };
@@ -229,22 +255,65 @@ mod tests {
     use super::*;
     use crate::memory::{PLACE_TILES, place_of};
 
+    /// Un lieu travaillé 100 h qui rendait `kcal_h`, où l'on voyait `forage`.
+    fn worked(kcal_h: f64, forage: f64) -> BandPlace {
+        BandPlace { worked_value: kcal_h * 100.0, worked_h: 100.0, seen_sum: forage * 100.0, seen_h: 100.0 }
+    }
+
+    fn at(s: (i64, i64)) -> (i64, i64) {
+        place_of((s.0 as f64 + 0.5, s.1 as f64 + 0.5))
+    }
+
     /// MEM-3 : la bande part là où elle se souvient que le pays rendait, pas
-    /// vers le lieu qu'elle n'a jamais exploité ni vers celui qu'elle sait
-    /// pauvre ; sans rien savoir, elle ne part pas.
+    /// vers celui qu'elle sait pauvre ; sans rien savoir, elle ne part pas.
     #[test]
     fn le_camp_part_vers_le_lieu_dont_on_se_souvient_qu_il_rendait() {
         let home = (0.0, 0.0);
         let d = 2.5 * PLACE_TILES; // hors du pays battu, à égale distance
-        let (rich, poor, unknown) = ((d as i64, 0), (-d as i64, 0), (0, d as i64));
+        let (rich, poor) = ((d as i64, 0), (-d as i64, 0));
         let mut band = BandDay::default();
-        band.springs.extend([rich, poor, unknown]);
-        let at = |s: (i64, i64)| place_of((s.0 as f64 + 0.5, s.1 as f64 + 0.5));
+        band.springs.extend([rich, poor]);
         assert!(choose_destination(home, &band).is_none(), "rien de vécu : on ne part pas");
-        band.places.insert(at(rich), (200_000.0, 100.0)); // 2 000 kcal/h
-        band.places.insert(at(poor), (10_000.0, 100.0)); // 100 kcal/h
+        band.places.insert(at(rich), worked(2000.0, 100.0));
+        band.places.insert(at(poor), worked(100.0, 100.0));
         let (dest, _) = choose_destination(home, &band).expect("une destination");
         assert_eq!(place_of(dest), at(rich), "vers le lieu qui rendait");
+    }
+
+    /// On ne compare pas un pays où personne n'est allé : une source connue
+    /// par ouï-dire n'y attire pas la bande, même si les lieux connus sont
+    /// pauvres (décision de l'utilisateur, 2026-10-20).
+    #[test]
+    fn on_ne_part_pas_vers_un_pays_ou_personne_n_est_alle() {
+        let home = (0.0, 0.0);
+        let d = 2.5 * PLACE_TILES;
+        let (known_poor, heard, rich_home) = ((d as i64, 0), (-d as i64, 0), (0, 0));
+        let mut band = BandDay::default();
+        band.springs.extend([known_poor, heard]);
+        band.places.insert(at(rich_home), worked(3000.0, 100.0)); // le pays qu'on quitte
+        band.places.insert(at(known_poor), worked(200.0, 30.0));
+        let (dest, _) = choose_destination(home, &band).expect("une destination");
+        assert_eq!(place_of(dest), at(known_poor), "le connu, même pauvre, plutôt que l'inconnu");
+        band.places.remove(&at(known_poor));
+        assert!(choose_destination(home, &band).is_none(), "seul l'inconnu reste : on ne part pas");
+    }
+
+    /// Un lieu seulement vu (en chassant, en explorant) se compare aux lieux
+    /// travaillés par ce qu'on y a vu pousser.
+    #[test]
+    fn un_lieu_vu_se_compare_par_ce_qu_on_y_a_vu_pousser() {
+        let home = (0.0, 0.0);
+        let d = 2.5 * PLACE_TILES;
+        let (seen_rich, poor, rich_home) = ((d as i64, 0), (-d as i64, 0), (0, 0));
+        let mut band = BandDay::default();
+        band.springs.extend([seen_rich, poor]);
+        band.places.insert(at(rich_home), worked(500.0, 50.0)); // 10 kcal/h par unité de fourrage
+        band.places.insert(at(poor), worked(200.0, 20.0));
+        band.places.insert(at(seen_rich), BandPlace { seen_sum: 100.0 * 10.0, seen_h: 10.0, ..BandPlace::default() });
+        let (dest, choice) = choose_destination(home, &band).expect("une destination");
+        assert_eq!(place_of(dest), at(seen_rich), "le pays vu riche l'emporte sur le pays travaillé pauvre");
+        assert!(!choice.chosen_known);
+        assert!((choice.remembered - 1000.0).abs() < 1.0, "100 de fourrage vu × 10 kcal/h : {}", choice.remembered);
     }
 
     /// Le gibier vu ces derniers jours ne fait pas préférer un lieu : la
@@ -257,9 +326,8 @@ mod tests {
         let (rich, poor) = ((d as i64, 0), (-d as i64, 0));
         let mut band = BandDay::default();
         band.springs.extend([rich, poor]);
-        let at = |s: (i64, i64)| place_of((s.0 as f64 + 0.5, s.1 as f64 + 0.5));
-        band.places.insert(at(rich), (100_000.0, 100.0)); // 1 000 kcal/h
-        band.places.insert(at(poor), (60_000.0, 100.0)); // 600 kcal/h
+        band.places.insert(at(rich), worked(1000.0, 100.0));
+        band.places.insert(at(poor), worked(600.0, 100.0));
         band.see_game(poor); // un troupeau vu près du lieu le moins bon
         let (dest, _) = choose_destination(home, &band).expect("une destination");
         assert_eq!(place_of(dest), at(rich), "on va où le pays rendait, pas où l'on a vu passer un troupeau");

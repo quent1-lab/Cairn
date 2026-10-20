@@ -1176,3 +1176,39 @@ battu (au-delà du rayon de résidence) ; (b) **l'inconnu vaut la moyenne** des 
 juste après avoir épuisé son pays, tout lieu inconnu bat les lieux connus récemment exploités,
 et la bande s'enfonce dans l'inconnu. La soif : à lire (arrivée à une source qu'un membre
 connaît par ouï-dire, enfants qui suivent mal ?).
+
+## Où le concept a été manqué (2026-10-20, relevé par l'utilisateur)
+Décision : « si un humain a déjà vu un endroit lors de la chasse ou de l'exploration, on peut
+comparer cet emplacement avec d'autres connus. On ne peut pas comparer un endroit que l'on ne
+connaît pas. Cette analyse aurait dû être faite avant les runs. »
+L'erreur, en trois couches :
+1. **Une valeur donnée à l'inconnu** (« la moyenne des lieux connus ») : l'omniscience que MEM-3
+   devait retirer, revenue sous la forme d'une ignorance traitée comme un savoir moyen.
+2. **Des candidates connues par ouï-dire** : toute source qu'un membre connaît, y compris
+   apprise d'autrui dans un pays où personne n'est allé.
+3. **Un seuil de 48 h de subsistance** qui rangeait parmi les inconnus les lieux vus en chassant
+   ou en explorant.
+Signes ignorés : le pré-mortem (point 1 : « presque toutes les candidates reçoivent la valeur
+par défaut ») et l'étape 1 (54 % des destinations sans mémoire) — mesurés au lieu d'être
+corrigés. Leçon (ajoutée à la méthode du chantier) : quand une valeur par défaut tient lieu de
+savoir, demander d'abord si l'agent **peut** savoir ; un pré-mortem qui touche le concept se
+corrige avant de mesurer.
+
+## MEM-3 corrigé — on ne compare que ce qu'on a vu (2026-10-20)
+- Candidates : les sources hors du pays battu **dont le lieu de 2 km a été parcouru de jour par
+  un membre** ; les autres n'ont pas de valeur et ne sont pas candidates.
+- Un lieu travaillé vaut ce qu'il a rendu (récent, puis repoussé) ; un lieu **seulement vu** vaut
+  le fourrage qu'on y a vu (`Place::seen_forage`, lu de jour sur la tuile où l'on se tient) ×
+  ce que rapporte, sur les lieux à la fois vus et travaillés par la bande, une unité de fourrage
+  vu (kcal/h) — la comparaison s'apprend.
+- Sans lieu comparable hors du pays, la bande reste.
+Tests : `on_ne_part_pas_vers_un_pays_ou_personne_n_est_alle` (rouge : l'ancienne règle partait
+vers l'inconnu valu à la moyenne), `un_lieu_vu_se_compare_par_ce_qu_on_y_a_vu_pousser` (rouge :
+l'ancienne lui donnait la moyenne) ; `une_bande_leve_le_camp_quand_le_pays_s_epuise` passe
+désormais de jour au pays de la source.
+Prédictions, banc `marche` 90 j × 8 runs, contre le choix 1 (ee90893) :
+1. Déplacement net du foyer ≤ 20 km sur 8/8 runs en 90 j (choix 1 : jusqu'à 33).
+2. Retours vers un ancien camp ≥ 30 % des levées (choix 1 : 19 %).
+3. Levées : moins nombreuses qu'au choix 1 (102) — moins de candidates.
+Réfuterait 1 : une run au-delà de 30 km.
+Puis `longue` 10 ans × 8 si 1 tient : foyer ≤ 200 km sur 8/8 ; population ≥ 70 % de `main` sur ≥ 6/8.

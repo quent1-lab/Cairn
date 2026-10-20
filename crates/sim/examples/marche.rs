@@ -364,7 +364,7 @@ fn print(rs: &[Report]) {
             }
         }
         println!(
-            "\n## levées du camp (tous runs) : {} ; destination jugée sur la mémoire {:.0} % ; candidats connus {:.0} % (moy. {:.1} sur {:.1}) ; gibier vu au lieu retenu {:.0} % ; vers un ancien camp {:.0} %",
+            "\n## levées du camp (tous runs) : {} ; destination travaillée {:.0} % (sinon seulement vue) ; candidats connus {:.0} % (moy. {:.1} sur {:.1}) ; gibier vu au lieu retenu {:.0} % ; vers un ancien camp {:.0} %",
             moves.len(),
             share(&|m| m.chosen_known),
             100.0 * mean(&|m| f64::from(m.known)) / mean(&|m| f64::from(m.candidates)).max(1e-9),
@@ -374,7 +374,7 @@ fn print(rs: &[Report]) {
             100.0 * back as f64 / n,
         );
         println!(
-            "   facteurs du lieu retenu (moy.) : mémoire {:.0} kcal/h contre {:.0} par défaut ; gibier ×{:.2} ; trajet ×{:.2} ; distance médiane {:.1} km (p90 {:.1})",
+            "   facteurs du lieu retenu (moy.) : attendu {:.0} kcal/h ; {:.1} kcal/h par unité de fourrage vu ; gibier ×{:.2} ; trajet ×{:.2} ; distance médiane {:.1} km (p90 {:.1})",
             mean(&|m| m.remembered),
             mean(&|m| m.prior),
             mean(&|m| 1.0 + f64::from(m.game)),

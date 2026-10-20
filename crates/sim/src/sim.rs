@@ -1161,6 +1161,7 @@ impl Sim {
                 time.tick,
                 pursuit,
                 gained,
+                (sight >= fauna::TRAIL_SIGHT).then(|| self.world.tile(pos.tile().0, pos.tile().1).biomass),
                 behavior.activity == Activity::Drinking,
                 behavior.activity == Activity::Sleeping,
             );
@@ -2496,12 +2497,18 @@ mod tests {
                 for d in 0..30u64 {
                     for h in 0..6u64 {
                         yields.spend_hour(crate::yields::Pursuit::Gather, 0.0);
-                        mem.live_hour(at_camp, d * 24 + h, Some(crate::yields::Pursuit::Gather), [500.0, 0.0], false, false);
+                        mem.live_hour(at_camp, d * 24 + h, Some(crate::yields::Pursuit::Gather), [500.0, 0.0], Some(100), false, false);
                     }
                     yields.gain(crate::yields::Pursuit::Gather, 3_000.0);
                     yields.take_day();
                 }
                 mem.springs.push((source.0 as i64, source.1 as i64));
+                // Et l'on est passé de jour au pays de la source (MEM-3 : on ne
+                // part que vers un lieu où l'un de nous est allé).
+                let there = (source.0 as f64 + 0.5, source.1 as f64 + 0.5);
+                for h in 0..4u64 {
+                    mem.live_hour(there, 31 * 24 + h, None, [0.0; 2], Some(100), false, false);
+                }
             }
             let camp = (home.0 as f64 + 0.5, home.1 as f64 + 0.5);
             let rate = if epuise { 300.0 } else { 6_000.0 }; // kcal nettes par jour d'adulte (la passe ajoute un jour vide)
