@@ -118,7 +118,7 @@ fn main() {
     let causes_head: Vec<String> = CAUSES.iter().map(|c| format!("morts_{c:?}")).collect();
     writeln!(
         csv,
-        "jour,an,pop,naissances,morts,{},clans,en_clan,taille_med,taille_max,clans_formes,clans_dissous,clans_absorbes,liens_med,tension_max,paires_tendues,faim_moy,faim_p90,expo_feu,expo_cuivre,techs_vivantes,decouvertes,oublis,troupeaux,tetes,meutes,predateurs,mailles_faune,chunks,tps_jour,tps_30j,rss_mo,morts_nourrissons,morts_enfants,age_med_deces_10a,age_med_vivants,disp_med_km,disp_max_km,tailles_clans,chasse_tetes,marche_h_adulte,noir_dormi,troupeaux_10km,foyers_km_jour,foyer_depart_km,inter_clans_km,huttes_chef,pop_A,pop_B,pop_mixte,morts_A,morts_B,morts_violence_A,morts_violence_B,morts_maladie_A,morts_maladie_B,dist_AB_km,contacts_AB_100m,liens_AB,clans_mixtes,naissances_mixtes,contagions_AB",
+        "jour,an,pop,naissances,morts,{},clans,en_clan,taille_med,taille_max,clans_formes,clans_dissous,clans_absorbes,liens_med,tension_max,paires_tendues,faim_moy,faim_p90,expo_feu,expo_cuivre,techs_vivantes,decouvertes,oublis,troupeaux,tetes,meutes,predateurs,mailles_faune,chunks,tps_jour,tps_30j,rss_mo,morts_nourrissons,morts_enfants,age_med_deces_10a,age_med_vivants,disp_med_km,disp_max_km,tailles_clans,chasse_tetes,marche_h_adulte,noir_dormi,troupeaux_10km,foyers_km_jour,foyer_depart_km,inter_clans_km,huttes_chef,pop_A,pop_B,pop_mixte,morts_A,morts_B,morts_violence_A,morts_violence_B,morts_maladie_A,morts_maladie_B,dist_AB_km,contacts_AB_100m,liens_AB,clans_mixtes,naissances_mixtes,contagions_AB,levees,levees_memoire,levees_retour,foyer_max_km",
         causes_head.join(",")
     )
     .unwrap();
@@ -143,6 +143,8 @@ fn main() {
     let mut cross_contagions = 0usize;
     let mut seen_births = 0usize;
     let mut infected_yesterday: BTreeSet<(u64, usize)> = BTreeSet::new();
+    let (mut seen_moves, mut moves_back, mut max_from_start) = (0usize, 0usize, 0.0f64);
+    let mut old_camps: BTreeSet<(u64, (i64, i64))> = BTreeSet::new();
     let reason = loop {
         let t0 = std::time::Instant::now();
         // La chasse, la marche et la nuit (CHA, MAR) : relevées heure par heure.
@@ -391,9 +393,20 @@ fn main() {
             }
         }
         infected_yesterday = infected_today;
+        // MAR-6b + MEM-3 : levées vers un lieu de 2 km qui a déjà été un camp
+        // du même clan ; plus grande distance d'un foyer au départ.
+        for m in &sim.camp_moves[seen_moves..] {
+            old_camps.insert((m.clan, cairn_sim::memory::place_of(m.from)));
+            moves_back += usize::from(old_camps.contains(&(m.clan, cairn_sim::memory::place_of(m.to))));
+            old_camps.insert((m.clan, cairn_sim::memory::place_of(m.to)));
+        }
+        seen_moves = sim.camp_moves.len();
+        for c in &sim.clans {
+            max_from_start = max_from_start.max(tiles_to_km((c.home.0 - home.0 as f64).hypot(c.home.1 - home.1 as f64)));
+        }
         writeln!(
             csv,
-            "{day},{:.3},{pop},{},{},{},{},{in_clan},{},{},{formed},{dissolved},{merged},{},{tension_max:.3},{tense},{hunger_mean:.3},{hunger_p90:.3},{fire},{copper},{},{disc},{forgot},{herds},{heads:.0},{packs},{predators:.0},{},{},{tps_day:.1},{tps_win:.1},{},{dead_infants},{dead_children},{:.1},{:.1},{:.2},{:.2},{},{hunted_day:.2},{walk_per_adult:.2},{dark_slept:.3},{near_herds},{camp_step_km:.3},{:.2},{inter:.2},{chief_huts},{},{},{},{},{},{},{},{},{},{dist_ab:.2},{contacts_ab},{links_ab},{mixed_clans},{mixed_births},{cross_contagions}",
+            "{day},{:.3},{pop},{},{},{},{},{in_clan},{},{},{formed},{dissolved},{merged},{},{tension_max:.3},{tense},{hunger_mean:.3},{hunger_p90:.3},{fire},{copper},{},{disc},{forgot},{herds},{heads:.0},{packs},{predators:.0},{},{},{tps_day:.1},{tps_win:.1},{},{dead_infants},{dead_children},{:.1},{:.1},{:.2},{:.2},{},{hunted_day:.2},{walk_per_adult:.2},{dark_slept:.3},{near_herds},{camp_step_km:.3},{:.2},{inter:.2},{chief_huts},{},{},{},{},{},{},{},{},{},{dist_ab:.2},{contacts_ab},{links_ab},{mixed_clans},{mixed_births},{cross_contagions},{},{},{moves_back},{max_from_start:.2}",
             day as f64 / 360.0,
             sim.births.len(),
             sim.deaths.len(),
@@ -421,6 +434,8 @@ fn main() {
             deaths_by_origin[1][1],
             deaths_by_origin[0][2],
             deaths_by_origin[1][2],
+            sim.camp_moves.len(),
+            sim.camp_moves.iter().filter(|m| m.chosen_known).count(),
         )
         .unwrap();
         csv.flush().unwrap();

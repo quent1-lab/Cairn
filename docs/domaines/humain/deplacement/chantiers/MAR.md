@@ -1089,3 +1089,19 @@ Prédictions, `longue` 10 ans, 4 seeds × 2 scènes, départ j135, contre `main`
 7. *Une prise de 60 000 kcal tombe sur la maille de l'abattage.* — **Retenu** comme lecture :
    rendements de chasse et de cueillette des lieux retenus lus à part.
 8. *Commentaire de tête de `camp.rs` périmé.* — **Retenu**, corrigé.
+
+### Prédictions révisées après le pré-mortem (avant tout banc)
+Correctifs faits : gibier compté par troupeau (d957678) ; valeur d'un lieu = rendement récent
+(demi-vie 4 j, celle du registre du camp) qui revient vers le long terme avec la repousse
+(demi-vie 60 j) (test `un_lieu_epuise_vaut_peu_puis_repousse`). Instrument : `Sim::camp_moves`
+(chaque levée : candidats, lus dans la mémoire, facteurs), lu par `marche` et `longue`.
+**Étape 1, banc `marche` 90 j × 8 runs** (exp/camp-memoire contre `main`) :
+- Seuil : si moins de 30 % des destinations sont jugées sur la mémoire, MEM-3 n'est pas
+  testé — on n'engage pas la run longue, on regarde pourquoi.
+- Prédiction : 30-80 % des destinations jugées sur la mémoire ; gibier présent au lieu
+  retenu ≤ 60 % ; retours vers un ancien camp ≥ 10 % des levées.
+- Relevé (hors verdict de MEM-3, il juge la règle de départ) : levées par clan.
+**Étape 2, `longue` 10 ans × 8** (si l'étape 1 passe) :
+1. Distance du foyer au départ : maximum sur 10 ans ≤ 200 km sur 8/8 ; médiane à l'an 10 ≤ 30 km.
+2. Population moyenne des ans 5-10 ≥ 70 % de `main` sur ≥ 6/8.
+3. Scène froide : morts de froid en hausse contre `main` (les huttes restent derrière) — lu à part.

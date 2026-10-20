@@ -44,6 +44,27 @@ const GAME_FRESH_TICKS: u64 = 3 * TICKS_PER_DAY;
 /// juge pas encore (même seuil que `yields::EVIDENCE_HOURS`).
 const PLACE_EVIDENCE_HOURS: f64 = crate::yields::EVIDENCE_HOURS as f64;
 
+/// Une levée du camp, relevée pour les bancs (pré-mortem de MEM-3) : où, et
+/// sur quoi le choix s'est fait.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CampMove {
+    pub tick: u64,
+    pub clan: u64,
+    pub from: (f64, f64),
+    pub to: (f64, f64),
+    /// Sources candidates hors du pays battu, dont celles dont le lieu est
+    /// jugé sur la mémoire (assez d'heures vécues).
+    pub candidates: u32,
+    pub known: u32,
+    /// Le lieu retenu est-il jugé sur la mémoire ? Ses trois facteurs, et la
+    /// valeur par défaut des lieux inconnus.
+    pub chosen_known: bool,
+    pub remembered: f64,
+    pub prior: f64,
+    pub game: u32,
+    pub day: f64,
+}
+
 /// Ce que la bande sait et a vécu ce jour, par clan.
 #[derive(Default)]
 struct BandDay {
@@ -131,7 +152,10 @@ pub(crate) fn daily(sim: &mut Sim) {
         if now >= habit {
             continue;
         }
-        if let Some(dest) = choose_destination(clan.home, band) {
+        if let Some((dest, mut choice)) = choose_destination(clan.home, band) {
+            choice.tick = tick;
+            choice.clan = clan.id.0;
+            sim.camp_moves.push(choice);
             clan.home = dest;
             clan.camp = Default::default();
         }
@@ -143,23 +167,26 @@ pub(crate) fn daily(sim: &mut Sim) {
 /// du rayon de résidence), là où la bande se souvient que la subsistance
 /// rendait le mieux par heure, et près du gibier vu, pesée par le trajet à
 /// l'échelle d'une journée de marche.
-fn choose_destination(home: (f64, f64), band: &BandDay) -> Option<(f64, f64)> {
+fn choose_destination(home: (f64, f64), band: &BandDay) -> Option<((f64, f64), CampMove)> {
     let (all_kcal, all_h) = band.places.values().fold((0.0, 0.0), |a, p| (a.0 + p.0, a.1 + p.1));
     if all_h < PLACE_EVIDENCE_HOURS {
         return None; // la bande ne sait encore rien de ce que rendent les lieux
     }
     let prior = all_kcal / all_h;
-    let mut best: Option<(f64, (f64, f64))> = None;
+    let mut best: Option<(f64, (f64, f64), CampMove)> = None;
+    let (mut candidates, mut known) = (0u32, 0u32);
     for &spring in &band.springs {
         let p = (spring.0 as f64 + 0.5, spring.1 as f64 + 0.5);
         let d = (p.0 - home.0).hypot(p.1 - home.1);
         if d < RESIDENCE_RADIUS_TILES {
             continue; // le pays qu'on quitte
         }
-        let remembered = match band.places.get(&crate::memory::place_of(p)) {
-            Some(&(kcal, h)) if h >= PLACE_EVIDENCE_HOURS => kcal / h,
-            _ => prior,
+        let (remembered, is_known) = match band.places.get(&crate::memory::place_of(p)) {
+            Some(&(kcal, h)) if h >= PLACE_EVIDENCE_HOURS => (kcal / h, true),
+            _ => (prior, false),
         };
+        candidates += 1;
+        known += u32::from(is_known);
         let side = crate::fauna::RANGE_ZONE_TILES;
         let game = band
             .game
@@ -168,11 +195,28 @@ fn choose_destination(home: (f64, f64), band: &BandDay) -> Option<(f64, f64)> {
             .count();
         let day = 1.0 / (1.0 + d / (WALK_TILES_PER_TICK * 24.0));
         let score = remembered * (1.0 + game as f64) * day;
-        if score > 0.0 && best.is_none_or(|(b, _)| score > b) {
-            best = Some((score, p));
+        if score > 0.0 && best.is_none_or(|(b, _, _)| score > b) {
+            let choice = CampMove {
+                tick: 0,
+                clan: 0,
+                from: home,
+                to: p,
+                candidates: 0,
+                known: 0,
+                chosen_known: is_known,
+                remembered,
+                prior,
+                game: game as u32,
+                day,
+            };
+            best = Some((score, p, choice));
         }
     }
-    best.map(|(_, p)| p)
+    best.map(|(_, p, mut c)| {
+        c.candidates = candidates;
+        c.known = known;
+        (p, c)
+    })
 }
 
 #[cfg(test)]
@@ -191,10 +235,10 @@ mod tests {
         let mut band = BandDay::default();
         band.springs.extend([rich, poor, unknown]);
         let at = |s: (i64, i64)| place_of((s.0 as f64 + 0.5, s.1 as f64 + 0.5));
-        assert_eq!(choose_destination(home, &band), None, "rien de vécu : on ne part pas");
+        assert!(choose_destination(home, &band).is_none(), "rien de vécu : on ne part pas");
         band.places.insert(at(rich), (200_000.0, 100.0)); // 2 000 kcal/h
         band.places.insert(at(poor), (10_000.0, 100.0)); // 100 kcal/h
-        let dest = choose_destination(home, &band).expect("une destination");
+        let (dest, _) = choose_destination(home, &band).expect("une destination");
         assert_eq!(place_of(dest), at(rich), "vers le lieu qui rendait");
     }
 
@@ -213,7 +257,7 @@ mod tests {
         for k in 0..30 {
             band.see_game((poor.0 + k, poor.1)); // le même troupeau, trente témoins
         }
-        let dest = choose_destination(home, &band).expect("une destination");
+        let (dest, _) = choose_destination(home, &band).expect("une destination");
         assert_eq!(place_of(dest), at(rich), "le gibier compte par troupeau, pas par témoin");
     }
 }

@@ -297,6 +297,8 @@ pub struct Sim {
     /// Têtes de gibier prélevées par les humains depuis le début : le compteur
     /// de la pression de chasse.
     pub hunted_head: f32,
+    /// Les levées du camp (MAR-6b, relevé pour les bancs).
+    pub camp_moves: Vec<crate::camp::CampMove>,
     /// Nombre cumulé d'appels A* (observabilité du coût de pathfinding).
     pub path_calls: u64,
     /// Demandes de trajet refusées faute de budget (observabilité : un refus
@@ -523,6 +525,7 @@ impl Sim {
             fosters: BTreeMap::new(),
             herd_trails: BTreeMap::new(),
             hunted_head: 0.0,
+            camp_moves: Vec::new(),
             path_calls: 0,
             path_denied: 0,
             shelter_ticks: 0,
