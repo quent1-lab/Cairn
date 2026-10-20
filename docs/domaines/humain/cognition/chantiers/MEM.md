@@ -113,3 +113,22 @@ MOR-5c5 lancé ensemble :
 2. Part des heures dans les 10 lieux les plus vécus : médiane ≥ 85 %.
 3. Lieux qui ont nourri : médiane ≤ 15 ; lieux où l'on a dormi : médiane ≤ 3.
 4. Contrôle : morts par run identiques à MOR-5c5 (pure observation) ; débit à ±5 %.
+
+### MEM-1 — mesuré (acceptation 1 an, 8 runs, 5316d3b, contre MOR-5c5 lancé ensemble)
+Contrôle : survie et morts par run **identiques** (pure observation) ; débit plancher à ±2 %.
+| par adulte, en fin d'année (347 adultes) | p10 | médiane | p90 |
+|---|---|---|---|
+| lieux de 2 km retenus | 25 | **52** | 99 |
+| part des heures dans les 10 premiers | 74 % | **92 %** | 98 % |
+| lieux qui ont nourri | 17 | 27 | 43 |
+| lieux où l'on a bu | 17 | 30 | 46 |
+| lieux où l'on a dormi | 17 | **30** | 53 |
+1. 15-40 lieux, p90 ≤ 80 : **réfutée vers le haut** (52 ; 99). 2. ≥ 85 % des heures dans 10
+lieux : **tenue** (92 %). 3. Nourri ≤ 15, dormi ≤ 3 : **réfutées** (27 ; 30).
+Lecture : le foyer du clan ne bouge pas, mais chacun **dort à 30 endroits** en un an : les
+nuits se passent là où la journée a mené, dans un rayon de ~6 km du foyer (≈ 28 mailles,
+cohérent avec la dispersion de 1,5-6 km des runs longues). Le pays connu (~200 km²) est de
+l'ordre d'un territoire de chasse baka (205 km²) ; il est vécu, pas exploité : 92 % du temps
+dans 10 mailles. Mémoire : +0,6 Mo sur 1,09 Go.
+Ce que j'ai pu manquer : 1 an seulement (le pays connu d'une vie n'est pas vu) ; les enfants ne
+sont pas comptés ; « dormi » compte toute heure de sommeil, sieste comprise.
