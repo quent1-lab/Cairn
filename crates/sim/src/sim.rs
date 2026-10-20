@@ -1095,6 +1095,7 @@ impl Sim {
             // la plaie (un blessé peine à tout — §3.1) : c'est là que
             // « improductif » se paie. Le savoir-faire, lui, vit dans `Skills`.
             let before = (pos.x, pos.y);
+            let kcal_before = ledger.kcal;
             let sight = crate::climate::sight(self.climate.light(pos.tile().1, time));
             let work = demography::work_capacity(demo.age_years(time.tick))
                 * (1.0 - WOUND_WORK_PENALTY * wound.0);
@@ -1150,6 +1151,16 @@ impl Sim {
             }
             // Où que la tâche l'ait mené, l'agent note où il a mis les pieds.
             mem.note_visit(pos.tile());
+            // MEM-1 : et ce que le lieu a été pour lui cette heure.
+            let gained = [0, 1].map(|i| ledger.kcal[i] - kcal_before[i]);
+            mem.live_hour(
+                (pos.x, pos.y),
+                time.tick,
+                pursuit,
+                gained,
+                behavior.activity == Activity::Drinking,
+                behavior.activity == Activity::Sleeping,
+            );
             if behavior.activity == Activity::Sleeping {
                 mem.lodge = Some(pos.tile()); // le gîte d'où partira la sortie de demain
             }

@@ -99,3 +99,17 @@ parcourent ~4 fois plus). Rien de chiffré sur la durée du souvenir d'un lieu n
 lieux-refuges : la forme validée reste à mesurer, pas à régler. Conséquence pour MEM-1 :
 retenir le rendu **par saison** (la maille qui rend en été n'est pas celle de l'hiver) est
 appuyé par les calendriers ; à proposer comme variante, pas d'emblée.
+
+## MEM-1 — la carte vécue (2026-10-20 ; ordre revu : la mobilité avant MOR-5c3)
+Changement (observation seule, aucune décision ne le lit) : `Memory::places`, par maille de
+2 km, ce que le lieu a été pour soi — premier et dernier passage, heures, heures à cueillir et
+à chasser, kcal acquises par activité, heures à boire, nuits. Noté chaque heure
+(`Memory::live_hour`, après `note_visit`) ; plafond de 5 000 lieux (le plus ancien s'oublie,
+en attendant la force du souvenir de MEM-4). Non encore : le danger (blessure, mort d'un
+proche), la saison. Test `la_carte_vecue_retient_ce_que_chaque_lieu_a_rendu`.
+Prédictions, acceptation 1 an × 8 runs (régime : camps immobiles, dispersion ≤ 6 km), contre
+MOR-5c5 lancé ensemble :
+1. Lieux retenus par adulte : médiane 15-40, p90 ≤ 80.
+2. Part des heures dans les 10 lieux les plus vécus : médiane ≥ 85 %.
+3. Lieux qui ont nourri : médiane ≤ 15 ; lieux où l'on a dormi : médiane ≤ 3.
+4. Contrôle : morts par run identiques à MOR-5c5 (pure observation) ; débit à ±5 %.

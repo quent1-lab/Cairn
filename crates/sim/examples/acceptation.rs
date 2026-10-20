@@ -139,6 +139,10 @@ struct Report {
     camp_water: [u64; 4],
     // Heures passées à boire (chacune une gorgée exposée à l'eau), toutes personnes.
     drink_h: u64,
+    // MEM-1, en fin de run, par adulte : lieux retenus, part des heures dans
+    // ses dix lieux les plus vécus, lieux où il a acquis des kcal, où il a bu,
+    // où il a dormi.
+    places: Vec<[f64; 5]>,
     // Énergie, par classe (femmes adultes, hommes adultes, < 3 ans, 3-13 ans) :
     // kcal dépensées, métabolisme de base cumulé, heures vécues, heures de marche.
     burn: [f64; 4],
@@ -675,6 +679,23 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
         }
     }
     r.clans_end = sim.clans.len();
+    for (_, (demo, mem)) in sim.agents.query::<(&cairn_sim::Demographics, &cairn_sim::Memory)>().iter() {
+        if !demo.is_adult(sim.time.tick) || mem.places.is_empty() {
+            continue;
+        }
+        let mut hours: Vec<u32> = mem.places.values().map(|p| p.hours).collect();
+        hours.sort_unstable_by(|a, b| b.cmp(a));
+        let total: u32 = hours.iter().sum();
+        let top10: u32 = hours.iter().take(10).sum();
+        let count = |f: &dyn Fn(&cairn_sim::memory::Place) -> bool| mem.places.values().filter(|p| f(p)).count() as f64;
+        r.places.push([
+            mem.places.len() as f64,
+            f64::from(top10) / f64::from(total.max(1)),
+            count(&|p| p.kcal.iter().sum::<f32>() > 0.0),
+            count(&|p| p.drinks > 0),
+            count(&|p| p.nights > 0),
+        ]);
+    }
     if let Some(fire) = fire {
         r.fire_clans = sim.clans.iter().filter(|c| sim.clan_corpus(c.id).contains(&fire)).count();
     }
@@ -830,6 +851,19 @@ fn print_episodes(rs: &[Report]) {
             .collect::<Vec<_>>()
             .join(" ; ")
     );
+    let mut places: Vec<[f64; 5]> = rs.iter().flat_map(|r| r.places.iter().copied()).collect();
+    if !places.is_empty() {
+        let col = |v: &mut Vec<[f64; 5]>, i: usize| -> (f64, f64, f64) {
+            v.sort_by(|a, b| a[i].total_cmp(&b[i]));
+            (v[v.len() / 10][i], v[v.len() / 2][i], v[v.len() * 9 / 10][i])
+        };
+        let names = ["lieux de 2 km retenus", "part des heures dans les 10 premiers", "lieux qui ont nourri", "lieux où l'on a bu", "lieux où l'on a dormi"];
+        println!("MEM-1, carte vécue des adultes en fin de run ({} adultes ; p10 / médiane / p90) :", places.len());
+        for (i, n) in names.iter().enumerate() {
+            let (a, b, c) = col(&mut places, i);
+            println!("  {n:<38} {a:.2} / {b:.2} / {c:.2}");
+        }
+    }
     let lived: u64 = rs.iter().map(|r| r.lived_h.iter().sum::<u64>()).sum();
     let drunk: u64 = rs.iter().map(|r| r.drink_h).sum();
     println!("Gorgées (heures à boire) par personne et par jour : {:.2}", 24.0 * drunk as f64 / lived.max(1) as f64);

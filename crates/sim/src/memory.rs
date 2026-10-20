@@ -19,7 +19,7 @@
 //! ce que l'agent a pu percevoir ou entendre — garanti par construction (on
 //! n'écrit dedans qu'aux passages et aux rencontres), testé par les bornes.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::agent::AgentId;
 use crate::sim::Sim;
@@ -71,6 +71,41 @@ pub struct Memory {
     /// Dernière cellule notée — évite une insertion par tick quand on
     /// piétine dans la même cellule (le cas de très loin le plus fréquent).
     last_cell: Option<(i64, i64)>,
+    /// MEM-1 : la carte vécue, par maille de 2 km (celle des plantes et des
+    /// domaines du gibier) — ce que chaque lieu a été pour soi.
+    pub places: BTreeMap<(i64, i64), Place>,
+}
+
+/// Côté d'un lieu de la carte vécue : 2 km, la maille des plantes et des
+/// domaines du gibier (MEM, décision de l'utilisateur du 2026-10-18).
+pub const PLACE_TILES: f64 = cairn_core::km_to_tiles(2.0);
+/// Lieux retenus au plus. Un territoire hadza fait ~1 000 mailles de 2 km,
+/// un territoire aché ~5 000 : le plafond n'est atteint que par un grand
+/// voyageur. Au-delà, le lieu le plus anciennement visité s'oublie (MEM-1 ;
+/// la force du souvenir viendra avec MEM-4).
+pub const MAX_PLACES: usize = 5000;
+
+/// Ce qu'un lieu a été pour soi (MEM-1, observation : aucune décision ne le
+/// lit encore).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Place {
+    /// Premier et dernier passage (ticks).
+    pub first: u64,
+    pub last: u64,
+    /// Heures passées sur le lieu, dont à chaque activité de subsistance.
+    pub hours: u32,
+    pub pursuit_hours: [f32; crate::yields::PURSUITS],
+    /// Kcal acquises sur le lieu, par activité.
+    pub kcal: [f32; crate::yields::PURSUITS],
+    /// Heures à y boire.
+    pub drinks: u16,
+    /// Nuits à y dormir.
+    pub nights: u16,
+}
+
+/// Le lieu (maille de 2 km) d'une position.
+pub fn place_of(pos: (f64, f64)) -> (i64, i64) {
+    ((pos.0 / PLACE_TILES).floor() as i64, (pos.1 / PLACE_TILES).floor() as i64)
 }
 
 impl Memory {
@@ -156,6 +191,37 @@ impl Memory {
     /// L'agent connaît-il cette cellule ?
     pub fn knows_cell(&self, cell: (i64, i64)) -> bool {
         self.known.contains(&cell)
+    }
+
+    /// MEM-1 : une heure vécue en `pos` — l'activité de subsistance qu'on y a
+    /// menée, les kcal qu'elle y a acquises, si l'on y a bu ou dormi.
+    pub fn live_hour(
+        &mut self,
+        pos: (f64, f64),
+        tick: u64,
+        pursuit: Option<crate::yields::Pursuit>,
+        kcal: [f64; crate::yields::PURSUITS],
+        drank: bool,
+        slept: bool,
+    ) {
+        let key = place_of(pos);
+        if !self.places.contains_key(&key) && self.places.len() >= MAX_PLACES {
+            let oldest = self.places.iter().min_by_key(|(k, p)| (p.last, **k)).map(|(k, _)| *k);
+            if let Some(k) = oldest {
+                self.places.remove(&k);
+            }
+        }
+        let place = self.places.entry(key).or_insert(Place { first: tick, ..Place::default() });
+        place.last = tick;
+        place.hours = place.hours.saturating_add(1);
+        if let Some(p) = pursuit {
+            place.pursuit_hours[p as usize] += 1.0;
+        }
+        for (i, k) in kcal.iter().enumerate() {
+            place.kcal[i] += *k as f32;
+        }
+        place.drinks = place.drinks.saturating_add(u16::from(drank));
+        place.nights = place.nights.saturating_add(u16::from(slept));
     }
 }
 
@@ -290,5 +356,25 @@ mod tests {
         mem.remember_spring((-500, 0), (0.0, 0.0));
         assert_eq!(mem.nearest_known_spring((0.0, 0.0)), Some((10, 0)));
         assert_eq!(mem.nearest_known_spring((-400.0, 0.0)), Some((-500, 0)));
+    }
+
+    #[test]
+    fn la_carte_vecue_retient_ce_que_chaque_lieu_a_rendu() {
+        use crate::yields::Pursuit;
+        let mut mem = Memory::default();
+        let camp = (10.0, 10.0);
+        let bush = (10.0 + PLACE_TILES * 3.0, 10.0);
+        for h in 0..10 {
+            mem.live_hour(bush, h, Some(Pursuit::Gather), [500.0, 0.0], false, false);
+        }
+        mem.live_hour(camp, 10, None, [0.0; 2], true, false);
+        mem.live_hour(camp, 11, None, [0.0; 2], false, true);
+        assert_eq!(mem.places.len(), 2, "deux lieux de 2 km distincts");
+        let b = mem.places[&place_of(bush)];
+        assert_eq!((b.first, b.last, b.hours), (0, 9, 10));
+        assert_eq!(b.pursuit_hours[Pursuit::Gather as usize], 10.0);
+        assert_eq!(b.kcal[Pursuit::Gather as usize], 5000.0, "la cueillette du lieu");
+        let c = mem.places[&place_of(camp)];
+        assert_eq!((c.drinks, c.nights, c.kcal), (1, 1, [0.0; 2]));
     }
 }
