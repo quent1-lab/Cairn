@@ -1151,3 +1151,28 @@ au lieu retenu 79 % (il est là où l'on a chassé) ; distance médiane 5,2 km ;
    étape 1 : 42, 45, 80). 2. 70-300 km/an sur ≥ 6/8 : **tenue (6/8)** ; f7 fait la navette (38
    levées, 2 km nets), t2024 parcourt. 3. Mémoire ≥ 41 %, retours ≥ 11 % : **tenue** (46 ; 19).
 Étape 1 passée → étape 2 (`longue` 10 ans × 8, contre `main`).
+
+### Étape 2 — mesurée (`longue` 10 ans × 8, camp-memoire ee90893 contre `main` 38dca99, départ j135)
+| run | pop moy. ans 5-10 main → camp | foyer au départ, max (km) | levées (mém. ; retours) | soif ; faim ; froid main → camp | feu vu ; techs main → camp |
+|---|---|---|---|---|---|
+| t42 | 62 → 62 | 324 | 613 (375 ; 217) | 4→4 ; 0→0 ; 0→0 | 0→0 ; 0→0 |
+| t7 | 49 → 31 | 460 | 902 (622 ; 438) | 9→14 ; 1→6 ; 0→0 | 42→26 ; 1→1 |
+| t1337 | 65 → 50 | 173 | 608 (462 ; 268) | 4→20 ; 0→7 ; 0→0 | 0→1 ; 0→1 |
+| t2024 | 57 → 46 | 550 | 906 (442 ; 244) | 19→11 ; 3→4 ; 0→0 | 5→37 ; 1→3 |
+| f42 | 75 → 26 | 147 | 615 (470 ; 351) | 4→26 ; 0→17 ; 6→12 | 0→6 ; 3→6 |
+| f7 | 23 → 43 | 457 | 973 (538 ; 356) | 7→21 ; 6→7 ; 3→0 | 0→28 ; 1→6 |
+| f1337 | 94 → 27 | 24 | 467 (446 ; 406) | 3→25 ; 0→15 ; 2→16 | 0→0 ; 1→1 |
+| f2024 | 94 → 49 | 193 | 861 (730 ; 527) | 4→21 ; 0→7 ; 0→5 | 0→36 ; 1→3 |
+1. Foyer ≤ 200 km sur 8/8 : **réfutée** (4/8 ; 324-550 km pour les quatre autres).
+2. Population ≥ 70 % de `main` sur ≥ 6/8 : **réfutée** (4/8 ; f42, f1337 à 29-35 %).
+3. Froid en hausse en scène froide : **tenue sur 3/4** (f7 en baisse).
+Ce que la mobilité apporte : **le monde s'ouvre** — feu vu sur 6/8 runs (2/8 sur `main`), plus
+de techniques sur 5/8 (jusqu'à 6 contre 1). Ce qu'elle coûte : **la soif ×2 à ×8 et la faim**
+sur 6/8, le froid en scène froide.
+Lecture : 47 à 97 levées par an (Batek ~44, Hadza ~12) ; 35-87 % reviennent à un ancien camp,
+mais les autres avancent : la bande dérive pas à pas. Deux mécanismes possibles, non
+départagés : (a) la **règle de départ** (de a'') lève trop souvent, et chaque levée sort du pays
+battu (au-delà du rayon de résidence) ; (b) **l'inconnu vaut la moyenne** des lieux connus :
+juste après avoir épuisé son pays, tout lieu inconnu bat les lieux connus récemment exploités,
+et la bande s'enfonce dans l'inconnu. La soif : à lire (arrivée à une source qu'un membre
+connaît par ouï-dire, enfants qui suivent mal ?).
