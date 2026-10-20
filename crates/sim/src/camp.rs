@@ -61,6 +61,14 @@ pub struct CampMove {
     pub prior: f64,
     pub game: u32,
     pub day: f64,
+    /// Ce qui a déclenché la levée (kcal nettes par jour d'adulte) : ce que
+    /// rendait le camp et l'habitude, et la part de la chasse dans chacun ;
+    /// jours depuis la levée précédente du clan (ou sa fondation).
+    pub now: f64,
+    pub habit: f64,
+    pub now_hunt: f64,
+    pub habit_hunt: f64,
+    pub days_at_camp: f64,
 }
 
 /// Ce que la bande sait et a vécu ce jour, par clan.
@@ -73,6 +81,8 @@ struct BandDay {
     /// Jours d'adulte et kcal nettes de l'habitude (le mois).
     habit_h: f32,
     habit_net: f32,
+    day_net_hunt: f32,
+    habit_net_hunt: f32,
     springs: BTreeSet<(i64, i64)>,
     /// Le gibier vu récemment, par maille de 2 km : un troupeau vu par dix
     /// adultes reste un troupeau.
@@ -115,6 +125,7 @@ pub(crate) fn daily(sim: &mut Sim) {
         .agents
         .query_mut::<(&ClanMembership, &Demographics, &mut Yields, &Memory, &crate::agent::Position)>()
     {
+        let hunt_today = yields.day_net_by()[crate::yields::Pursuit::Hunt as usize];
         let (_, dn) = yields.take_day();
         let Some(clan) = membership.0 else { continue };
         if !demo.is_adult(tick) {
@@ -129,9 +140,11 @@ pub(crate) fn daily(sim: &mut Sim) {
         if homes.get(&clan.0).is_some_and(|h| (pos.x - h.0).hypot(pos.y - h.1) <= RESIDENCE_RADIUS_TILES) {
             band.at_camp += 1;
             band.day_net += dn;
+            band.day_net_hunt += hunt_today;
         }
         band.habit_h += hh;
         band.habit_net += hn;
+        band.habit_net_hunt += yields.habit_net_by()[crate::yields::Pursuit::Hunt as usize];
         band.springs.extend(mem.springs.iter().copied());
         for (key, place) in &mem.places {
             let e = band.places.entry(*key).or_default();
@@ -158,6 +171,7 @@ pub(crate) fn daily(sim: &mut Sim) {
         // l'habitude ; le camp, lui, ne compte que les jours qu'on y a passés.
         clan.camp.h = clan.camp.h * keep + band.at_camp as f32;
         clan.camp.net = clan.camp.net * keep + band.day_net;
+        clan.camp.net_hunt = clan.camp.net_hunt * keep + band.day_net_hunt;
         let evidence = band.adults as f32 * RECENT_EVIDENCE_HOURS / 24.0;
         if clan.camp.h < evidence || band.habit_h < 2.0 * evidence || band.habit_net <= 0.0 {
             continue;
@@ -170,6 +184,12 @@ pub(crate) fn daily(sim: &mut Sim) {
         if let Some((dest, mut choice)) = choose_destination(clan.home, band) {
             choice.tick = tick;
             choice.clan = clan.id.0;
+            choice.now = f64::from(now);
+            choice.habit = f64::from(habit);
+            choice.now_hunt = f64::from(clan.camp.net_hunt / clan.camp.h);
+            choice.habit_hunt = f64::from(band.habit_net_hunt / band.habit_h);
+            let since = sim.camp_moves.iter().rev().find(|m| m.clan == clan.id.0).map_or(clan.founded_tick, |m| m.tick);
+            choice.days_at_camp = tick.saturating_sub(since) as f64 / TICKS_PER_DAY as f64;
             sim.camp_moves.push(choice);
             clan.home = dest;
             clan.camp = Default::default();
@@ -239,6 +259,11 @@ fn choose_destination(home: (f64, f64), band: &BandDay) -> Option<((f64, f64), C
                 prior: per_forage.unwrap_or(0.0),
                 game: game as u32,
                 day,
+                now: 0.0,
+                habit: 0.0,
+                now_hunt: 0.0,
+                habit_hunt: 0.0,
+                days_at_camp: 0.0,
             };
             best = Some((score, p, choice));
         }

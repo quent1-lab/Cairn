@@ -563,6 +563,9 @@ pub struct Clan {
 pub struct CampLedger {
     pub h: f32,
     pub net: f32,
+    /// La part de `net` venue de la chasse (relevé pour les bancs : ce qui
+    /// déclenche une levée).
+    pub net_hunt: f32,
 }
 
 /// Instantané minimal d'un clan pour la délibération (`brain::decide`) : ce

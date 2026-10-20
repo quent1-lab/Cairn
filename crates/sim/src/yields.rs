@@ -79,6 +79,8 @@ pub struct Yields {
     /// par le camp (`take_day`).
     day_h: f32,
     day_net: f32,
+    /// La part de `day_net` venue de chaque activité.
+    day_net_by: [f32; PURSUITS],
     /// Jours vécus, effacés comme l'expérience (demi-vie d'un mois) : le
     /// dénominateur de l'habitude **par jour**, trajets et jours sans
     /// subsistance compris.
@@ -95,6 +97,7 @@ impl Yields {
         self.own_net[p as usize] -= extra_kcal as f32;
         self.day_h += 1.0;
         self.day_net -= extra_kcal as f32;
+        self.day_net_by[p as usize] -= extra_kcal as f32;
     }
 
     /// Des kcal acquises par cette activité.
@@ -102,14 +105,27 @@ impl Yields {
         self.kcal[p as usize] += kcal.max(0.0);
         self.own_net[p as usize] += kcal.max(0.0) as f32;
         self.day_net += kcal.max(0.0) as f32;
+        self.day_net_by[p as usize] += kcal.max(0.0) as f32;
     }
 
     /// Les heures et kcal nettes du jour écoulé, remises à zéro.
     pub fn take_day(&mut self) -> (f32, f32) {
         let day = (self.day_h, self.day_net);
         (self.day_h, self.day_net) = (0.0, 0.0);
+        self.day_net_by = [0.0; PURSUITS];
         self.own_days += 1.0;
         day
+    }
+
+    /// La part de chaque activité dans les kcal nettes du jour en cours (à lire
+    /// avant `take_day`).
+    pub fn day_net_by(&self) -> [f32; PURSUITS] {
+        self.day_net_by
+    }
+
+    /// La part de chaque activité dans l'habitude (kcal nettes du mois).
+    pub fn habit_net_by(&self) -> [f32; PURSUITS] {
+        self.own_net
     }
 
     /// L'habitude par jour vécu : jours du mois et kcal nettes de sa propre

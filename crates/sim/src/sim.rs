@@ -2521,7 +2521,7 @@ mod tests {
                 chief: ids[0],
                 desired: None,
                 rivalry: 0.0,
-                camp: social::CampLedger { h: 8.0, net: 8.0 * rate },
+                camp: social::CampLedger { h: 8.0, net: 8.0 * rate, net_hunt: 0.0 },
             });
             crate::camp::daily(&mut sim);
             (camp, sim.clans[0].home)

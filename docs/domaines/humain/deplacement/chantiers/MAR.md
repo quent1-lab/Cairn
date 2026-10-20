@@ -1237,3 +1237,20 @@ camp le plus souvent. La cause est en amont, dans la **règle de départ** (a'')
 sur quelques jours, contre une habitude d'un mois où entrent les grosses prises (60 000 kcal) —
 le défaut déjà relevé en octobre (« prises bosselées contre habitude lissée »).
 Run longue non engagée (prédiction 1 réfutée).
+
+## Ce qui déclenche une levée, et le camp jugé sur la cueillette (choix 1 de l'utilisateur, 2026-10-20)
+Instrument (observation, sans effet) : chaque levée relève ce que rendait le camp et
+l'habitude (kcal nettes par jour d'adulte), la part de la chasse dans chacun, et les jours
+passés au camp. Puis **un changement** (décision de l'utilisateur : « idée 1 ») : le camp et
+l'habitude se jugent **hors chasse** — ce qui s'épuise autour d'un camp, ce sont les plantes ;
+le gibier bouge et ses prises (60 000 kcal d'un coup) sont trop irrégulières pour juger un lieu
+en quelques jours.
+Prédictions, banc `marche` 90 j × 8 runs, règle actuelle (instrument seul) et règle hors chasse
+lancées ensemble :
+1. Règle actuelle : la chasse fait plus de la moitié de l'habitude dans ≥ 50 % des levées, et
+   dans ≥ 40 % des levées le camp rendait **hors chasse** autant ou plus que l'habitude hors
+   chasse (levées déclenchées par l'absence d'une prise, pas par l'épuisement).
+2. Règle hors chasse : levées divisées par ≥ 2 (121) ; aucune run au-delà de 20 km nets en 90 j.
+3. Jours au camp (médiane) : ≥ 8 (Batek 8,2).
+Réfuterait 1 : la chasse < 25 % de l'habitude dans la plupart des levées (alors elle ne
+déclenche pas).

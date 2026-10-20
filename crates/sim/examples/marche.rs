@@ -383,6 +383,29 @@ fn print(rs: &[Report]) {
             dist[dist.len() * 9 / 10],
         );
     }
+    if !moves.is_empty() {
+        let v = |f: &dyn Fn(&cairn_sim::camp::CampMove) -> f64| {
+            let mut x: Vec<f64> = moves.iter().map(|m| f(m)).collect();
+            x.sort_by(f64::total_cmp);
+            (x[x.len() / 10], x[x.len() / 2], x[x.len() * 9 / 10])
+        };
+        let show = |(a, b, c): (f64, f64, f64)| format!("{a:.0} / {b:.0} / {c:.0}");
+        println!("   déclencheurs (p10 / médiane / p90, kcal nettes par jour d'adulte) :");
+        println!("     camp {} dont chasse {} ; habitude {} dont chasse {}", show(v(&|m| m.now)), show(v(&|m| m.now_hunt)), show(v(&|m| m.habit)), show(v(&|m| m.habit_hunt)));
+        println!(
+            "     camp hors chasse {} contre habitude hors chasse {} ; jours au camp {}",
+            show(v(&|m| m.now - m.now_hunt)),
+            show(v(&|m| m.habit - m.habit_hunt)),
+            show(v(&|m| m.days_at_camp)),
+        );
+        let n = moves.len() as f64;
+        let share = |f: &dyn Fn(&cairn_sim::camp::CampMove) -> bool| 100.0 * moves.iter().filter(|m| f(m)).count() as f64 / n;
+        println!(
+            "     levées où la chasse fait plus de la moitié de l'habitude {:.0} % ; où le camp, hors chasse, rendait autant ou plus que l'habitude hors chasse {:.0} %",
+            share(&|m| m.habit_hunt > 0.5 * m.habit),
+            share(&|m| m.now - m.now_hunt >= m.habit - m.habit_hunt),
+        );
+    }
     println!("  (chasseurs-cueilleurs : ~160-175 km/an de déplacements résidentiels ; Batek : un camp tous les 8 j)");
     println!("\n## par run : régime (latitude, heures de jour départ → fin) ; marche km/j femmes ; hommes ; sommeil dans le noir ; noir passé à dormir");
     for r in rs {
