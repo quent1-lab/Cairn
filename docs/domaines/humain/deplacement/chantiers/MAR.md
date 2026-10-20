@@ -1105,3 +1105,21 @@ Correctifs faits : gibier compté par troupeau (d957678) ; valeur d'un lieu = re
 1. Distance du foyer au départ : maximum sur 10 ans ≤ 200 km sur 8/8 ; médiane à l'an 10 ≤ 30 km.
 2. Population moyenne des ans 5-10 ≥ 70 % de `main` sur ≥ 6/8.
 3. Scène froide : morts de froid en hausse contre `main` (les huttes restent derrière) — lu à part.
+
+### Étape 1 — mesurée (banc `marche` 90 j × 8 runs, 6b721d6) contre `main` (1e960f8)
+- **101 levées** ; destination jugée sur la mémoire **41 %** (seuil 30 % : passé ; prédit 30-80 % :
+  tenu) ; candidats connus 47 % (5,6 sur 11,9) ; vers un ancien camp **11 %** (≥ 10 % : tenu).
+- **Gibier vu au lieu retenu : 91 %** (prédit ≤ 60 % : **réfuté**). Facteurs moyens du lieu
+  retenu : mémoire 1 535 kcal/h contre 899 par défaut (×1,7) ; gibier **×3,9** ; trajet ×0,94 ;
+  distance médiane 5,9 km (p90 9). Même compté par troupeau, le gibier décide.
+- Par run (chemin du foyer, km/an ; déplacement net en 90 j ; levées) : t42 156 ; 6,9 ; 6 ·
+  t7 581 ; 42 ; 22 · t1337 159 ; 6,8 ; 7 · t2024 657 ; 80 ; 23 · f42 70 ; 5,3 ; 4 · f7 512 ; 45 ;
+  20 · f1337 188 ; 14 ; 8 · f2024 219 ; 6,1 ; 11. Réel : ~160-175 km/an de déplacements
+  résidentiels. **5 runs dans l'ordre réel, 3 qui dérivent** (42-80 km nets en 90 j).
+- Marche totale 7,6 → 7,1 h/j ; **vers l'eau 1,39 → 0,98 h/j (−30 %)** : le camp se pose à une
+  source.
+Lecture : la mémoire est lue (41 %), mais le facteur multiplicatif du gibier (1 + mailles où l'on
+a vu du gibier, jusqu'à ×4) l'écrase ; les runs qui dérivent sont celles qui suivent des
+troupeaux. Le gibier compte déjà dans la mémoire (les kcal de chasse d'un lieu) : le facteur le
+compte deux fois, et l'information « gibier vu ces trois derniers jours » pèse plus que tout ce
+qu'on sait du pays. Question à l'utilisateur avant l'étape 2.
