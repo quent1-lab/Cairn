@@ -132,3 +132,38 @@ l'ordre d'un territoire de chasse baka (205 km²) ; il est vécu, pas exploité 
 dans 10 mailles. Mémoire : +0,6 Mo sur 1,09 Go.
 Ce que j'ai pu manquer : 1 an seulement (le pays connu d'une vie n'est pas vu) ; les enfants ne
 sont pas comptés ; « dormi » compte toute heure de sommeil, sieste comprise.
+
+## MEM-4a — les sources s'oublient par l'usage (branche `exp/mem4a`, eba022b, 2026-10-20)
+Ordre de MEM : MEM-4 avant MEM-3 pour les sources (la soif, les trajets d'eau). Changement
+(`memory`) : chaque source connue porte une force de souvenir — renfort de 0,2 vue, 0,1
+entendue, 0,5 bue (une fois par jour : un jour d'usage) ; effacement de constante 60 j vers un
+plancher usage / (usage + 10) ; oubli sous 0,02 ; plafond porté de 16 à 64 (Nyae Nyae : ~40
+points d'eau), la plus faible part la première, **plus la plus lointaine**. Constantes non
+sourcées (forme validée par l'utilisateur). Test `une_source_s_oublie_par_l_usage_pas_par_la_distance`
+(remplace `les_sources_lointaines_s_oublient`, qui fixait l'ancien comportement).
+**Voisin** : `les_curieux_explorent_plus_loin` (CUR) échoue sur la seed 1337 (64,9 cellules
+contre 66,3 ; il passait à 1,03-1,30 selon les seeds) — critère déjà fragile, lu dans CUR ; la
+branche n'est pas reportée tant que la mesure n'a pas tranché.
+Prédictions, banc `marche` 90 j × 8 runs puis acceptation 1 an × 8, contre `main` (MEM-1) :
+1. Heures de marche vers l'eau en baisse de 10-30 % (on ne perd plus les sources du pays en
+   s'éloignant). Réfuterait : baisse < 5 % ou hausse.
+2. Sources retenues par adulte : médiane 20-64 (16 avant, plafond).
+3. Morts de soif à 1 an : égales ou en baisse (8 runs).
+
+### MEM-4a — mesuré (banc `marche` 90 j × 8 runs ; acceptation 1 an × 8 ; contre `main` 1e960f8)
+| | `main` | MEM-4a |
+|---|---|---|
+| marche vers l'eau (h/j, jour ; noir) | 1,39 ; 0,47 | 1,38 ; 0,47 |
+| marche totale (h/j) | 7,6 | 7,5 |
+| sources retenues par adulte (p10 / méd. / p90) | 16 / 16 / 16 | **64 / 64 / 64** |
+| morts de soif (8 runs, 1 an) | 3 | 2 |
+| débit plancher annuel, moyenne des 8 runs (tps) | 70,1 | **60,8** (−13 %) |
+1. Marche vers l'eau −10 à −30 % : **réfutée** (−0,7 %). 2. Sources 20-64 : tenue, mais **au
+plafond pour tous** : en un an, aucune source ne passe sous le seuil d'oubli. 3. Soif : égale.
+Lecture : dans le régime d'aujourd'hui (camp immobile, pays de ~6 km de rayon), l'oubli par
+la distance ne mordait pas — on ne quitte jamais assez ses sources pour les perdre. Les 1,4 h/j
+vers l'eau ne viennent pas de sources oubliées. Et le changement coûte : 64 sources à parcourir
+à chaque soif, et un tri du plus faible à chaque source vue (le plafond est toujours plein).
+**Non reporté** ; la branche reste pour quand le camp bougera (MAR-6b), où la distance comptera.
+Le coût serait à reprendre (une structure qui ne rescanne pas, ou un plafond plus bas).
+Conséquence pour l'ordre : MEM-3 (les choix lisent la mémoire) directement.
