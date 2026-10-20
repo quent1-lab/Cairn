@@ -1212,3 +1212,28 @@ Prédictions, banc `marche` 90 j × 8 runs, contre le choix 1 (ee90893) :
 3. Levées : moins nombreuses qu'au choix 1 (102) — moins de candidates.
 Réfuterait 1 : une run au-delà de 30 km.
 Puis `longue` 10 ans × 8 si 1 tient : foyer ≤ 200 km sur 8/8 ; population ≥ 70 % de `main` sur ≥ 6/8.
+
+### MEM-3 corrigé — mesuré (banc `marche` 90 j × 8 runs, 72cae9f) contre le choix 1 (ee90893)
+| run | chemin km/an | net 90 j (km) | levées |
+|---|---|---|---|
+| t42 | 57 | 4,6 | 3 |
+| t7 | 435 | 19,6 | 18 |
+| t1337 | 132 | 4,8 | 6 |
+| t2024 | 692 | **56,5** | 34 |
+| f42 | 95 | 6,0 | 7 |
+| f7 | 805 | 8,0 | 37 |
+| f1337 | 209 | 6,4 | 9 |
+| f2024 | 102 | 4,8 | 7 |
+121 levées ; candidats connus **99 %** (10,0 sur 10,2) ; destination travaillée 96 % ; vers un
+ancien camp **32 %** ; distance médiane 5,4 km.
+1. Net ≤ 20 km sur 8/8 : **réfutée** (t2024 : 56,5). 2. Retours ≥ 30 % : **tenue** (32 %).
+3. Moins de levées : **réfutée** (121 contre 102).
+Lecture : le concept est corrigé, mais **ce n'était pas le moteur de la dérive** : presque toutes
+les sources que connaît la bande sont dans des lieux qu'un membre a vus (99 %) ; l'inconnu ne
+pesait que sur une minorité de choix. Ce qui reste : **la fréquence des levées** — 3 à 37 en
+90 j selon la run (Hadza ~3, Batek ~11) — chacune d'au moins le rayon de résidence (~5 km).
+Les runs qui dérivent (t2024, t7) et celle qui fait la navette (f7) sont celles qui lèvent le
+camp le plus souvent. La cause est en amont, dans la **règle de départ** (a'') : un camp jugé
+sur quelques jours, contre une habitude d'un mois où entrent les grosses prises (60 000 kcal) —
+le défaut déjà relevé en octobre (« prises bosselées contre habitude lissée »).
+Run longue non engagée (prédiction 1 réfutée).
