@@ -2487,10 +2487,13 @@ mod tests {
                 sim.agents.query_mut::<(&mut crate::yields::Yields, &mut Memory, &mut ClanMembership)>()
             {
                 membership.0 = Some(social::ClanId(1));
-                // Un mois d'habitude : 3 000 kcal nettes par jour.
-                for _ in 0..30 {
-                    for _ in 0..6 {
+                // Un mois d'habitude : 3 000 kcal nettes par jour, vécues au camp
+                // (MEM-3 : la bande s'en souvient lieu par lieu).
+                let at_camp = (home.0 as f64 + 0.5, home.1 as f64 + 0.5);
+                for d in 0..30u64 {
+                    for h in 0..6u64 {
                         yields.spend_hour(crate::yields::Pursuit::Gather, 0.0);
+                        mem.live_hour(at_camp, d * 24 + h, Some(crate::yields::Pursuit::Gather), [500.0, 0.0], false, false);
                     }
                     yields.gain(crate::yields::Pursuit::Gather, 3_000.0);
                     yields.take_day();

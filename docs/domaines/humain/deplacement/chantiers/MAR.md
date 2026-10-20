@@ -1040,3 +1040,26 @@ régulateur sans faire bouger le camp.
 **Ce que j'ai pu manquer** : une seule seed, une seule scène (tempérée) ; le froid, où la faim et
 le froid mordent, régulerait autrement ; le régime des enfants (5-14 ans) n'a pas été lu ici ;
 la faune stable n'a pas été confrontée à la chasse (prises par jour non lues).
+
+## MAR-6b + MEM-3 — le camp se lève vers les lieux dont la bande se souvient (branche `exp/camp-memoire`, 2026-10-20)
+Ordre revu le 2026-10-20 (run à deux foyers : le camp immobile fait stagner le monde) ; MEM-4a
+sans effet tant que le camp ne bouge pas. Reprise de MAR-6b (a'') sur `main` (règle de départ :
+le camp, jugé par jour d'adulte qu'on y passe, rend moins que l'habitude — Charnov ; Batek
+8,2 j par camp), avec **un changement** : la destination ne lit plus le stock réel des plantes
+ni le nombre réel de bouches par maille (omniscience, MEM.md), mais **la carte vécue des
+membres** (`Memory::places`, MEM-1) — kcal acquises par heure de subsistance sur le lieu de
+2 km de chaque source connue hors du pays battu ; un lieu sans 48 h vécues vaut la moyenne des
+lieux connus (ni préféré ni écarté) ; sans rien de vécu, on ne part pas. Gibier vu et trajet
+pesés comme avant. Test `le_camp_part_vers_le_lieu_dont_on_se_souvient_qu_il_rendait` (rouge :
+l'ancienne destination lisait le monde) ; `une_bande_leve_le_camp_quand_le_pays_s_epuise` donne
+désormais à la bande un mois vécu au camp.
+Non encore : la repousse d'un lieu quitté (un lieu épuisé reste jugé épuisé), la saison, le
+danger ; MEM-4a (sources) n'est pas dans la branche.
+Rappel (a'') : foyers à 250-1 260 km en 10 ans, populations effondrées, faute de mémoire.
+Prédictions, `longue` 10 ans, 4 seeds × 2 scènes, départ j135, contre `main` (même binaire de banc) :
+1. Distance du foyer médian au départ à l'an 10 : médiane des runs ≤ 30 km, et aucune run
+   au-delà de 200 km (a'' : 250-1 260). Réfuterait : une run > 200 km.
+2. Levées du camp (jours où le foyer d'un clan bouge de plus de 1 km) : 5 à 40 par clan et par
+   an (Hadza ~12, Batek ~40).
+3. Population à l'an 10 ≥ 70 % de `main` sur ≥ 6/8 runs.
+4. Exposition au feu ou au cuivre : non prédite (à lire).
