@@ -1254,3 +1254,23 @@ lancées ensemble :
 3. Jours au camp (médiane) : ≥ 8 (Batek 8,2).
 Réfuterait 1 : la chasse < 25 % de l'habitude dans la plupart des levées (alors elle ne
 déclenche pas).
+
+### Mesuré (banc `marche` 90 j × 8 runs, départ j135 : printemps-été) — règle actuelle (6c970db, instrument seul) et hors chasse (820a3b7)
+**Ce qui déclenche, sous la règle actuelle** (121 levées, médianes ; p10-p90) :
+- camp 4 093 kcal nettes/jour d'adulte (2 601-5 779), dont chasse **−95** (coût sans prise) ;
+  habitude 5 496 (4 445-8 294), dont chasse **1 517** (596-5 709) ;
+- hors chasse : camp 3 926 contre habitude 3 367 — **dans 88 % des levées, la cueillette du camp
+  rendait autant ou plus que d'habitude** ; la chasse fait plus de la moitié de l'habitude dans
+  31 % des levées ; **2 jours au camp** en médiane (p90 9).
+1. Chasse > ½ de l'habitude dans ≥ 50 % des levées : **réfutée** (31 %) ; camp hors chasse ≥
+   habitude hors chasse dans ≥ 40 % : **tenue, et de loin** (88 %). Les levées ne viennent pas de
+   l'épuisement du pays mais du **creux de chasse** : quelques jours sans prise au camp, contre
+   une habitude qui contient des prises.
+**Règle hors chasse : aucune levée en 90 jours, sur 8/8 runs** (marche vers l'eau revenue à
+1,4 h/j). 2. Levées divisées par ≥ 2 : **réfutée par l'autre bout** (÷ ∞). 3. ≥ 8 jours au camp :
+sans objet.
+Lecture, aux deux bouts : avec la chasse, la bande part pour un bruit ; sans elle, la cueillette
+d'un camp ne baisse jamais sous l'habitude **au printemps et en été** — la saison où les plantes
+repoussent (r = 0,08/j) et où une maille ne s'épuise pas en 90 j (déjà vu en MAR-6c). Le banc ne
+couvre pas l'hiver : c'est le régime où le pays devrait s'épuiser (règle 2). Mesure suivante :
+la règle hors chasse sur une année entière.
