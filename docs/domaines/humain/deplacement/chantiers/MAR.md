@@ -1297,3 +1297,28 @@ froid et soif ; f7 : 56 contre 33). Feu vu sur 3/8 (1/8 sur `main`).
 Ce que j'ai pu manquer : 2 ans seulement (la dérive sur 10 ans n'est pas jugée ; t7 et t2024
 avancent de ~30 km/an) ; la fréquence en saison maigre n'est pas comparée aux séjours d'hiver
 réels ; f42 s'effondre de froid : les huttes restent derrière.
+
+### Règle hors chasse sur dix ans (`longue` 10 ans × 8, 820a3b7) contre `main` (38dca99)
+| run | pop moy. ans 5-10 main → hc | foyer, max (km) | levées/an (retours) | soif ; faim ; froid main → hc | feu vu |
+|---|---|---|---|---|---|
+| t42 | 62 → 63 | 66 | 56 (68 %) | 4→4 ; 0→0 ; 0→0 | 0→0 |
+| t7 | 49 → 40 | 180 | 61 (57 %) | 9→15 ; 1→2 ; 0→0 | 42→35 |
+| t1337 | 65 → 64 | 156 | 63 (58 %) | 4→5 ; 0→0 ; 0→0 | 0→29 |
+| t2024 | 57 → 56 | 202 | 60 (53 %) | 19→7 ; 3→0 ; 0→0 | 5→4 |
+| f42 | 75 → **5** | 54 | 41 (75 %) | 4→24 ; 0→9 ; 6→36 | 0→2 |
+| f7 | 23 → 31 | 83 | 66 (70 %) | 7→21 ; 6→18 ; 3→9 | 0→22 |
+| f1337 | 94 → **35** | 28 | 56 (79 %) | 3→16 ; 0→11 ; 2→15 | 0→0 |
+| f2024 | 94 → 62 | 58 | 64 (73 %) | 4→17 ; 0→7 ; 0→3 | 0→12 |
+1. Foyer ≤ 200 km sur 8/8 : **tenue sur 7/8** (t2024 : 202) — règle de la chasse : 324-550 km.
+2. Population ≥ 70 % de `main` sur ≥ 6/8 : **réfutée de peu (5/8)** : **tempéré 4/4** (82-102 %),
+   froid 1/4 (f42 s'éteint presque, f1337 à 37 %).
+3. Froid en hausse en scène froide : **tenue 4/4** ; soif et faim aussi.
+Feu vu sur 5/8 (2/8 sur `main`). Levées 41-66 par an, retours 53-79 %.
+**Lecture** : en pays tempéré, le mécanisme fait ce qu'il doit (mobilité bornée, population
+tenue, le monde s'ouvre). En pays froid, **lever le camp en hiver tue** : froid, soif et faim
+montent ensemble. La cause est dans la règle de départ : elle compare le camp à l'**habitude** du
+mois écoulé, qui contient l'automne ; en hiver, tout le pays rend peu, et la bande part quand
+même — vers un lieu qui ne rendra pas mieux, en laissant ses huttes. Le théorème de la valeur
+marginale compare le lieu à ce qu'on peut attendre **ailleurs**, trajet compris : la mémoire
+datée des lieux (MEM-3) le permet. Les huttes laissées derrière (MAR-6b (b)) aggravent le même
+hiver.
