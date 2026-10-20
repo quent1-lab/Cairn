@@ -54,6 +54,11 @@ Agent `contradicteur` sur la conception et les prédictions (skill `debat`) : le
 l'effet **dans ce régime et cet horizon** (une acceptation d'un an ne contient aucun enfant
 de plus de 6 mois) ? Les cas limites sont-ils traités (le premier jour à un nouveau camp,
 l'orphelin, l'eau non douce) ? Dix minutes contre des heures de runs.
+Un point du pré-mortem qui touche **le concept** (ce que l'agent peut savoir, ce que le
+mécanisme compare) se corrige **avant** de mesurer, pas après. En particulier, toute
+**valeur par défaut** qui tient lieu de savoir (« l'inconnu vaut la moyenne ») : demander
+d'abord si l'agent *peut* savoir — sinon c'est l'omniscience par une autre porte (MEM-3,
+2026-10-20 : deux runs de 5 h pour le découvrir).
 
 ## 5. Le test de reproduction rouge
 - Écrire le test qui doit échouer **sans** le changement. Le voir échouer : neutraliser
