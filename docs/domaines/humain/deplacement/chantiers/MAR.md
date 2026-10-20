@@ -1006,3 +1006,37 @@ Relancée à **6 km** le 2026-10-18 à 15 h 45 (`out/longue/deuxfoyers/t42_2x80_
 À lire (D13) : pourquoi la tension sature et ne redescend jamais pendant des années de
 contacts quotidiens et de liens (45-75 liens A-B) ; pourquoi la violence ne s'arrête qu'à
 l'anéantissement d'un clan.
+
+### À 6 km — arrêtée à l'an 197 (2026-10-20) : pourquoi le monde stagne
+Arrêt à la main (40 h de calcul ; débit stable ~10 tps, jamais près de 1). Lecture du CSV par
+périodes de 20 ans (`out/longue/deuxfoyers/t42_2x80_6km_3c0fe52.csv`) :
+| an | pop moy. | natalité ‰ | mortalité ‰ | dont maladie ‰ | morts < 15 / naissances |
+|---|---|---|---|---|---|
+| 10-30 | 91 | 56 | 49 | 39 | 0,54 |
+| 70-90 | 168 | 73 | 62 | 53 | 0,62 |
+| 110-130 | 181 | 56 | 61 | 48 | 0,61 |
+| 170-190 | 174 | 58 | 61 | 50 | 0,60 |
+Constantes sur 197 ans : foyer à 0,59 km du point de départ, 3 huttes du chef, dispersion
+maximale 1,5-6 km ; faim moyenne 0,21-0,25, **0 mort de faim**, 0 de froid ; exposition au
+feu et au cuivre **0** ; aucune technique ; un seul clan (165-191) jamais scindé ; violence
+nulle après l'an 3 ; faune stable ~28 000-33 000 têtes.
+**La chaîne, de l'amont à l'aval** (une seed, une scène : à confirmer, règle 7) :
+1. **Le camp ne bouge jamais** (à 20 km non plus : foyers fixes 18 ans). Sans levée du camp
+   (MAR-6b), sans mémoire des lieux qui donnerait une raison d'aller ailleurs (MEM-3) et sans
+   scission (BAN), toute la population vit 200 ans dans un rayon de quelques km.
+2. **Donc rien de neuf n'est vu** : aucun feu de foudre dans ce rayon de forêt tempérée humide
+   (D1 : le feu rare en climat humide), aucun gisement → aucune exposition → aucune technique
+   possible (l'arbre exige des expositions).
+3. **Donc la nourriture ne borne pas** (faim stable, aucune mort de faim) : c'est la **maladie**
+   qui régule (80 % des morts), et elle frappe un camp unique de ~180 qui boit aux mêmes points
+   et dort serré : **60 % des enfants meurent avant 15 ans** (réel ~40 % ; 43 % au banc de 5 ans,
+   avec des camps de 40-90). Natalité et mortalité s'égalisent vers 55-65 ‰ : croissance nulle.
+4. **Donc rien ne grossit** (ni population ni monde chargé) et le débit reste plat : la run ne
+   pouvait pas « se tuer » seule. Le coût, lui, est notable : ~10 tps pour 170 humains et ~30 000
+   têtes de faune.
+**Ce que cela dit de l'ordre** : la stagnation vient de l'amont — la mobilité (MAR-6b, MEM-3) et
+la scission (BAN) — plus que de la maladie, qui n'en est que le régulateur ; MOR-5c3 baissera ce
+régulateur sans faire bouger le camp.
+**Ce que j'ai pu manquer** : une seule seed, une seule scène (tempérée) ; le froid, où la faim et
+le froid mordent, régulerait autrement ; le régime des enfants (5-14 ans) n'a pas été lu ici ;
+la faune stable n'a pas été confrontée à la chasse (prises par jour non lues).
