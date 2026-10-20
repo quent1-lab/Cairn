@@ -1274,3 +1274,26 @@ d'un camp ne baisse jamais sous l'habitude **au printemps et en été** — la s
 repoussent (r = 0,08/j) et où une maille ne s'épuise pas en 90 j (déjà vu en MAR-6c). Le banc ne
 couvre pas l'hiver : c'est le régime où le pays devrait s'épuiser (règle 2). Mesure suivante :
 la règle hors chasse sur une année entière.
+
+### Règle hors chasse sur deux ans (`longue` 2 ans × 8, 820a3b7, départ j135) — contre `main` au jour 720 (38dca99)
+| run | levées (retours) | foyer à l'an 2 ; max (km) | pop main → hors chasse | soif ; faim ; froid (hors chasse) |
+|---|---|---|---|---|
+| t42 | 89 (42) | 12 ; 17 | 56 → 53 | 2 ; 0 ; 0 |
+| t7 | 85 (32) | 63 ; 68 | 50 → 51 | 0 ; 0 ; 0 |
+| t1337 | 92 (44) | 27 ; 31 | 58 → 57 | 0 ; 0 ; 0 |
+| t2024 | 90 (38) | 67 ; 67 | 59 → 53 | 2 ; 0 ; 0 |
+| f42 | 114 (84) | 8 ; 17 | 66 → **27** | 15 ; 6 ; 20 |
+| f7 | 119 (75) | 22 ; 30 | 33 → 56 | 8 ; 7 ; 4 |
+| f1337 | 110 (91) | 1 ; 9 | 85 → 72 | 0 ; 0 ; 1 |
+| f2024 | 116 (80) | 11 ; 21 | 75 → 75 | 1 ; 0 ; 0 |
+**Une mobilité saisonnière émerge, sans être écrite** : aucune levée de mai à septembre (la
+saison où les plantes repoussent), puis les levées d'octobre à février, et de nouveau la
+seconde année (levées cumulées par mois, t42 : 0 pendant 5 mois, 28 à l'hiver, plat jusqu'à
+l'été suivant, 89 à la fin du second hiver). ~45 levées par an (Batek ~44, Hadza ~12), mais
+**concentrées sur 4-5 mois** : un camp tous les 3 jours environ en saison maigre (trop).
+Foyers à 9-68 km au plus en 2 ans (règle de la chasse : 300-550 km en 10 ans) ; 36 à 83 % des
+levées reviennent à un ancien camp. Population au niveau de `main` sur 6/8 (f42 : 27 contre 66,
+froid et soif ; f7 : 56 contre 33). Feu vu sur 3/8 (1/8 sur `main`).
+Ce que j'ai pu manquer : 2 ans seulement (la dérive sur 10 ans n'est pas jugée ; t7 et t2024
+avancent de ~30 km/an) ; la fréquence en saison maigre n'est pas comparée aux séjours d'hiver
+réels ; f42 s'effondre de froid : les huttes restent derrière.
