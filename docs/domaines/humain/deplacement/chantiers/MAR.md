@@ -1133,3 +1133,21 @@ Prédictions, banc `marche` 90 j × 8 runs, contre l'étape 1 :
 2. Chemin du foyer de 70 à 300 km/an sur ≥ 6/8 runs (réel ~160-175).
 3. Destinations jugées sur la mémoire ≥ 41 % ; retours vers un ancien camp ≥ 11 %.
 Réfuterait 1 : une run au-delà de 40 km.
+
+### Choix 1 — mesuré (banc `marche` 90 j × 8 runs, ee90893)
+| run | chemin km/an | net 90 j (km) | levées |
+|---|---|---|---|
+| t42 | 149 | 8,4 | 7 |
+| t7 | 300 | 23,6 | 12 |
+| t1337 | 72 | 5,7 | 3 |
+| t2024 | 591 | **33,0** | 25 |
+| f42 | 78 | 0,0 | 4 |
+| f7 | 678 | 2,0 | 38 |
+| f1337 | 113 | 10,7 | 5 |
+| f2024 | 108 | 0,0 | 8 |
+102 levées ; destination sur la mémoire **46 %** ; vers un ancien camp **19 %** ; gibier présent
+au lieu retenu 79 % (il est là où l'on a chassé) ; distance médiane 5,2 km ; eau 1,0 h/j.
+1. Aucune run > 30 km nets : **manquée de peu** (t2024 : 33 ; seuil de réfutation 40 non atteint ;
+   étape 1 : 42, 45, 80). 2. 70-300 km/an sur ≥ 6/8 : **tenue (6/8)** ; f7 fait la navette (38
+   levées, 2 km nets), t2024 parcourt. 3. Mémoire ≥ 41 %, retours ≥ 11 % : **tenue** (46 ; 19).
+Étape 1 passée → étape 2 (`longue` 10 ans × 8, contre `main`).
