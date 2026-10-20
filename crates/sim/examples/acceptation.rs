@@ -142,7 +142,7 @@ struct Report {
     // MEM-1, en fin de run, par adulte : lieux retenus, part des heures dans
     // ses dix lieux les plus vécus, lieux où il a acquis des kcal, où il a bu,
     // où il a dormi.
-    places: Vec<[f64; 5]>,
+    places: Vec<[f64; 6]>,
     // Énergie, par classe (femmes adultes, hommes adultes, < 3 ans, 3-13 ans) :
     // kcal dépensées, métabolisme de base cumulé, heures vécues, heures de marche.
     burn: [f64; 4],
@@ -694,6 +694,7 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
             count(&|p| p.kcal.iter().sum::<f32>() > 0.0),
             count(&|p| p.drinks > 0),
             count(&|p| p.nights > 0),
+            mem.springs.len() as f64,
         ]);
     }
     if let Some(fire) = fire {
@@ -851,13 +852,13 @@ fn print_episodes(rs: &[Report]) {
             .collect::<Vec<_>>()
             .join(" ; ")
     );
-    let mut places: Vec<[f64; 5]> = rs.iter().flat_map(|r| r.places.iter().copied()).collect();
+    let mut places: Vec<[f64; 6]> = rs.iter().flat_map(|r| r.places.iter().copied()).collect();
     if !places.is_empty() {
-        let col = |v: &mut Vec<[f64; 5]>, i: usize| -> (f64, f64, f64) {
+        let col = |v: &mut Vec<[f64; 6]>, i: usize| -> (f64, f64, f64) {
             v.sort_by(|a, b| a[i].total_cmp(&b[i]));
             (v[v.len() / 10][i], v[v.len() / 2][i], v[v.len() * 9 / 10][i])
         };
-        let names = ["lieux de 2 km retenus", "part des heures dans les 10 premiers", "lieux qui ont nourri", "lieux où l'on a bu", "lieux où l'on a dormi"];
+        let names = ["lieux de 2 km retenus", "part des heures dans les 10 premiers", "lieux qui ont nourri", "lieux où l'on a bu", "lieux où l'on a dormi", "sources retenues"];
         println!("MEM-1, carte vécue des adultes en fin de run ({} adultes ; p10 / médiane / p90) :", places.len());
         for (i, n) in names.iter().enumerate() {
             let (a, b, c) = col(&mut places, i);
