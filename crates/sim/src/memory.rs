@@ -97,10 +97,46 @@ pub struct Place {
     pub pursuit_hours: [f32; crate::yields::PURSUITS],
     /// Kcal acquises sur le lieu, par activité.
     pub kcal: [f32; crate::yields::PURSUITS],
+    /// MEM-3 : la même chose, récente — kcal acquises et heures de
+    /// subsistance qui s'effacent (demi-vie `crate::yields::RECENT_HALF_LIFE_DAYS`,
+    /// celle du registre du camp : ce que le lieu rend en ce moment), à la
+    /// date de `last`.
+    pub recent_kcal: f32,
+    pub recent_h: f32,
     /// Heures à y boire.
     pub drinks: u16,
     /// Nuits à y dormir.
     pub nights: u16,
+}
+
+/// Un lieu quitté repousse (MEM-3, plan validé par l'utilisateur) : ce qu'on
+/// attend d'un lieu revient de son rendement récent vers son rendement de long
+/// terme avec cette demi-vie — celle de la repousse du modèle (une prairie
+/// rasée remonte à mi-hauteur en ~2 mois, `ecology::GROWTH_RATE_PER_DAY`).
+pub const REGROW_HALF_LIFE_DAYS: f64 = 60.0;
+
+impl Place {
+    /// Heures de subsistance vécues sur le lieu.
+    pub fn work_hours(&self) -> f32 {
+        self.pursuit_hours.iter().sum()
+    }
+
+    /// Ce qu'on attend du lieu au tick `tick`, en kcal acquises par heure de
+    /// subsistance : le rendement récent juste après l'avoir quitté, le
+    /// rendement de long terme une fois qu'il a repoussé.
+    pub fn expected(&self, tick: u64) -> f64 {
+        let h = f64::from(self.work_hours());
+        if h <= 0.0 {
+            return 0.0;
+        }
+        let long = f64::from(self.kcal.iter().sum::<f32>()) / h;
+        if self.recent_h <= 0.0 {
+            return long;
+        }
+        let recent = f64::from(self.recent_kcal / self.recent_h);
+        let days = tick.saturating_sub(self.last) as f64 / cairn_core::TICKS_PER_DAY as f64;
+        long + (recent - long) * 0.5f64.powf(days / REGROW_HALF_LIFE_DAYS)
+    }
 }
 
 /// Le lieu (maille de 2 km) d'une position.
@@ -211,7 +247,15 @@ impl Memory {
                 self.places.remove(&k);
             }
         }
-        let place = self.places.entry(key).or_insert(Place { first: tick, ..Place::default() });
+        let place = self.places.entry(key).or_insert(Place { first: tick, last: tick, ..Place::default() });
+        let hours_since = tick.saturating_sub(place.last) as f64;
+        let keep = 0.5f64.powf(hours_since / (crate::yields::RECENT_HALF_LIFE_DAYS * 24.0)) as f32;
+        place.recent_kcal *= keep;
+        place.recent_h *= keep;
+        if pursuit.is_some() {
+            place.recent_h += 1.0;
+        }
+        place.recent_kcal += kcal.iter().sum::<f64>() as f32;
         place.last = tick;
         place.hours = place.hours.saturating_add(1);
         if let Some(p) = pursuit {
@@ -376,5 +420,30 @@ mod tests {
         assert_eq!(b.kcal[Pursuit::Gather as usize], 5000.0, "la cueillette du lieu");
         let c = mem.places[&place_of(camp)];
         assert_eq!((c.drinks, c.nights, c.kcal), (1, 1, [0.0; 2]));
+    }
+
+    #[test]
+    fn un_lieu_epuise_vaut_peu_puis_repousse() {
+        use crate::yields::Pursuit;
+        use cairn_core::TICKS_PER_DAY;
+        let mut mem = Memory::default();
+        let spot = (10.0, 10.0);
+        // Deux mois riches (1 000 kcal/h), puis un mois épuisé (100 kcal/h).
+        let mut t = 0;
+        for (days, kcal) in [(60, 1000.0), (30, 100.0)] {
+            for _ in 0..days {
+                for _ in 0..6 {
+                    mem.live_hour(spot, t, Some(Pursuit::Gather), [kcal, 0.0], false, false);
+                    t += 1;
+                }
+                t += TICKS_PER_DAY - 6;
+            }
+        }
+        let p = mem.places[&place_of(spot)];
+        let now = p.expected(t);
+        assert!(now < 400.0, "juste quitté, il est épuisé : {now:.0} kcal/h");
+        let later = p.expected(t + 240 * TICKS_PER_DAY);
+        let long = f64::from(p.kcal[0] / p.pursuit_hours[0]);
+        assert!((later - long).abs() < 0.1 * long, "huit mois après, il a repoussé : {later:.0} contre {long:.0}");
     }
 }

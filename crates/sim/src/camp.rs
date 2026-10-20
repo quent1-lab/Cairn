@@ -58,8 +58,8 @@ struct BandDay {
     /// Le gibier vu récemment, par maille de 2 km : un troupeau vu par dix
     /// adultes reste un troupeau.
     game: BTreeSet<(i64, i64)>,
-    /// MEM-3 : ce que les lieux ont rendu à ses membres (kcal acquises, heures
-    /// de subsistance), par lieu de 2 km.
+    /// MEM-3 : ce que ses membres attendent de chaque lieu de 2 km (kcal par
+    /// heure, pesées par les heures qu'ils y ont vécues) : (somme pesée, heures).
     places: BTreeMap<(i64, i64), (f64, f64)>,
 }
 
@@ -98,9 +98,12 @@ pub(crate) fn daily(sim: &mut Sim) {
         band.habit_net += hn;
         band.springs.extend(mem.springs.iter().copied());
         for (key, place) in &mem.places {
-            let e = band.places.entry(*key).or_default();
-            e.0 += f64::from(place.kcal.iter().sum::<f32>());
-            e.1 += f64::from(place.pursuit_hours.iter().sum::<f32>());
+            let h = f64::from(place.work_hours());
+            if h > 0.0 {
+                let e = band.places.entry(*key).or_default();
+                e.0 += place.expected(tick) * h;
+                e.1 += h;
+            }
         }
         if let Some((spot, seen)) = mem.game
             && tick.saturating_sub(seen) < GAME_FRESH_TICKS
