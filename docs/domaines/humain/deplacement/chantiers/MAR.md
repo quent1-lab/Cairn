@@ -1063,3 +1063,29 @@ Prédictions, `longue` 10 ans, 4 seeds × 2 scènes, départ j135, contre `main`
    an (Hadza ~12, Batek ~40).
 3. Population à l'an 10 ≥ 70 % de `main` sur ≥ 6/8 runs.
 4. Exposition au feu ou au cuivre : non prédite (à lire).
+
+### Débat (2026-10-20, pré-mortem, contradicteur Opus)
+1. *La mémoire départagerait peu : 92 % du temps dans ~10 mailles autour d'un camp jamais levé,
+   presque toutes exclues ; au-delà, peu de lieux à 48 h vécues : tout vaut la moyenne, le gibier
+   et le trajet décident, comme (a'').* — **Retenu.** Action : relever, à chaque levée, la part de
+   candidats et la destination lus dans la mémoire (banc `marche` 90 j d'abord). Seuil : moins de
+   30 % des destinations lues dans la mémoire → MEM-3 n'est pas testé.
+2. *`(1 + game)` compte un troupeau par témoin : dix adultes, facteur 11, qui écrase la mémoire.* —
+   **Retenu, bug** (un troupeau reste un troupeau) : compté une fois par maille de 2 km, correctif
+   à part avec test rouge. Action : relever les trois facteurs du lieu retenu.
+3. *La prédiction 2 (5-40 levées/an) juge la règle de départ de (a''), pas MEM-3.* — **Retenu** :
+   elle sort du verdict de MEM-3, elle reste un relevé.
+4. *Mémoire de vie entière : le camp qu'on vient d'épuiser garde sa bonne moyenne → navette ; la
+   prédiction 1 ne la verrait pas.* — **Retenu.** Le plan validé de MEM-3 disait « un lieu quitté
+   repousse » : la valeur d'un lieu suit son rendement **récent** (demi-vie 30 j, celle des
+   rendements appris), et revient vers son rendement de long terme à mesure que le temps passe
+   depuis le dernier passage (demi-vie 60 j : la repousse du modèle, une prairie rasée à mi-hauteur
+   en ~2 mois, `ecology::GROWTH_RATE_PER_DAY`). Mesures : distance maximale, chemin par an, part des
+   levées vers un ancien camp, durée des séjours.
+5. *Population jugée sur un instant contre un témoin pathologique.* — **Retenu** : effectif moyen
+   des ans 5-10 et causes de mort, contre `main` et (a'').
+6. *Le froid n'est pas prédit : sans huttes rebâties, la bande qui part perd sa chaleur au premier
+   hiver.* — **Retenu** : prédiction ajoutée (morts de froid en scène froide en hausse).
+7. *Une prise de 60 000 kcal tombe sur la maille de l'abattage.* — **Retenu** comme lecture :
+   rendements de chasse et de cueillette des lieux retenus lus à part.
+8. *Commentaire de tête de `camp.rs` périmé.* — **Retenu**, corrigé.

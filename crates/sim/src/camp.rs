@@ -13,7 +13,7 @@
 //! membres (`Yields::habit`). Sous l'habitude, il lève le camp vers une source
 //! d'eau que connaît l'un d'eux, hors du pays déjà battu, là où **la bande se
 //! souvient** que la subsistance rendait le mieux (MEM-3 : la carte vécue de
-//! ses membres, `Memory::places`, plus le stock réel des plantes) et où l'on a
+//! ses membres, `Memory::places`, et non plus le stock réel des plantes) et où l'on a
 //! vu du gibier ces derniers jours — le trajet pesé à l'échelle d'une journée
 //! de marche. Un lieu dont personne ne se souvient assez vaut ce que rendent
 //! en moyenne les lieux connus : ni préféré, ni écarté. Rien ne dit
@@ -55,10 +55,18 @@ struct BandDay {
     habit_h: f32,
     habit_net: f32,
     springs: BTreeSet<(i64, i64)>,
-    game: Vec<(i64, i64)>,
+    /// Le gibier vu récemment, par maille de 2 km : un troupeau vu par dix
+    /// adultes reste un troupeau.
+    game: BTreeSet<(i64, i64)>,
     /// MEM-3 : ce que les lieux ont rendu à ses membres (kcal acquises, heures
     /// de subsistance), par lieu de 2 km.
     places: BTreeMap<(i64, i64), (f64, f64)>,
+}
+
+impl BandDay {
+    fn see_game(&mut self, spot: (i64, i64)) {
+        self.game.insert(crate::fauna::range_zone((spot.0 as f64 + 0.5, spot.1 as f64 + 0.5)));
+    }
 }
 
 /// La passe de minuit : relève le jour, et lève le camp des bandes dont le
@@ -97,7 +105,7 @@ pub(crate) fn daily(sim: &mut Sim) {
         if let Some((spot, seen)) = mem.game
             && tick.saturating_sub(seen) < GAME_FRESH_TICKS
         {
-            band.game.push(spot);
+            band.see_game(spot);
         }
     }
 
@@ -149,7 +157,12 @@ fn choose_destination(home: (f64, f64), band: &BandDay) -> Option<(f64, f64)> {
             Some(&(kcal, h)) if h >= PLACE_EVIDENCE_HOURS => kcal / h,
             _ => prior,
         };
-        let game = band.game.iter().filter(|g| ((g.0 - spring.0) as f64).hypot((g.1 - spring.1) as f64) <= GAME_NEAR_TILES).count();
+        let side = crate::fauna::RANGE_ZONE_TILES;
+        let game = band
+            .game
+            .iter()
+            .filter(|z| ((z.0 as f64 + 0.5) * side - p.0).hypot((z.1 as f64 + 0.5) * side - p.1) <= GAME_NEAR_TILES)
+            .count();
         let day = 1.0 / (1.0 + d / (WALK_TILES_PER_TICK * 24.0));
         let score = remembered * (1.0 + game as f64) * day;
         if score > 0.0 && best.is_none_or(|(b, _)| score > b) {
@@ -180,5 +193,24 @@ mod tests {
         band.places.insert(at(poor), (10_000.0, 100.0)); // 100 kcal/h
         let dest = choose_destination(home, &band).expect("une destination");
         assert_eq!(place_of(dest), at(rich), "vers le lieu qui rendait");
+    }
+
+    /// Un troupeau vu par trente adultes reste un troupeau : il ne fait pas
+    /// préférer le lieu pauvre où il paît au lieu riche.
+    #[test]
+    fn un_troupeau_vu_par_tous_compte_une_fois() {
+        let home = (0.0, 0.0);
+        let d = 2.5 * PLACE_TILES;
+        let (rich, poor) = ((d as i64, 0), (-d as i64, 0));
+        let mut band = BandDay::default();
+        band.springs.extend([rich, poor]);
+        let at = |s: (i64, i64)| place_of((s.0 as f64 + 0.5, s.1 as f64 + 0.5));
+        band.places.insert(at(rich), (200_000.0, 100.0)); // 2 000 kcal/h
+        band.places.insert(at(poor), (10_000.0, 100.0)); // 100 kcal/h
+        for k in 0..30 {
+            band.see_game((poor.0 + k, poor.1)); // le même troupeau, trente témoins
+        }
+        let dest = choose_destination(home, &band).expect("une destination");
+        assert_eq!(place_of(dest), at(rich), "le gibier compte par troupeau, pas par témoin");
     }
 }
