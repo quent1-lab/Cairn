@@ -99,6 +99,10 @@ struct BandDay {
 #[derive(Debug, Clone, Copy, Default)]
 struct BandPlace {
     worked_value: f64,
+    /// Le rendement de long terme, pesé de même : c'est sur lui que s'apprend
+    /// ce que vaut une unité de fourrage vu (un camp qu'on vient d'épuiser ne
+    /// doit pas faire paraître épuisé tout pays vu).
+    long_value: f64,
     worked_h: f64,
     seen_sum: f64,
     seen_h: f64,
@@ -151,6 +155,7 @@ pub(crate) fn daily(sim: &mut Sim) {
             let e = band.places.entry(*key).or_default();
             let h = f64::from(place.work_hours());
             e.worked_value += place.expected(tick) * h;
+            e.long_value += place.long_term() * h;
             e.worked_h += h;
             e.seen_sum += f64::from(place.seen_forage) * f64::from(place.seen_h);
             e.seen_h += f64::from(place.seen_h);
@@ -178,16 +183,22 @@ pub(crate) fn daily(sim: &mut Sim) {
         // 2026-10-20) : ce qui s'épuise autour d'un camp, ce sont les plantes ;
         // le gibier bouge, et une prise de 60 000 kcal dans l'habitude du mois
         // faisait paraître épuisé tout camp sans prise récente.
-        let habit_gather = band.habit_net - band.habit_net_hunt;
-        if clan.camp.h < evidence || band.habit_h < 2.0 * evidence || habit_gather <= 0.0 {
-            continue;
-        }
-        let now_gather = (clan.camp.net - clan.camp.net_hunt) / clan.camp.h;
-        if now_gather >= habit_gather / band.habit_h {
+        if clan.camp.h < evidence || band.habit_h < 2.0 * evidence {
             continue;
         }
         let (now, habit) = (clan.camp.net / clan.camp.h, band.habit_net / band.habit_h);
-        if let Some((dest, mut choice)) = choose_destination(clan.home, band) {
+        // MAR-6b c (décision de l'utilisateur, 2026-10-20, solution 3) : on ne
+        // part que si un lieu connu promet mieux que le camp, trajet compris —
+        // la valeur marginale contre ce qu'on peut attendre **ailleurs**, plus
+        // contre l'habitude du mois (qui contient l'automne : en hiver, tout le
+        // pays rend peu, et la bande partait vers un lieu qui ne rendait pas mieux).
+        let Some(here) = band.places.get(&crate::memory::place_of(clan.home)).filter(|p| p.worked_h > 0.0) else {
+            continue;
+        };
+        let here_value = here.worked_value / here.worked_h;
+        if let Some((dest, mut choice)) = choose_destination(clan.home, band)
+            && choice.remembered * choice.day > here_value
+        {
             choice.tick = tick;
             choice.clan = clan.id.0;
             choice.now = f64::from(now);
@@ -213,7 +224,7 @@ fn choose_destination(home: (f64, f64), band: &BandDay) -> Option<((f64, f64), C
     // lieux que la bande a à la fois vus et travaillés. C'est ce qui permet de
     // comparer un lieu seulement vu (en chassant, en explorant) à un lieu exploité.
     let (num, den) = band.places.values().filter(|p| p.worked_h > 0.0 && p.seen_h > 0.0).fold((0.0, 0.0), |a, p| {
-        (a.0 + p.worked_value, a.1 + p.seen_mean() * p.worked_h)
+        (a.0 + p.long_value, a.1 + p.seen_mean() * p.worked_h)
     });
     let per_forage = (den > 0.0).then(|| num / den);
     let mut best: Option<(f64, (f64, f64), CampMove)> = None;
@@ -288,7 +299,7 @@ mod tests {
 
     /// Un lieu travaillé 100 h qui rendait `kcal_h`, où l'on voyait `forage`.
     fn worked(kcal_h: f64, forage: f64) -> BandPlace {
-        BandPlace { worked_value: kcal_h * 100.0, worked_h: 100.0, seen_sum: forage * 100.0, seen_h: 100.0 }
+        BandPlace { worked_value: kcal_h * 100.0, long_value: kcal_h * 100.0, worked_h: 100.0, seen_sum: forage * 100.0, seen_h: 100.0 }
     }
 
     fn at(s: (i64, i64)) -> (i64, i64) {

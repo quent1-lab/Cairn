@@ -127,6 +127,12 @@ impl Place {
         self.pursuit_hours.iter().sum()
     }
 
+    /// Le rendement de long terme du lieu (kcal par heure de subsistance).
+    pub fn long_term(&self) -> f64 {
+        let h = f64::from(self.work_hours());
+        if h <= 0.0 { 0.0 } else { f64::from(self.kcal.iter().sum::<f32>()) / h }
+    }
+
     /// Ce qu'on attend du lieu au tick `tick`, en kcal acquises par heure de
     /// subsistance : le rendement récent juste après l'avoir quitté, le
     /// rendement de long terme une fois qu'il a repoussé.

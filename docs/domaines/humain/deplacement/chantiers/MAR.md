@@ -1322,3 +1322,18 @@ même — vers un lieu qui ne rendra pas mieux, en laissant ses huttes. Le théo
 marginale compare le lieu à ce qu'on peut attendre **ailleurs**, trajet compris : la mémoire
 datée des lieux (MEM-3) le permet. Les huttes laissées derrière (MAR-6b (b)) aggravent le même
 hiver.
+
+## MAR-6b c — partir seulement si un lieu connu promet mieux (solution 3 de l'utilisateur, étape 1 ; 2026-10-22)
+Changement (`camp::daily`) : la bande lève le camp si la meilleure destination connue (MEM-3)
+promet, trajet compris, plus que ce que la bande attend du lieu de son camp (sa mémoire datée :
+le rendement récent) — plus contre l'habitude du mois. En hiver, si tous les lieux connus rendent
+peu, on reste. Le rapport « kcal/h par unité de fourrage vu » s'apprend désormais sur le
+rendement **de long terme** des lieux travaillés (sinon un camp qu'on vient d'épuiser faisait
+paraître épuisé tout pays vu). Les deux pursuits comptent de part et d'autre (même biais de la
+maille d'abattage des deux côtés). Test `une_bande_leve_le_camp_quand_le_pays_s_epuise` revu
+(dates du vécu alignées sur l'horloge du test, derniers jours épuisés ou non) ; **pas de test
+rouge dédié à l'hiver** (dette, à écrire si la mesure garde la règle). Huttes : étape 2, après.
+Prédictions, `longue` 10 ans × 8 contre `main` (38dca99) et la règle hors chasse (820a3b7) :
+1. Scène froide : population moyenne des ans 5-10 ≥ 70 % de `main` sur ≥ 3/4 (hors chasse : 1/4).
+2. Tempéré : ≥ 70 % de `main` sur 4/4 (tenu par hors chasse) ; foyer ≤ 200 km sur 8/8.
+3. Levées : moins qu'hors chasse (41-66/an), surtout l'hiver.

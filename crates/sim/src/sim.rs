@@ -2486,6 +2486,7 @@ mod tests {
             let (mut sim, home) = scenario_au_foyer(5, 4, 0);
             sim.time.tick = 135 * cairn_core::TICKS_PER_DAY;
             let source = land_near(&mut sim, home, cairn_core::km_to_tiles(6.0));
+            let base = sim.time.tick - 40 * 24;
             let ids: Vec<AgentId> = sim.agents.query::<&AgentId>().iter().map(|(_, a)| *a).collect();
             for (_, (yields, mem, membership)) in
                 sim.agents.query_mut::<(&mut crate::yields::Yields, &mut Memory, &mut ClanMembership)>()
@@ -2497,17 +2498,24 @@ mod tests {
                 for d in 0..30u64 {
                     for h in 0..6u64 {
                         yields.spend_hour(crate::yields::Pursuit::Gather, 0.0);
-                        mem.live_hour(at_camp, d * 24 + h, Some(crate::yields::Pursuit::Gather), [500.0, 0.0], Some(100), false, false);
+                        mem.live_hour(at_camp, base + d * 24 + h, Some(crate::yields::Pursuit::Gather), [500.0, 0.0], Some(100), false, false);
                     }
                     yields.gain(crate::yields::Pursuit::Gather, 3_000.0);
                     yields.take_day();
                 }
                 mem.springs.push((source.0 as i64, source.1 as i64));
+                // Les derniers jours au camp : épuisé (50 kcal/h) ou non (500).
+                let recent = if epuise { 50.0 } else { 500.0 };
+                for d in 30..35u64 {
+                    for h in 0..6u64 {
+                        mem.live_hour(at_camp, base + d * 24 + h, Some(crate::yields::Pursuit::Gather), [recent, 0.0], Some(100), false, false);
+                    }
+                }
                 // Et l'on est passé de jour au pays de la source (MEM-3 : on ne
                 // part que vers un lieu où l'un de nous est allé).
                 let there = (source.0 as f64 + 0.5, source.1 as f64 + 0.5);
                 for h in 0..4u64 {
-                    mem.live_hour(there, 31 * 24 + h, None, [0.0; 2], Some(100), false, false);
+                    mem.live_hour(there, base + 31 * 24 + h, None, [0.0; 2], Some(100), false, false);
                 }
             }
             let camp = (home.0 as f64 + 0.5, home.1 as f64 + 0.5);
