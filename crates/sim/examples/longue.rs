@@ -138,8 +138,10 @@ fn main() {
     // [jour, âge, km à la source connue la plus proche, km à la vraie source la
     // plus proche (rayon de 16 chunks, ~2 km), km au camp, jours depuis la dernière
     // levée, en marche] à l'heure d'avant chaque mort de soif.
-    let mut parched: BTreeMap<u64, [f64; 7]> = BTreeMap::new();
-    let mut thirst_log: Vec<[f64; 7]> = Vec::new();
+    let mut parched: BTreeMap<u64, ([f64; 7], String)> = BTreeMap::new();
+    let mut thirst_log: Vec<([f64; 7], String)> = Vec::new();
+    // Heure de la dernière gorgée de chacun.
+    let mut last_drink: BTreeMap<u64, u64> = BTreeMap::new();
     let mut seen_thirst = 0usize;
     // La rencontre des foyers : morts par origine (toutes, violence, maladie),
     // naissances mixtes, contagions d'une origine à l'autre (infections
@@ -164,11 +166,23 @@ fn main() {
                 if d.cause == DeathCause::Dehydration
                     && let Some(snap) = parched.get(&d.agent.0)
                 {
-                    thirst_log.push(*snap);
+                    thirst_log.push(snap.clone());
                 }
             }
             seen_thirst = sim.deaths.len();
             let tick = sim.time.tick;
+            for (_, (id, b)) in sim.agents.query::<(&AgentId, &Behavior)>().iter() {
+                if b.activity == Activity::Drinking {
+                    last_drink.insert(id.0, tick);
+                }
+            }
+            // Ce que fait chacun (pour le porteur d'un petit).
+            let doing: BTreeMap<u64, (Activity, f32, f32)> = sim
+                .agents
+                .query::<(&AgentId, &Behavior, &Physiology)>()
+                .iter()
+                .map(|(_, (id, b, p))| (id.0, (b.activity, p.thirst, p.cold)))
+                .collect();
             let camp_of: BTreeMap<u64, ((f64, f64), u64)> = sim
                 .clans
                 .iter()
@@ -177,24 +191,38 @@ fn main() {
                     (c.id.0, (c.home, last))
                 })
                 .collect();
-            type View = (u64, (f64, f64), Option<(i64, i64)>, f64, Option<u64>, Activity);
+            type View = (u64, (f64, f64), Option<(i64, i64)>, f64, Option<u64>, Activity, String);
             let views: Vec<View> = sim
                 .agents
-                .query::<(&AgentId, &Position, &Physiology, &cairn_sim::Memory, &Demographics, &ClanMembership, &Behavior)>()
+                .query::<(&AgentId, &Position, &Physiology, &cairn_sim::Memory, &Demographics, &ClanMembership, &Behavior, &cairn_sim::demography::Kinship)>()
                 .iter()
-                .filter(|(_, (_, _, p, _, _, _, _))| p.thirst > 0.9)
-                .map(|(_, (id, pos, _, mem, demo, m, b))| {
-                    (id.0, (pos.x, pos.y), mem.nearest_known_spring((pos.x, pos.y)), demo.age_years(tick), m.0.map(|c| c.0), b.activity)
+                .filter(|(_, (_, _, p, _, _, _, _, _))| p.thirst > 0.9)
+                .map(|(_, (id, pos, p, mem, demo, m, b, kin))| {
+                    let carrier = sim.fosters.get(&id.0).copied().or(kin.mother).filter(|_| demo.is_infant(tick));
+                    let carried = carrier.map_or("-".to_string(), |c| {
+                        doing.get(&c.0).map_or("mort".to_string(), |(a, t, cold)| format!("{a:?}/soif{t:.2}/froid{cold:.2}"))
+                    });
+                    let since_drink = last_drink.get(&id.0).map_or(f64::NAN, |&t| (tick - t) as f64);
+                    let extra = format!(
+                        "{:?},{},{:.2},{:.2},{:.2},{:.2},{since_drink:.0},{carried}",
+                        b.activity,
+                        b.task.map_or("-".to_string(), |t| format!("{:?}", t.kind)),
+                        p.thirst,
+                        p.hunger,
+                        p.cold,
+                        p.health
+                    );
+                    (id.0, (pos.x, pos.y), mem.nearest_known_spring((pos.x, pos.y)), demo.age_years(tick), m.0.map(|c| c.0), b.activity, extra)
                 })
                 .collect();
             parched.clear();
-            for (id, pos, known, age, clan, act) in views {
+            for (id, pos, known, age, clan, act, extra) in views {
                 let real = sim.world.nearest_spring((pos.0 as i64, pos.1 as i64), 16);
                 let km = |s: Option<(i64, i64)>| s.map_or(f64::NAN, |s| tiles_to_km((s.0 as f64 - pos.0).hypot(s.1 as f64 - pos.1)));
                 let (camp_km, since_days) = clan.and_then(|c| camp_of.get(&c)).map_or((f64::NAN, f64::NAN), |(h, last)| {
                     (tiles_to_km((h.0 - pos.0).hypot(h.1 - pos.1)), tick.saturating_sub(*last) as f64 / TICKS_PER_DAY as f64)
                 });
-                parched.insert(id, [tick as f64 / TICKS_PER_DAY as f64, age, km(known), km(real), camp_km, since_days, f64::from(act == Activity::Walking)]);
+                parched.insert(id, ([tick as f64 / TICKS_PER_DAY as f64, age, km(known), km(real), camp_km, since_days, f64::from(act == Activity::Walking)], extra));
             }
             let dark = sim.climate.light(home.1, sim.time) == 0.0;
             for (_, (demo, behavior)) in sim.agents.query::<(&Demographics, &Behavior)>().iter() {
@@ -524,9 +552,9 @@ fn main() {
         started.elapsed().as_secs_f64() / 3600.0
     );
     let mut log = std::fs::File::create(format!("{out}.soif.csv")).expect("journal de la soif");
-    writeln!(log, "jour,age,km_source_connue,km_source_reelle,km_camp,jours_depuis_levee,en_marche").unwrap();
-    for r in &thirst_log {
-        writeln!(log, "{:.2},{:.2},{:.2},{:.2},{:.2},{:.1},{}", r[0], r[1], r[2], r[3], r[4], r[5], r[6]).unwrap();
+    writeln!(log, "jour,age,km_source_connue,km_source_reelle,km_camp,jours_depuis_levee,en_marche,activite,tache,soif,faim,froid,sante,h_depuis_gorgee,porteur").unwrap();
+    for (r, extra) in &thirst_log {
+        writeln!(log, "{:.2},{:.2},{:.2},{:.2},{:.2},{:.1},{},{extra}", r[0], r[1], r[2], r[3], r[4], r[5], r[6]).unwrap();
     }
 }
 
