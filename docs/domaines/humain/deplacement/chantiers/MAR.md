@@ -1387,3 +1387,14 @@ Lecture : les huttes rebâties ne sauvent pas le froid, et **dérèglent le temp
 toutes les structures (la hutte du chef comprise) multiplie les levées — mécanisme non lu. **Non
 retenu** : l'étape 2 est défaite (revert), MAR-6b c reste. Ce que le froid garde : **la soif**
 (18-30 morts en 10 ans contre 3-4 sur `main`), avant le froid lui-même.
+
+## La soif des bandes mobiles en pays froid (instrument, 2026-10-23 ; décision de l'utilisateur : suite 1)
+Relevé (`longue`, fichier `<csv>.soif.csv`) : à l'heure d'avant chaque mort de soif, âge, distance
+à la source connue la plus proche, à la vraie source la plus proche (2 km), au camp, jours depuis
+la dernière levée, en marche ou non. Réserve : chercher la vraie source charge des chunks (D7 :
+l'éviction peut changer le monde) — l'instrument n'est pas garanti neutre.
+Scène froide, 4 seeds × 5 ans, MAR-6b c (b7ce1ec + instrument). Prédictions :
+1. ≥ 50 % des morts de soif à moins de 3 jours d'une levée (la bande vient d'arriver).
+2. ≥ 50 % avec une vraie source à moins de 2 km mais aucune source connue plus proche que 2 km
+   (on ne sait pas encore où boire au nouveau camp).
+3. Enfants (< 5 ans) ≥ 50 % des morts.

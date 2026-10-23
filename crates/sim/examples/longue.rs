@@ -135,6 +135,12 @@ fn main() {
     let (mut dead_infants, mut dead_children) = (0usize, 0usize);
     let mut death_ages: VecDeque<(u64, f64)> = VecDeque::new(); // (jour, âge) sur 10 ans
     let mut day = 0u64;
+    // [jour, âge, km à la source connue la plus proche, km à la vraie source la
+    // plus proche (rayon de 16 chunks, ~2 km), km au camp, jours depuis la dernière
+    // levée, en marche] à l'heure d'avant chaque mort de soif.
+    let mut parched: BTreeMap<u64, [f64; 7]> = BTreeMap::new();
+    let mut thirst_log: Vec<[f64; 7]> = Vec::new();
+    let mut seen_thirst = 0usize;
     // La rencontre des foyers : morts par origine (toutes, violence, maladie),
     // naissances mixtes, contagions d'une origine à l'autre (infections
     // nouvelles du jour dont le malade source est de l'autre origine).
@@ -152,6 +158,44 @@ fn main() {
         let (mut adult_h, mut walk_h, mut dark_h, mut dark_sleep_h) = (0u64, 0u64, 0u64, 0u64);
         for _ in 0..TICKS_PER_DAY {
             sim.step();
+            // La soif des bandes mobiles (2026-10-23) : à chaque mort de soif,
+            // l'état de l'heure d'avant (relevé pour les seuls très assoiffés).
+            for d in &sim.deaths[seen_thirst..] {
+                if d.cause == DeathCause::Dehydration
+                    && let Some(snap) = parched.get(&d.agent.0)
+                {
+                    thirst_log.push(*snap);
+                }
+            }
+            seen_thirst = sim.deaths.len();
+            let tick = sim.time.tick;
+            let camp_of: BTreeMap<u64, ((f64, f64), u64)> = sim
+                .clans
+                .iter()
+                .map(|c| {
+                    let last = sim.camp_moves.iter().rev().find(|m| m.clan == c.id.0).map_or(c.founded_tick, |m| m.tick);
+                    (c.id.0, (c.home, last))
+                })
+                .collect();
+            type View = (u64, (f64, f64), Option<(i64, i64)>, f64, Option<u64>, Activity);
+            let views: Vec<View> = sim
+                .agents
+                .query::<(&AgentId, &Position, &Physiology, &cairn_sim::Memory, &Demographics, &ClanMembership, &Behavior)>()
+                .iter()
+                .filter(|(_, (_, _, p, _, _, _, _))| p.thirst > 0.9)
+                .map(|(_, (id, pos, _, mem, demo, m, b))| {
+                    (id.0, (pos.x, pos.y), mem.nearest_known_spring((pos.x, pos.y)), demo.age_years(tick), m.0.map(|c| c.0), b.activity)
+                })
+                .collect();
+            parched.clear();
+            for (id, pos, known, age, clan, act) in views {
+                let real = sim.world.nearest_spring((pos.0 as i64, pos.1 as i64), 16);
+                let km = |s: Option<(i64, i64)>| s.map_or(f64::NAN, |s| tiles_to_km((s.0 as f64 - pos.0).hypot(s.1 as f64 - pos.1)));
+                let (camp_km, since_days) = clan.and_then(|c| camp_of.get(&c)).map_or((f64::NAN, f64::NAN), |(h, last)| {
+                    (tiles_to_km((h.0 - pos.0).hypot(h.1 - pos.1)), tick.saturating_sub(*last) as f64 / TICKS_PER_DAY as f64)
+                });
+                parched.insert(id, [tick as f64 / TICKS_PER_DAY as f64, age, km(known), km(real), camp_km, since_days, f64::from(act == Activity::Walking)]);
+            }
             let dark = sim.climate.light(home.1, sim.time) == 0.0;
             for (_, (demo, behavior)) in sim.agents.query::<(&Demographics, &Behavior)>().iter() {
                 if !demo.is_adult(sim.time.tick) {
@@ -479,6 +523,11 @@ fn main() {
         day as f64 / 360.0,
         started.elapsed().as_secs_f64() / 3600.0
     );
+    let mut log = std::fs::File::create(format!("{out}.soif.csv")).expect("journal de la soif");
+    writeln!(log, "jour,age,km_source_connue,km_source_reelle,km_camp,jours_depuis_levee,en_marche").unwrap();
+    for r in &thirst_log {
+        writeln!(log, "{:.2},{:.2},{:.2},{:.2},{:.2},{:.1},{}", r[0], r[1], r[2], r[3], r[4], r[5], r[6]).unwrap();
+    }
 }
 
 /// Mémoire résidente du processus, en ko (`/proc/self/status`, Linux).
