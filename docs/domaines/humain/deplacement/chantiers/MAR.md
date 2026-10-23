@@ -1478,3 +1478,16 @@ en hiver dans sa mémoire — et le gibier vu ne pèse plus (choix 1). Elle part
 gibier vers des pays de cueillette d'été. Deux mécanismes candidats : (a) **une mémoire des lieux
 sans saison** (le sourçage de MEM l'appuie : on connaît les ressources de son pays saison par
 saison) ; (b) le gibier absent du choix.
+
+## MEM-3 par saison (décision de l'utilisateur, 2026-10-23 : « 1 »)
+Changement : chaque lieu retient, par **quart d'année vécu** (`memory::quarter_of`, le moment de
+l'année et non l'étiquette `Season` du climat, que la simulation ne lit pas), les kcal acquises,
+les heures de subsistance et le fourrage vu. Le camp compare les lieux sur ce qu'ils rendent **à
+ce moment de l'année** (`Place::expected_in_season`, `season_seen`) ; un lieu jamais travaillé ni
+vu à ce moment de l'année n'est pas comparable. Test `un_lieu_se_juge_sur_ce_qu_il_rend_a_ce_moment_de_l_annee`
+(l'été A rend 1 000 kcal/h et B 200, l'hiver A 50 et B 400 : toute l'année, A paraît meilleur ;
+l'hiver, B l'emporte).
+Prédictions, `longue` 10 ans × 8 contre MAR-6b c (22c985d en froid, b7ce1ec en tempéré) et `main` :
+1. Froid : troupeaux à 10 km du foyer non nuls à l'an 10 sur ≥ 3/4 (c : 0 sur f42 et f1337) ;
+   morts de faim divisées par ≥ 2 (115) ; population des ans 5-10 ≥ 70 % de `main` sur ≥ 2/4.
+2. Tempéré : population ≥ 90 % de c sur 4/4.

@@ -151,14 +151,19 @@ pub(crate) fn daily(sim: &mut Sim) {
         band.habit_net += hn;
         band.habit_net_hunt += yields.habit_net_by()[crate::yields::Pursuit::Hunt as usize];
         band.springs.extend(mem.springs.iter().copied());
+        // Ce que chaque lieu rend **à ce moment de l'année** (MEM-3 par saison,
+        // décision de l'utilisateur, 2026-10-23).
         for (key, place) in &mem.places {
             let e = band.places.entry(*key).or_default();
-            let h = f64::from(place.work_hours());
-            e.worked_value += place.expected(tick) * h;
-            e.long_value += place.long_term() * h;
-            e.worked_h += h;
-            e.seen_sum += f64::from(place.seen_forage) * f64::from(place.seen_h);
-            e.seen_h += f64::from(place.seen_h);
+            if let (Some(v), Some((long, h))) = (place.expected_in_season(tick), place.season_long(tick)) {
+                e.worked_value += v * h;
+                e.long_value += long * h;
+                e.worked_h += h;
+            }
+            if let Some((mean, h)) = place.season_seen(tick) {
+                e.seen_sum += mean * h;
+                e.seen_h += h;
+            }
         }
         if let Some((spot, seen)) = mem.game
             && tick.saturating_sub(seen) < GAME_FRESH_TICKS
