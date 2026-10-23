@@ -1398,3 +1398,22 @@ Scène froide, 4 seeds × 5 ans, MAR-6b c (b7ce1ec + instrument). Prédictions :
 2. ≥ 50 % avec une vraie source à moins de 2 km mais aucune source connue plus proche que 2 km
    (on ne sait pas encore où boire au nouveau camp).
 3. Enfants (< 5 ans) ≥ 50 % des morts.
+
+### Soif des bandes mobiles en froid — mesuré (`longue` froid 4 seeds × 5 ans, d05a5cf)
+57 morts de soif (f42 25, f1337 17, f7 8, f2024 7). À l'heure d'avant la mort :
+- **à la source** : source connue la plus proche à 10 m en médiane (p90 1,7 km), vraie source à
+  10 m ; une source réelle à moins de 2 km dans 100 % des cas, inconnue de lui dans 9 % seulement ;
+- **au camp** (0,48 km en médiane), **pas en marche** (5 %) ;
+- **en plein hiver** : 41 des 57 entre mi-décembre et mi-février ;
+- 56 % d'enfants de moins de 5 ans, 26 % de moins d'un an ; 6,1 jours depuis la dernière levée
+  en médiane.
+1. ≥ 50 % à moins de 3 jours d'une levée : **réfutée de peu** (44 %). 2. Source réelle proche mais
+   inconnue : **réfutée** (9 %). 3. Enfants ≥ 50 % : **tenue** (56 %).
+Lecture : ce n'est pas un problème de mémoire ni de trajet — on meurt de soif **assis à côté de
+l'eau, en hiver**. Rien dans le code ne gèle l'eau (`has_fresh_water` est un drapeau fixe). Deux
+explications que ces chiffres ne départagent pas : (a) en hiver, une autre urgence (s'abriter du
+froid, dormir) l'emporte sur boire jusqu'à la mort — le choix ne bascule pas ; (b) l'instrument de
+cause : la mort est attribuée à « la plus forte morsure », et la soif peut masquer un corps qui
+meurt de froid et de faim ensemble (défaut d'instrument déjà relevé au chantier de l'eau). Pour
+les petits : ils ne boivent qu'avec leur porteur (MOR-4). Mesure suivante : l'activité et la tâche
+de l'heure d'avant, la soif, la faim, le froid et la santé, l'heure de la dernière gorgée.
