@@ -1447,3 +1447,18 @@ mesurées avant ce commit mêlent la faim et le froid à la soif.**
 Remesure : `longue` froid 4 seeds × 10 ans, MAR-6b c contre `main`, tous deux avec la bonne cause.
 Prédiction : sur la branche, les morts « de soif » des plus de 3 ans passent en grande partie à la
 faim (≥ 50 %) ; sur `main`, la soif baisse aussi.
+
+### Froid mobile remesuré avec la bonne cause (`longue` froid 4 × 10 ans ; `main` f0bdec5, branche 22c985d)
+Dynamique identique à MAR-6b c (populations des ans 5-10 : 9, 46, 32, 61 — mêmes qu'en b7ce1ec) ;
+seules les causes changent.
+| run | soif ; faim ; froid ; maladie — `main` | — branche (avant correction de l'instrument) |
+|---|---|---|
+| f42 | 3 ; 4 ; 3 ; 29 | **13 ; 47 ; 14** ; 15 (30 ; 5 ; 41) |
+| f7 | 4 ; 9 ; 1 ; 20 (violence 32) | 14 ; 27 ; 1 ; 41 (24 ; 12 ; 5) |
+| f1337 | 4 ; 0 ; 1 ; 41 | 17 ; 33 ; 4 ; 44 (30 ; 20 ; 6) |
+| f2024 | 4 ; 0 ; 0 ; 30 | 10 ; 8 ; 0 ; 44 (11 ; 8 ; 0) |
+Prédiction (≥ 50 % des « soifs » des plus grands passent à la faim) : **tenue sur l'ensemble** —
+soif 95 → 54, froid 52 → 19, faim 45 → **115** (contre 13 sur `main`).
+**La bande mobile en pays froid meurt de faim**, d'abord : 115 morts de faim en 4 × 10 ans, contre
+13 pour la bande immobile. Reste à lire pourquoi (cueillette nulle partout l'hiver ? réserve du
+clan ? chasse d'hiver hors du domaine des troupeaux ? marche plus coûteuse ?).
