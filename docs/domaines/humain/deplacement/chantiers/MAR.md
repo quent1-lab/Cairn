@@ -1435,3 +1435,15 @@ Conséquences : (1) l'instrument de cause doit compter ce qui a **usé la santé
 jours, pas la morsure de la dernière heure — sans quoi toutes les mesures de « soif » depuis le
 chantier de l'eau mêlent faim et froid ; (2) la mobilité d'hiver en pays froid affame : à lire
 (réserves laissées au camp ? cueillette nulle partout en hiver ?).
+
+## L'instrument de cause de mort corrigé (2026-10-23, validé par l'utilisateur)
+`Physiology::worn` : l'usure de la santé par cause lente (soif, faim, froid, maladie), avec une
+demi-vie d'une semaine ; une mort lente revient à la cause qui a le plus usé le corps
+(`Physiology::cause_of_death`), une mort soudaine (violence, prédation, foudre, âge) reste
+elle-même. Test `la_cause_d_une_mort_lente_est_ce_qui_a_use_le_corps` (dix jours de jeûne puis une
+journée sans eau : `last_damage` dit soif, la nouvelle règle dit faim). Sans effet sur la dynamique
+(la cause ne sert qu'à la Chronique) : reporté aussi sur `main`. **Toutes les causes de mort
+mesurées avant ce commit mêlent la faim et le froid à la soif.**
+Remesure : `longue` froid 4 seeds × 10 ans, MAR-6b c contre `main`, tous deux avec la bonne cause.
+Prédiction : sur la branche, les morts « de soif » des plus de 3 ans passent en grande partie à la
+faim (≥ 50 %) ; sur `main`, la soif baisse aussi.

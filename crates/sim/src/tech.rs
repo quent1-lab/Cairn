@@ -796,6 +796,7 @@ mod tests {
                 cold: 0.0,
                 health: 1.0,
                 last_damage: None,
+                worn: [0.0; 4],
                 ..Physiology::default()
             };
             m.0 = Some(ClanId(1));

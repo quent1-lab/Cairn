@@ -625,6 +625,7 @@ impl Sim {
                 cold: 0.0,
                 health: 1.0,
                 last_damage: None,
+                worn: [0.0; 4],
                 ..Physiology::with_full_reserves(
                     &Demographics { sex, born_tick: self.time.tick as i64, pregnancy: None },
                     self.time.tick,
@@ -1342,9 +1343,10 @@ impl Sim {
                     phys.last_damage = Some(DeathCause::Disease);
                 }
                 phys.health = (phys.health - sick).max(0.0);
+                phys.wear_disease(sick);
             }
             if phys.is_dead() {
-                let cause = phys.last_damage.unwrap_or(DeathCause::Starvation);
+                let cause = phys.cause_of_death();
                 // Le sexe part avec le corps : on le note ici, sans quoi la
                 // Chronique ne saurait plus nommer le défunt (voir `chronicle`).
                 dead.push((entity, *id, cause, (x, y), demo.sex));

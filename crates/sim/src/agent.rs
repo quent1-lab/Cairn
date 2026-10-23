@@ -79,6 +79,13 @@ pub const DAMAGE_DEHYDRATION: f32 = 1.0 / 48.0;
 pub const DAMAGE_STARVATION: f32 = 1.0 / 336.0;
 /// Mort de froid en ~1 jour de stress thermique maximal.
 pub const DAMAGE_HYPOTHERMIA: f32 = 1.0 / 24.0;
+/// Mémoire de l'usure, pour la cause d'une mort lente : une semaine.
+pub const WORN_HALF_LIFE_DAYS: f32 = 7.0;
+const WORN_CAUSES: [DeathCause; 4] = [DeathCause::Dehydration, DeathCause::Starvation, DeathCause::Hypothermia, DeathCause::Disease];
+
+fn worn_index(c: DeathCause) -> Option<usize> {
+    WORN_CAUSES.iter().position(|&w| w == c)
+}
 /// Récupération quand tous les besoins sont contenus : ~10 jours pour
 /// remonter de mourant à plein.
 pub const HEALTH_REGEN: f32 = 1.0 / 240.0;
@@ -274,6 +281,12 @@ pub struct Physiology {
     /// Le besoin qui a rongé la santé en dernier — le futur « cause du
     /// décès » de la Chronique.
     pub last_damage: Option<DeathCause>,
+    /// Ce qui a usé la santé ces derniers jours, par cause lente (soif, faim,
+    /// froid, maladie ; demi-vie `WORN_HALF_LIFE_DAYS`) : la cause d'une mort
+    /// lente est celle qui a le plus usé le corps, pas la morsure de la
+    /// dernière heure (2026-10-23 : un corps affamé et transi depuis des jours,
+    /// achevé par quelques heures de soif, était compté mort de soif).
+    pub worn: [f32; 4],
     /// Points de nourriture par unité de faim : deux jours du besoin de
     /// référence de **ce** corps (`energy::Body::scale`) ; 1 pour l'adulte de
     /// référence. Tenu à jour par la physiologie.
@@ -297,6 +310,7 @@ impl Default for Physiology {
             cold: 0.0,
             health: 1.0,
             last_damage: None,
+            worn: [0.0; 4],
             scale: 1.0,
             burn_kcal: 0.0,
             reserves_kcal: 0.0,
@@ -349,8 +363,15 @@ impl Physiology {
         // comme cause dominante.
         let starving = self.starving();
         let mut worst: Option<(f32, DeathCause)> = None;
+        let keep = 0.5f32.powf(1.0 / (WORN_HALF_LIFE_DAYS * 24.0));
+        for w in &mut self.worn {
+            *w *= keep;
+        }
         let mut bite = |damage: f32, cause: DeathCause, worst: &mut Option<(f32, DeathCause)>| {
             self.health -= damage;
+            if let Some(i) = worn_index(cause) {
+                self.worn[i] += damage;
+            }
             if worst.is_none_or(|(w, _)| damage > w) {
                 *worst = Some((damage, cause));
             }
@@ -453,6 +474,24 @@ impl Physiology {
 
     pub fn is_dead(&self) -> bool {
         self.health <= 0.0
+    }
+
+    /// La cause d'une mort : une cause soudaine (violence, prédation, foudre,
+    /// âge) reste elle-même ; une mort lente revient à ce qui a le plus usé
+    /// la santé ces derniers jours.
+    pub fn cause_of_death(&self) -> DeathCause {
+        match self.last_damage {
+            Some(c) if worn_index(c).is_none() => c,
+            last => {
+                let (i, w) = self.worn.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)).expect("quatre causes");
+                if *w > 0.0 { WORN_CAUSES[i] } else { last.unwrap_or(DeathCause::Starvation) }
+            }
+        }
+    }
+
+    /// Une atteinte de la maladie (appliquée hors de `drift`).
+    pub fn wear_disease(&mut self, damage: f32) {
+        self.worn[3] += damage;
     }
 }
 
@@ -598,5 +637,29 @@ mod tests {
         // Assez pour tout : réserves pleines, faim nulle.
         p.eat_points(10.0);
         assert!(p.hunger == 0.0 && (p.reserves_kcal - 10_000.0).abs() < 1.0);
+    }
+
+    /// Un corps affamé depuis dix jours, achevé par une journée de soif, meurt
+    /// de faim : la cause d'une mort lente est ce qui l'a usé, pas la morsure de
+    /// la dernière heure (que l'ancienne règle, `last_damage`, retenait).
+    #[test]
+    fn la_cause_d_une_mort_lente_est_ce_qui_a_use_le_corps() {
+        let mut p = Physiology { hunger: 1.0, thirst: 0.0, reserves_kcal: 0.0, ..Physiology::default() };
+        for _ in 0..(10 * 24) {
+            p.drift(20.0, Activity::Idle, 0.5, 0.0);
+            p.thirst = 0.0; // on boit
+        }
+        assert!(p.health < 0.4, "dix jours de jeûne usent la santé : {}", p.health);
+        while !p.is_dead() {
+            p.drift(20.0, Activity::Idle, 0.5, 0.0); // plus d'eau
+        }
+        assert_eq!(p.last_damage, Some(DeathCause::Dehydration), "la dernière morsure est la soif");
+        assert_eq!(p.cause_of_death(), DeathCause::Starvation, "mais c'est la faim qui l'a usé");
+        let mut q = Physiology { thirst: 1.0, ..Physiology::default() };
+        while !q.is_dead() {
+            q.drift(20.0, Activity::Idle, 0.5, 0.0);
+            q.hunger = 0.0;
+        }
+        assert_eq!(q.cause_of_death(), DeathCause::Dehydration, "un corps nourri sans eau meurt de soif");
     }
 }
