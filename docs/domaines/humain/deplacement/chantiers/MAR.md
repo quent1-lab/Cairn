@@ -1337,3 +1337,22 @@ Prédictions, `longue` 10 ans × 8 contre `main` (38dca99) et la règle hors cha
 1. Scène froide : population moyenne des ans 5-10 ≥ 70 % de `main` sur ≥ 3/4 (hors chasse : 1/4).
 2. Tempéré : ≥ 70 % de `main` sur 4/4 (tenu par hors chasse) ; foyer ≤ 200 km sur 8/8.
 3. Levées : moins qu'hors chasse (41-66/an), surtout l'hiver.
+
+### MAR-6b c — mesuré (`longue` 10 ans × 8, b7ce1ec)
+| run | pop moy. ans 5-10 main ; hors chasse ; c | foyer max (km) | levées/an (retours) | soif ; faim ; froid (c) | feu vu (c) |
+|---|---|---|---|---|---|
+| t42 | 62 ; 63 ; **66** | 98 | 28 (31 %) | 4 ; 0 ; 0 | 57 |
+| t7 | 49 ; 40 ; **51** | 133 | 33 (45 %) | 8 ; 2 ; 0 | 50 |
+| t1337 | 65 ; 64 ; **67** | 73 | 21 (44 %) | 4 ; 0 ; 0 | 0 |
+| t2024 | 57 ; 56 ; **68** | 112 | 34 (30 %) | 4 ; 0 ; 0 | 30 |
+| f42 | 75 ; 5 ; **9** | 117 | 23 (31 %) | 30 ; 5 ; 41 | 0 |
+| f7 | 23 ; 31 ; **46** | 280 | 63 (44 %) | 24 ; 12 ; 5 | 30 |
+| f1337 | 94 ; 35 ; **32** | 32 | 31 (70 %) | 30 ; 20 ; 6 | 0 |
+| f2024 | 94 ; 62 ; **61** | 330 | 53 (30 %) | 11 ; 8 ; 0 | 36 |
+1. Froid ≥ 70 % de `main` sur ≥ 3/4 : **réfutée** (1/4 : f7). 2. Tempéré ≥ 70 % sur 4/4 :
+**tenue, au-dessus de `main` sur 4/4** (103-119 %) ; foyer ≤ 200 km : **6/8** (f7 280, f2024 330).
+3. Moins de levées : **tenue** (21-34/an en tempéré contre 56-63 hors chasse ; Hadza ~12, Batek ~44).
+Lecture : en tempéré, la règle « un lieu connu promet mieux » donne enfin des bandes mobiles,
+bornées, **plus nombreuses que les bandes immobiles**, qui voient le feu (3/4 runs). En froid, la
+mort vient du froid et de la soif (f42 : 41 et 30 ; f1337 : soif 30, faim 20) : l'étape 2 (les
+huttes rebâties au nouveau camp) vise ce bout-là.
