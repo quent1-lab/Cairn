@@ -1356,3 +1356,15 @@ Lecture : en tempéré, la règle « un lieu connu promet mieux » donne enfin d
 bornées, **plus nombreuses que les bandes immobiles**, qui voient le feu (3/4 runs). En froid, la
 mort vient du froid et de la soif (f42 : 41 et 30 ; f1337 : soif 30, faim 20) : l'étape 2 (les
 huttes rebâties au nouveau camp) vise ce bout-là.
+
+## MAR-6b c + b — les huttes rebâties au nouveau camp (solution 3, étape 2 ; 2026-10-23)
+Reprise de l'essai (b) (0009b85, cherry-pick a4faad9) sur MAR-6b c : une structure à plus du
+rayon de résidence du camp de son clan est laissée derrière (abandonnée, reprise seulement par
+d'autres occupants) ; le clan, s'il a froid, en désire une nouvelle au camp. Test
+`un_clan_qui_leve_le_camp_laisse_sa_hutte_et_en_desire_une_autre` (vu rouge à l'époque) ; le test
+de surchasse, rouge sur l'ancienne branche, passe ici.
+Prédictions, `longue` 10 ans × 8 contre MAR-6b c (b7ce1ec) :
+1. Scène froide : morts de froid en baisse sur ≥ 3/4 ; population moyenne des ans 5-10 ≥ 70 %
+   de `main` sur ≥ 2/4 (c : 1/4).
+2. Tempéré : inchangé à ±10 % (pas de huttes sans froid).
+Réfuterait 1 : froid en hausse ou égal sur ≥ 2/4.
