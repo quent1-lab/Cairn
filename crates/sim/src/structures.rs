@@ -57,7 +57,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::agent::{Physiology, Prestige};
 use crate::sim::{STOCK_SCALE_PER_MEMBER, Sim};
 use crate::skills::Skills;
-use crate::social::{ClanId, ClanMembership, RESIDENCE_RADIUS_TILES};
+use crate::social::{ClanId, ClanMembership};
 use cairn_core::km_to_tiles;
 
 /// Les structures qu'un clan peut bâtir. `repr(u8)` implicite via l'ordre :
@@ -172,15 +172,8 @@ pub fn hut_warmth(pos: (f64, f64), clan: Option<ClanId>, huts: &[(f64, f64, Clan
 
 /// Facteur de durée de vie de la réserve d'un clan : `GRANARY_KEEP_FACTOR`
 /// s'il a un grenier, 1 sinon.
-impl Structure {
-    /// En usage : son clan vit autour (elle n'est pas laissée derrière).
-    pub fn in_use(&self) -> bool {
-        self.abandoned_since.is_none()
-    }
-}
-
 pub fn granary_keep_factor(clan: ClanId, structures: &[Structure]) -> f32 {
-    if structures.iter().any(|s| s.clan == clan && s.kind == StructureKind::Granary && s.in_use()) {
+    if structures.iter().any(|s| s.clan == clan && s.kind == StructureKind::Granary) {
         GRANARY_KEEP_FACTOR
     } else {
         1.0
@@ -189,7 +182,7 @@ pub fn granary_keep_factor(clan: ClanId, structures: &[Structure]) -> f32 {
 
 /// Le clan a-t-il une palissade ? (lu par `social::update_relations`).
 pub fn has_palisade(clan: ClanId, structures: &[Structure]) -> bool {
-    structures.iter().any(|s| s.clan == clan && s.kind == StructureKind::Palisade && s.in_use())
+    structures.iter().any(|s| s.clan == clan && s.kind == StructureKind::Palisade)
 }
 
 /// Passe quotidienne : mesure les pressions de chaque clan et fixe la
@@ -198,7 +191,7 @@ pub fn has_palisade(clan: ClanId, structures: &[Structure]) -> bool {
 pub(crate) fn plan(sim: &mut Sim) {
     // Structures déjà présentes, par clan (pour ne désirer que ce qui manque).
     let mut existing: BTreeMap<u64, BTreeSet<StructureKind>> = BTreeMap::new();
-    for s in sim.structures.iter().filter(|s| s.in_use()) {
+    for s in &sim.structures {
         existing.entry(s.clan.0).or_default().insert(s.kind);
     }
     // Pression thermique : froid moyen des membres, par clan.
@@ -273,20 +266,11 @@ pub(crate) fn maintain(sim: &mut Sim, day: u64) {
     // en mutable sans conflit — `claim_at` n'a besoin que d'un `&[Clan]`.
     let clans = std::mem::take(&mut sim.clans);
     let alive: BTreeSet<u64> = clans.iter().map(|c| c.id.0).collect();
-    // MAR-6b (b) : une structure loin du camp de son clan est laissée derrière
-    // — la bande qui lève le camp ne traîne pas sa hutte, elle en refera une.
-    let homes: BTreeMap<u64, (f64, f64)> = clans.iter().map(|c| (c.id.0, c.home)).collect();
-    let at_camp = |s: &Structure| {
-        homes.get(&s.clan.0).is_some_and(|h| (s.pos.0 - h.0).hypot(s.pos.1 - h.1) <= RESIDENCE_RADIUS_TILES)
-    };
     sim.structures.retain_mut(|s| {
-        if alive.contains(&s.clan.0) && at_camp(s) {
+        if alive.contains(&s.clan.0) {
             s.abandoned_since = None;
             true
-        } else if let Some(owner) = crate::social::claim_at(s.pos, &clans)
-            && owner != s.clan
-        {
-            // Reprise par les occupants du lieu (pas par le clan qui l'a quittée).
+        } else if let Some(owner) = crate::social::claim_at(s.pos, &clans) {
             s.clan = owner;
             s.abandoned_since = None;
             true
@@ -461,34 +445,6 @@ mod tests {
         assert_eq!(sim.structures.len(), 1, "toujours dans le délai de grâce");
         maintain(&mut sim, 100 + STRUCTURE_DECAY_DAYS);
         assert!(sim.structures.is_empty(), "passé le délai, la ruine emporte la structure");
-    }
-
-    /// MAR-6b (b) : un clan qui a levé son camp laisse sa hutte derrière ; elle
-    /// est abandonnée, et le clan, s'il a froid, en désire une nouvelle.
-    #[test]
-    fn un_clan_qui_leve_le_camp_laisse_sa_hutte_et_en_desire_une_autre() {
-        let mut sim = Sim::new(WorldSeed(1), 64);
-        for _ in 0..4 {
-            sim.spawn_agent(cairn_core::km_to_tiles(6.0), 0.0);
-        }
-        let mut clan = clan_with(1, 4, 0.0);
-        clan.home = (cairn_core::km_to_tiles(6.0), 0.0); // le camp est parti à 6 km
-        sim.clans.push(clan);
-        sim.structures.push(Structure {
-            kind: StructureKind::Hut,
-            clan: ClanId(1),
-            pos: (0.0, 0.0),
-            built_tick: 0,
-            abandoned_since: None,
-        });
-        maintain(&mut sim, 10);
-        assert_eq!(sim.structures[0].abandoned_since, Some(10), "la hutte laissée derrière est abandonnée");
-        for (_, (membership, phys)) in sim.agents.query_mut::<(&mut ClanMembership, &mut Physiology)>() {
-            membership.0 = Some(ClanId(1));
-            phys.cold = 0.8;
-        }
-        plan(&mut sim);
-        assert_eq!(sim.clans[0].desired, Some(StructureKind::Hut), "au froid, le clan veut une hutte au nouveau camp");
     }
 
     #[test]
