@@ -1462,3 +1462,19 @@ soif 95 → 54, froid 52 → 19, faim 45 → **115** (contre 13 sur `main`).
 **La bande mobile en pays froid meurt de faim**, d'abord : 115 morts de faim en 4 × 10 ans, contre
 13 pour la bande immobile. Reste à lire pourquoi (cueillette nulle partout l'hiver ? réserve du
 clan ? chasse d'hiver hors du domaine des troupeaux ? marche plus coûteuse ?).
+
+### La faim d'hiver des bandes mobiles en froid — lu (deux ans, 4 seeds, f184cb6 contre b99981d ; et les runs de 10 ans de 22c985d)
+- **Sur deux ans, l'hiver ne décroche pas** : cueillette et chasse du jour, réserve des clans et faim
+  des adultes de la bande mobile valent celles de la bande immobile (faim d'hiver 0,66 contre 0,66 ;
+  réserve plus haute : 4 400 contre 2 555) ; morts de faim 6 contre 1.
+- **Le décrochage vient ensuite, avec le gibier** (10 ans, f42 et f1337) : la bande immobile garde
+  ses troupeaux près d'elle (troupeaux à 10 km : 9 → 105 en f42, 7 → 32 en f1337) ; la bande mobile
+  **les quitte** (f42 : 3-15 puis **0** dès l'an 5, foyer à 50-115 km ; f1337 : 8-15 puis 0 aux ans
+  8-10). Sa faim et ses morts de faim suivent (f42 : 11 et 15 aux ans 2-3 ; f1337 : 12 à l'an 5,
+  4-7 aux ans 7-9).
+Lecture : en pays froid, l'hiver se passe sur la chasse ; la bande mobile choisit ses camps sur ce
+que les lieux ont rendu, **toutes saisons confondues** — un lieu riche en plantes l'été vaut autant
+en hiver dans sa mémoire — et le gibier vu ne pèse plus (choix 1). Elle part loin de son pays de
+gibier vers des pays de cueillette d'été. Deux mécanismes candidats : (a) **une mémoire des lieux
+sans saison** (le sourçage de MEM l'appuie : on connaît les ressources de son pays saison par
+saison) ; (b) le gibier absent du choix.
