@@ -1417,3 +1417,21 @@ cause : la mort est attribuée à « la plus forte morsure », et la soif peut m
 meurt de froid et de faim ensemble (défaut d'instrument déjà relevé au chantier de l'eau). Pour
 les petits : ils ne boivent qu'avec leur porteur (MOR-4). Mesure suivante : l'activité et la tâche
 de l'heure d'avant, la soif, la faim, le froid et la santé, l'heure de la dernière gorgée.
+
+### Soif en froid — tranché (journal détaillé, 4 seeds × 5 ans, 57 morts « de soif »)
+Deux populations distinctes :
+- **Les petits (< 3 ans), ~20 morts** : dernière gorgée **44 à 124 h** avant (ou jamais : ils ne
+  boivent qu'avec leur porteur) ; **porteur mort dans 18 cas**. Ce sont des **orphelins** : leur mort
+  par la soif est réelle, et c'est le chantier des orphelins (MOR-4b), pas la mobilité.
+- **Les plus grands (3,5 à 42 ans), ~37 morts** : dernière gorgée **20 à 25 h** avant seulement ;
+  soif ~1, mais **faim 1,00 dans la plupart des cas**, froid 0,2-0,8, santé ~0 ; endormis, au repos
+  ou à l'abri (Sleeping 20, Idle 12, Sheltering 15 sur 57). Personne ne meurt de soif en 22 h :
+  ce sont des corps **qui meurent de faim et de froid**, et que l'instrument de cause range en
+  « soif » parce que la soif est la plus forte morsure de la dernière heure.
+Verdict : explication (b) — **la cause de mort est mal attribuée** pour les grands ; la vraie
+cause en pays froid mobile est **la faim d'hiver** (et le froid), plus les orphelins. L'explication
+(a) (une autre urgence empêche de boire) ne tient pas : on avait bu la veille.
+Conséquences : (1) l'instrument de cause doit compter ce qui a **usé la santé** sur les derniers
+jours, pas la morsure de la dernière heure — sans quoi toutes les mesures de « soif » depuis le
+chantier de l'eau mêlent faim et froid ; (2) la mobilité d'hiver en pays froid affame : à lire
+(réserves laissées au camp ? cueillette nulle partout en hiver ?).
