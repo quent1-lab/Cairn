@@ -1368,3 +1368,22 @@ Prédictions, `longue` 10 ans × 8 contre MAR-6b c (b7ce1ec) :
    de `main` sur ≥ 2/4 (c : 1/4).
 2. Tempéré : inchangé à ±10 % (pas de huttes sans froid).
 Réfuterait 1 : froid en hausse ou égal sur ≥ 2/4.
+
+### MAR-6b c + b — mesuré (`longue` 10 ans × 8) contre c (b7ce1ec)
+| run | pop 5-10 main ; c ; c+b | froid c → c+b | soif c → c+b | foyer max c+b (km) | levées c → c+b |
+|---|---|---|---|---|---|
+| t42 | 62 ; 66 ; 68 | 0 → 0 | 4 → 3 | 319 | 277 → 380 |
+| t7 | 49 ; 51 ; 46 | 0 → 0 | 8 → 5 | 307 | 327 → 428 |
+| t1337 | 65 ; 67 ; **48** | 0 → 0 | 4 → 11 | 218 | 210 → 604 |
+| t2024 | 57 ; 68 ; 65 | 0 → 0 | 4 → 16 | **622** | 340 → 502 |
+| f42 | 75 ; 9 ; 18 | 41 → 17 | 30 → 18 | 70 | 229 → 210 |
+| f7 | 23 ; 46 ; 39 | 5 → 1 | 24 → 29 | 243 | 626 → 486 |
+| f1337 | 94 ; 32 ; 34 | 6 → 12 | 30 → 20 | 25 | 310 → 323 |
+| f2024 | 94 ; 61 ; 57 | 0 → 4 | 11 → 24 | 179 | 528 → 410 |
+1. Froid en baisse sur ≥ 3/4 : **réfutée** (2/4 ; f1337 et f2024 en hausse) ; population ≥ 70 %
+   de `main` sur ≥ 2/4 : **réfutée** (1/4). 2. Tempéré inchangé à ±10 % : **réfutée** (t1337 −28 %),
+   et les levées montent de 30 à 190 % en tempéré, les foyers partent à 218-622 km.
+Lecture : les huttes rebâties ne sauvent pas le froid, et **dérèglent le tempéré** : laisser derrière
+toutes les structures (la hutte du chef comprise) multiplie les levées — mécanisme non lu. **Non
+retenu** : l'étape 2 est défaite (revert), MAR-6b c reste. Ce que le froid garde : **la soif**
+(18-30 morts en 10 ans contre 3-4 sur `main`), avant le froid lui-même.
