@@ -1040,3 +1040,10 @@ régulateur sans faire bouger le camp.
 **Ce que j'ai pu manquer** : une seule seed, une seule scène (tempérée) ; le froid, où la faim et
 le froid mordent, régulerait autrement ; le régime des enfants (5-14 ans) n'a pas été lu ici ;
 la faune stable n'a pas été confrontée à la chasse (prises par jour non lues).
+
+## L'instrument de cause de mort corrigé (2026-10-23, reporté de `exp/camp-memoire`)
+Une mort lente revient à la cause qui a le plus usé la santé sur la dernière semaine
+(`Physiology::worn`, `cause_of_death`), plus à la morsure de la dernière heure. Trouvé en lisant les
+morts « de soif » des bandes mobiles en froid : des corps affamés et transis depuis des jours,
+achevés par quelques heures de soif. **Les causes de mort mesurées avant ce commit mêlent la faim
+et le froid à la soif.** Le détail est sur la branche `exp/camp-memoire` (MAR.md, fin).
