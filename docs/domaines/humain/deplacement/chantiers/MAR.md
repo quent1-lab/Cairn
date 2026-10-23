@@ -1491,3 +1491,24 @@ Prédictions, `longue` 10 ans × 8 contre MAR-6b c (22c985d en froid, b7ce1ec en
 1. Froid : troupeaux à 10 km du foyer non nuls à l'an 10 sur ≥ 3/4 (c : 0 sur f42 et f1337) ;
    morts de faim divisées par ≥ 2 (115) ; population des ans 5-10 ≥ 70 % de `main` sur ≥ 2/4.
 2. Tempéré : population ≥ 90 % de c sur 4/4.
+
+### MEM-3 par saison — mesuré (`longue` 10 ans × 8, aa51683)
+| run | pop moy. ans 5-10 main ; c ; saison | faim c → saison | soif ; froid (saison) | foyer max (km) | levées |
+|---|---|---|---|---|---|
+| t42 | 62 ; 66 ; 68 | 0 → 0 | 3 ; 0 | 105 | 329 |
+| t7 | 49 ; 51 ; 42 | 2 → 9 | 7 ; 0 | 216 | 431 |
+| t1337 | 65 ; 67 ; 62 | 0 → 0 | 3 ; 0 | 210 | 463 |
+| t2024 | 57 ; 68 ; 68 | 0 → 0 | 5 ; 0 | 144 | 428 |
+| f42 | 75 ; 9 ; 7 | 47 → 27 | 11 ; 32 | 55 | 184 |
+| f7 | 23 ; 46 ; **54** | 27 → 15 | 15 ; 0 | 307 | 576 |
+| f1337 | 94 ; 32 ; 36 | 33 → 17 | 12 ; 3 | 32 | 300 |
+| f2024 | 94 ; 61 ; **74** | 8 → 3 | 5 ; 0 | 69 | 677 |
+1. Froid : morts de faim ÷ 2 — **manqué de peu** (115 → 62, ÷ 1,85) ; population ≥ 70 % de `main` sur
+   ≥ 2/4 — **tenue** (f7, f2024) ; troupeaux à 10 km — **instrument faux** : la colonne
+   `troupeaux_10km` se mesure autour du **point de départ**, pas du camp. Pour une bande immobile
+   c'est le même lieu ; pour une bande mobile, non. La lecture « la bande mobile quitte son pays de
+   gibier » (plus haut) repose en partie sur ce chiffre : **à reprendre** avec les troupeaux autour du
+   camp courant.
+2. Tempéré ≥ 90 % de c sur 4/4 : **réfutée** (3/4 ; t7 à 82 %).
+Lecture : la saison aide en froid (faim presque ÷ 2, deux runs au niveau de `main` ou au-dessus),
+sans coût net en tempéré (une run en baisse). f42 et f1337 restent effondrées (f42 : froid 32, faim 27).
