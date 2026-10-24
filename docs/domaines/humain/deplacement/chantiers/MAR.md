@@ -1781,3 +1781,10 @@ Lecture :
 - Conclusion : le désusage est nécessaire mais pas suffisant ; la capacité borne le domaine ;
   et dès qu'elle ne le borne plus, c'est le **coût du départ** qui manque. **Question à
   l'utilisateur.**
+
+**Décision de l'utilisateur (2026-10-24, soir)** : d'abord la capacité d'après le réel, puis le
+coût du départ, chacun mesuré seul. Capacité retenue : **256** (sources : > 50 points d'eau
+utilisés par un homme, > 1 200 connus d'un groupe, retrouvés après 50-60 ans — cognition,
+SOURCES). Le binaire `mar6d-cap256` est exactement ce code : la mesure de 2 ans × 8 ci-dessus
+vaut pour lui. L'oubli au fil du temps n'est pas ajouté : à 50-60 ans de souvenir, il serait
+sans effet sur l'horizon des bancs.

@@ -30,7 +30,12 @@ use crate::sim::Sim;
 pub const MEMORY_CELL_TILES: i64 = 256;
 /// Sources retenues au plus : une mémoire, pas un atlas. Au-delà, on oublie
 /// celle qu'on a vue le moins récemment (MAR-6d : l'oubli par désusage).
-pub const MAX_KNOWN_SPRINGS: usize = 16;
+/// « Des centaines » (MAR-6d, décision de l'utilisateur du 2026-10-24) : un
+/// homme du désert de l'Ouest en liste plus de 50 qu'il a utilisés, son groupe
+/// en connaît plus de 1 200, et un point d'eau se retrouve après 50-60 ans
+/// sans visite (SOURCES de la cognition). À 16, chacun était toujours au
+/// plafond et le pays quitté sortait de la mémoire en quelques camps.
+pub const MAX_KNOWN_SPRINGS: usize = 256;
 /// Plafond de cellules mémorisées (~1 000 km² vécus). Au-delà, on ne note
 /// plus : la borne mémoire prime sur l'exhaustivité du souvenir.
 pub const MAX_KNOWN_CELLS: usize = 4096;

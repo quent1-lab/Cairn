@@ -48,3 +48,16 @@ par (moi, sous-agent `sourceur`) · lu en entier ou de seconde main.
 - **Non trouvé** : un nombre de *lieux* retenus par personne ; la durée du souvenir d'un lieu
   précis ; l'écart territoire connu / fréquenté ; des lieux-refuges gardés pour les mauvaises
   années (seulement la notion d'aliment de repli).
+
+## Points d'eau connus (sous-agent `sourceur`, 2026-10-24 ; tout de seconde main, pour MAR-6d)
+- Martu (désert de l'Ouest, Australie) : **1 200+ points d'eau** (rockholes, soaks, claypans)
+  recensés par le groupe sur 152 000 km² (collectif). https://www.natureaustralia.org.au/what-we-do/our-priorities/land-and-freshwater/land-freshwater-stories/sacred-waterholes-of-the-western-desert/
+- Un homme mantjiltjarra (désert de l'Ouest) liste **plus de 50** rockholes, soaks ou claypans
+  utilisés avant le contact — **individuel**, borne basse (ceux qu'il a utilisés). Bayly 1999,
+  cité de seconde main ; PDF illisible : https://www.rswa.org.au/wp-content/uploads/2023/10/821bayly.pdf
+- Spinifex people (Great Victoria) : des points d'eau retrouvés après **50-60 ans** sans visite.
+  https://japingkaaboriginalart.com/articles/water-the-centre-of-life/
+- Gould 1969 (*Yiwara*), de seconde main : la connaissance des points d'eau (noms, emplacement)
+  dépasse les régions réellement visitées ; transmise le long des chaînes de points d'eau.
+- Non trouvé : chiffre individuel Ju/'hoansi, Hadza, Pintupi, Inuit (Nunavut : ~10 000 lieux
+  nommés, collectif).
