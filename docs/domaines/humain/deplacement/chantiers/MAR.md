@@ -1512,3 +1512,16 @@ Prédictions, `longue` 10 ans × 8 contre MAR-6b c (22c985d en froid, b7ce1ec en
 2. Tempéré ≥ 90 % de c sur 4/4 : **réfutée** (3/4 ; t7 à 82 %).
 Lecture : la saison aide en froid (faim presque ÷ 2, deux runs au niveau de `main` ou au-dessus),
 sans coût net en tempéré (une run en baisse). f42 et f1337 restent effondrées (f42 : froid 32, faim 27).
+
+## Instrument de `longue` relu et corrigé (2026-10-24, demande de l'utilisateur)
+Relu colonne par colonne pour ce qui supposait une bande immobile :
+- `troupeaux_10km` : autour du **point de départ** → autour du **camp du plus grand clan** (ou du
+  centre de la population sans clan), relevé de la veille ;
+- la nuit (`noir_dormi`) : à la latitude du départ → à celle du camp courant ;
+- `kcal_cueillette_j`, `kcal_chasse_j` : différence des sommes (un mort faisait baisser la somme) →
+  différence par humain ;
+- gardés : `foyer_depart_km`, `foyer_max_km` (le départ est voulu), dispersion (centre du jour),
+  morts cumulées, faim, techniques.
+Journal des morts lentes (`<csv>.morts.csv`, remplace `.soif.csv`) : soif, faim et froid, avec la
+cause, l'état de l'heure d'avant (relevé dès que la santé passe sous 0,2).
+Remesure : `longue` froid 4 × 10 ans, MEM-3 par saison contre `main` (mêmes corrections).
