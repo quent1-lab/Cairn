@@ -1600,3 +1600,30 @@ des corps qui mangent mieux boivent et se chauffent mieux. Morts lentes en froid
 **Voisin** : les foyers dérivent plus loin (tempéré : 163-670 km, contre 105-216) — mécanisme non lu.
 Lecture : la réserve tenait derrière la porte une grande part des morts lentes ; ce qui reste, en
 froid, est une faim qui ne baisse pas partout (f42, f2024 en hausse) — à relire au journal.
+
+### 1. La faim qui reste en froid (journaux de 50c84ba, f42 et f2024)
+f42 : 40 morts de faim, **toutes réserve vide**, en décembre-janvier, au camp ou près (16 au camp),
+**28 à 49 jours après la dernière levée** (la bande ne bouge plus : aucun lieu connu ne promet mieux
+l'hiver), aucun troupeau à moins de 2 km (souvent aucun dans le rayon relevé). f2024 : 16 morts,
+15 réserve vide, surtout des enfants de 3-15 ans, en hiver. **C'est une vraie disette d'hiver** :
+plus de réserve, plus de gibier proche, plus de plantes. La bande immobile du même pays vit au
+milieu des troupeaux (96-105 à 10 km en f42), la bande mobile, partie à 130 km, non. Ce qui manque
+est en amont : arriver à l'hiver avec une réserve, ou là où est le gibier d'hiver.
+
+### 2. La dérive (comparaison saison / réserve)
+Chemin du foyer sur 10 ans : 1 060-3 860 km (106-386 km/an ; réel ~160-175), du même ordre avec
+et sans la porte ; retours vers un ancien camp 23-55 %. La distance finale au départ (25-660 km)
+varie dans les deux sens d'une variante à l'autre (plus loin sur 5/8, moins sur 3/8) : c'est
+l'issue d'une **marche presque aléatoire** (~300-500 levées de ~5,5 km : √400 × 5,5 ≈ 110 km
+attendus), pas un effet de la porte. Le défaut de fond : **aucun attachement à un domaine** — la
+bande compare les lieux connus à ~5 km, sans pays à elle vers lequel revenir.
+
+### 3. Synthèse du chantier camp + mémoire (2026-10-24)
+Ce qui marche, mesuré : la carte vécue (MEM-1, neutre, coût nul) ; le camp qui se lève sur la
+mémoire des lieux (MEM-3), **sans comparer l'inconnu**, jugé **hors chasse**, **par saison**, et
+**seulement si un lieu connu promet mieux** ; le gibier compté par troupeau ; **l'instrument de
+cause de mort** (déjà sur `main`) ; **la réserve sans porte**. En tempéré : bandes mobiles bornées en
+fréquence (21-48 levées/an), population au niveau de `main` ou au-dessus, le feu vu bien plus souvent.
+Ce qui ne tient pas encore : (a) **pas de domaine vital** — le foyer marche presque au hasard, 25 à
+670 km en 10 ans ; (b) **la disette d'hiver en froid** quand la bande arrive sans réserve loin du
+gibier ; (c) des runs froides sous `main` (f42, f1337).
