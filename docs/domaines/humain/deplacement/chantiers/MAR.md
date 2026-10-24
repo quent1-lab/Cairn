@@ -1557,3 +1557,15 @@ fourrage de la tuile ; froid 4 × 5 ans, même dynamique que 53362a3) :
 1. ≥ 60 % des morts de faim avec une réserve > 0,1 **et** (un troupeau à moins de 2 km ou un
    fourrage ≥ 5) — la porte fermée sur une réserve pleine.
 Réfuterait : réserve vide (≤ 0,1) dans la plupart des morts (alors la bande n'a rien à partager).
+
+### La porte de la réserve — mesuré (froid 4 × 5 ans, 9c77968, 48 morts de faim)
+- **41 sur 48 (85 %)** meurent avec une réserve du clan > 0,1 **et** la porte fermée ; 7 avec une
+  réserve vide. Prédiction (≥ 60 %) : **tenue**.
+- Le fourrage de la tuile vaut **98 à 150** à chaque mort (seuil de la porte : 5) : la porte se ferme
+  sur la **biomasse** (le fourrage du gibier), qui reste haute l'hiver, alors que ce qu'un humain en
+  tire l'hiver est presque nul — on meurt « en train de manger » (Eating/Forage) sur une tuile riche.
+- Des réserves pleines au même moment : 1 990 à 3 735 points dans plusieurs cas.
+**Pourquoi** : la réserve n'est proposée qu'à un affamé dont le pays « ne répond plus », jugé sur la
+biomasse et sur l'absence de troupeau en vue — deux signes qui disent « il y a à manger ici » alors
+qu'en hiver ni la biomasse ni un troupeau aperçu ne nourrissent. Une bande immobile vit dans un pays
+épuisé (porte ouverte) ; une bande qui vient d'arriver ailleurs, non.
