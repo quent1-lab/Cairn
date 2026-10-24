@@ -224,7 +224,20 @@ fn main() {
                 })
                 .collect();
             parched.clear();
+            let herds_at: Vec<(f64, f64)> = if views.is_empty() {
+                Vec::new()
+            } else {
+                sim.fauna.query::<(&Herd, &Position)>().iter().map(|(_, (_, p))| (p.x, p.y)).collect()
+            };
+            let stock_of: BTreeMap<u64, f32> = sim.clans.iter().map(|c| (c.id.0, c.stock)).collect();
             for (id, pos, known, age, clan, act, extra) in views {
+                // Ce qui ouvre ou ferme l'accès à la réserve (`brain`, « puiser dans
+                // le stock ») : réserve du clan, troupeau à portée de vue (~2 km),
+                // fourrage de la tuile.
+                let herd_km = herds_at.iter().map(|h| tiles_to_km((h.0 - pos.0).hypot(h.1 - pos.1))).fold(f64::INFINITY, f64::min);
+                let stock = clan.and_then(|c| stock_of.get(&c)).copied().unwrap_or(f32::NAN);
+                let forage = sim.world.tile(pos.0 as i64, pos.1 as i64).biomass;
+                let extra = format!("{extra},{stock:.2},{herd_km:.2},{forage}");
                 let real = sim.world.nearest_spring((pos.0 as i64, pos.1 as i64), 16);
                 let km = |s: Option<(i64, i64)>| s.map_or(f64::NAN, |s| tiles_to_km((s.0 as f64 - pos.0).hypot(s.1 as f64 - pos.1)));
                 let (camp_km, since_days) = clan.and_then(|c| camp_of.get(&c)).map_or((f64::NAN, f64::NAN), |(h, last)| {
@@ -586,7 +599,7 @@ fn main() {
         started.elapsed().as_secs_f64() / 3600.0
     );
     let mut log = std::fs::File::create(format!("{out}.morts.csv")).expect("journal des morts lentes");
-    writeln!(log, "jour,age,km_source_connue,km_source_reelle,km_camp,jours_depuis_levee,en_marche,cause,activite,tache,soif,faim,froid,sante,h_depuis_gorgee,porteur").unwrap();
+    writeln!(log, "jour,age,km_source_connue,km_source_reelle,km_camp,jours_depuis_levee,en_marche,cause,activite,tache,soif,faim,froid,sante,h_depuis_gorgee,porteur,stock_clan,km_troupeau,fourrage_tuile").unwrap();
     for (r, extra) in &thirst_log {
         writeln!(log, "{:.2},{:.2},{:.2},{:.2},{:.2},{:.1},{},{extra}", r[0], r[1], r[2], r[3], r[4], r[5], r[6]).unwrap();
     }

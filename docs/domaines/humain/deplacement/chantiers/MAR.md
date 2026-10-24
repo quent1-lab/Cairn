@@ -1544,3 +1544,16 @@ manger l'hiver. Ce qui tue, c'est **la dynamique d'après une levée d'hiver** :
 cueillir ou chasser à 3-5 km d'un camp neuf, sans revenir manger ce que la bande a. Les famines
 réelles (Kivalliq, 1916-1926 ; Keewatin, 1950) suivent l'effondrement d'une ressource, pas une
 abondance moyenne : **problème de modèle**.
+
+## Pourquoi des adultes meurent de faim loin d'un camp neuf (2026-10-24)
+Lecture du code (`brain`, « puiser dans le stock du clan ») : la réserve n'est proposée que si
+`stock > 0,1` **et** (fourrage alentour < 5 **ou** part de la maille < 0,3) **et aucun troupeau en
+vue**. Porte tout ou rien sans impossibilité physique (règle 10) : un adulte affamé qui voit un
+troupeau, ou qui se tient dans un pays « riche » sur le papier (un camp neuf), **ne pense pas à la
+réserve**, chasse ou cueille sans succès jusqu'à la mort. Une bande immobile vit dans un pays
+épuisé : la porte s'ouvre ; une bande qui vient d'arriver dans un pays neuf : elle se ferme.
+Hypothèse, prédictions (journal des morts lentes enrichi : réserve du clan, troupeau le plus proche,
+fourrage de la tuile ; froid 4 × 5 ans, même dynamique que 53362a3) :
+1. ≥ 60 % des morts de faim avec une réserve > 0,1 **et** (un troupeau à moins de 2 km ou un
+   fourrage ≥ 5) — la porte fermée sur une réserve pleine.
+Réfuterait : réserve vide (≤ 0,1) dans la plupart des morts (alors la bande n'a rien à partager).
