@@ -143,7 +143,8 @@ fn main() {
     let mut cross_contagions = 0usize;
     let mut seen_births = 0usize;
     let mut infected_yesterday: BTreeSet<(u64, usize)> = BTreeSet::new();
-    let mut kcal_prev = [0.0f64; 2];
+    let mut kcal_prev: BTreeMap<u64, [f64; 2]> = BTreeMap::new();
+    let mut ref_point: (f64, f64) = (home.0 as f64 + 0.5, home.1 as f64 + 0.5);
     let reason = loop {
         let t0 = std::time::Instant::now();
         // La chasse, la marche et la nuit (CHA, MAR) : relevées heure par heure.
@@ -151,7 +152,7 @@ fn main() {
         let (mut adult_h, mut walk_h, mut dark_h, mut dark_sleep_h) = (0u64, 0u64, 0u64, 0u64);
         for _ in 0..TICKS_PER_DAY {
             sim.step();
-            let dark = sim.climate.light(home.1, sim.time) == 0.0;
+            let dark = sim.climate.light(ref_point.1 as i64, sim.time) == 0.0;
             for (_, (demo, behavior)) in sim.agents.query::<(&Demographics, &Behavior)>().iter() {
                 if !demo.is_adult(sim.time.tick) {
                     continue;
@@ -287,7 +288,7 @@ fn main() {
             .fauna
             .query::<(&Herd, &Position)>()
             .iter()
-            .filter(|(_, (h, p))| h.anchor.is_none() && (p.x - home.0 as f64).hypot(p.y - home.1 as f64) < km_to_tiles(10.0))
+            .filter(|(_, (h, p))| h.anchor.is_none() && (p.x - ref_point.0).hypot(p.y - ref_point.1) < km_to_tiles(10.0))
             .count();
         let side = km_to_tiles(ZONE_KM);
         let zones: BTreeSet<(i64, i64)> = sim
@@ -394,13 +395,20 @@ fn main() {
         infected_yesterday = infected_today;
         // La faim d'hiver (2026-10-23, colonnes alignées sur `exp/camp-memoire` ;
         // pas de levée du camp sur `main`).
-        let kcal_now: [f64; 2] = sim
+        let kcal_now: BTreeMap<u64, [f64; 2]> = sim
             .agents
-            .query::<&cairn_sim::yields::Yields>()
+            .query::<(&AgentId, &cairn_sim::yields::Yields)>()
             .iter()
-            .fold([0.0; 2], |a, (_, y)| [a[0] + y.kcal[0], a[1] + y.kcal[1]]);
-        let (gather_day, hunt_day) = ((kcal_now[0] - kcal_prev[0]).max(0.0), (kcal_now[1] - kcal_prev[1]).max(0.0));
+            .map(|(_, (id, y))| (id.0, [y.kcal[0], y.kcal[1]]))
+            .collect();
+        let (mut gather_day, mut hunt_day) = (0.0f64, 0.0f64);
+        for (id, k) in &kcal_now {
+            let before = kcal_prev.get(id).copied().unwrap_or([0.0; 2]);
+            gather_day += k[0] - before[0];
+            hunt_day += k[1] - before[1];
+        }
         kcal_prev = kcal_now;
+        ref_point = sim.clans.iter().max_by_key(|c| (c.members.len(), std::cmp::Reverse(c.id.0))).map_or(c, |cl| cl.home);
         let stock_total: f32 = sim.clans.iter().map(|c| c.stock).sum();
         let (hs, hn) = sim
             .agents
