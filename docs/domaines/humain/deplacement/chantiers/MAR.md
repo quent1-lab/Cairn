@@ -1580,3 +1580,23 @@ Prédictions, `longue` 10 ans × 8, contre MEM-3 par saison (aa51683 / 53362a3) 
 1. Froid : morts de faim ÷ ≥ 2 (62) ; population des ans 5-10 ≥ 70 % de `main` sur ≥ 3/4 (saison : 2/4).
 2. Tempéré : population à ±10 % de la saison.
 3. Réserve des clans plus basse en fin d'hiver (on y puise).
+
+### Porte de la réserve retirée — mesuré (`longue` 10 ans × 8, 50c84ba) contre MEM-3 par saison (aa51683)
+| run | pop 5-10 main ; saison ; réserve | faim saison → réserve | soif ; froid (réserve) | foyer max (km) |
+|---|---|---|---|---|
+| t42 | 62 ; 68 ; 65 | 0 → 0 | 1 ; 0 | 356 |
+| t7 | 49 ; 42 ; **59** | 9 → 0 | 3 ; 0 | 385 |
+| t1337 | 65 ; 62 ; 62 | 0 → 0 | 5 ; 0 | 163 |
+| t2024 | 57 ; 68 ; 65 | 0 → 10 | 8 ; 0 | **670** |
+| f42 | 75 ; 7 ; **29** | 27 → 40 | 3 ; 0 | 136 |
+| f7 | 23 ; 54 ; 56 | 15 → 4 | 5 ; 0 | 198 |
+| f1337 | 94 ; 36 ; **49** | 17 → 9 | 7 ; 7 | 35 |
+| f2024 | 94 ; 74 ; 76 | 3 → 16 | 7 ; 1 | 275 |
+1. Froid : faim ÷ 2 — **réfutée** (62 → 69 ; en baisse sur 2/4, en hausse sur 2/4) ; population
+   ≥ 70 % de `main` sur ≥ 3/4 — **réfutée** (2/4), mais en hausse sur 3/4 (f42 7 → 29, f1337 36 → 49).
+2. Tempéré à ±10 % : **réfutée par le haut** sur t7 (+40 %), les trois autres à ±5 %.
+Ce qui change le plus : **la soif et le froid** en pays froid (43 → 22 et 35 → 8 sur les 4 runs) —
+des corps qui mangent mieux boivent et se chauffent mieux. Morts lentes en froid : 140 → 99.
+**Voisin** : les foyers dérivent plus loin (tempéré : 163-670 km, contre 105-216) — mécanisme non lu.
+Lecture : la réserve tenait derrière la porte une grande part des morts lentes ; ce qui reste, en
+froid, est une faim qui ne baisse pas partout (f42, f2024 en hausse) — à relire au journal.
