@@ -182,7 +182,7 @@ pub fn decide(
     let here = agent.pos.tile();
     let spring = world.nearest_spring(here, SPRING_RADIUS_CHUNKS);
     if let Some(seen) = spring {
-        mem.remember_spring(seen, (agent.pos.x, agent.pos.y));
+        mem.remember_spring(seen, time.tick);
     }
     // Le gibier aussi s'apprend en le voyant : on retient le dernier troupeau
     // aperçu. Arrivé sur une piste sans rien y voir, on l'oublie.

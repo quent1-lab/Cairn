@@ -3835,7 +3835,7 @@ mod tests {
         let secret = (123_456, -654_321); // n'importe où : on teste le canal
         for (_, (id, mem)) in sim.agents.query_mut::<(&AgentId, &mut Memory)>() {
             if *id == ids[0] {
-                mem.remember_spring(secret, (0.0, 0.0));
+                mem.remember_spring(secret, sim.time.tick);
             }
         }
         crate::memory::exchange_knowledge(&mut sim);
