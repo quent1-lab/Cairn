@@ -74,3 +74,17 @@ par (moi, sous-agent `sourceur`) · lu en entier ou de seconde main.
   résistant. De seconde main.
 - **Non trouvé** : relation nombre d'usagers d'un point d'eau → risque ; durée du danger d'une
   mare naturelle après le départ des usagers ; données de chasseurs-cueilleurs.
+
+## Chasseurs-cueilleurs de climat froid (sous-agent `sourceur`, 2026-10-24 ; tout de seconde main)
+- Famines : Mackenzie (HBC), hiver 1888-89, 47 morts de faim ; « grande famine » du Kivalliq
+  1916-1926 : groupes réduits de 53 à 83 % (Harvaqtuurmiut 186 → 74, Ahiarmiut ~600 → ~100) ;
+  famine du caribou de 1950 (Keewatin) : ~60 morts, ~120 survivants. Rasmussen, Burch, Jenness ;
+  https://nunatsiaq.com/stories/article/the-starving-inuit-of-the-inland-kivalliq/ ·
+  https://www.historicalclimatology.com/projects/a-hungry-winter-colonialism-in-a-cold-climate
+- Inughuit (Thulé) : ~40 sites d'hiver nommés, 10-15 occupés à la fois, site d'hiver changé tous
+  les 2-3 ans ; maisons d'hiver du Labrador ~20 personnes. Caches de caribou congelé l'hiver
+  (Anthropozoologica 48(1)).
+- Densité : 0,0025 à 3,9 pers./km² sur 27 sociétés (Binford 2001) ; les hautes latitudes ont des
+  densités plus basses (Tallavaara et al. 2018, PNAS).
+- **Non trouvé** : part des morts dues à la faim ou au froid, fréquence des famines, survie à 15 ans
+  pour une population arctique (Gurven et Kaplan 2007 n'en contient aucune).

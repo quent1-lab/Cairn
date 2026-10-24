@@ -179,6 +179,7 @@ mod tests {
             chief: AgentId(0),
             desired: None,
             rivalry: 0.0,
+            camp: Default::default(),
         }
     }
 

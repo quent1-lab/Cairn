@@ -412,6 +412,7 @@ mod tests {
             chief,
             desired: None,
             rivalry: 0.0,
+            camp: Default::default(),
         };
         sim.clans.push(clan(1, raider, 0.0));
         sim.clans.push(clan(2, victim, 5.0));

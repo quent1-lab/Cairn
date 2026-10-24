@@ -810,6 +810,7 @@ mod tests {
             chief: a,
             desired: None,
             rivalry: 0.0,
+            camp: Default::default(),
         });
         sim.clan_pressure.insert(ClanId(1), ClanPressure { cold, ..Default::default() });
         (sim, a, fire)

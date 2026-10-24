@@ -32,6 +32,14 @@ pub const EVIDENCE_HOURS: f32 = 48.0;
 /// Pas d'observation à chaque échange (toutes les 4 h) : ce qu'on voit faire
 /// rejoint l'expérience des proches en une journée environ.
 pub const SEEN_STEP: f32 = 1.0 / 6.0;
+/// Demi-vie de ce que rapporte le camp où l'on vit (jours) : le rendement du
+/// moment, que la bande compare à son habitude pour lever le camp
+/// (`crate::camp`). Ordre de grandeur des séjours batek (8,2 j par camp, 3 à
+/// 24 ; Venkataraman et al. 2017). Choix ; sa sensibilité se mesure au banc.
+pub const RECENT_HALF_LIFE_DAYS: f64 = 4.0;
+/// Heures par adulte sous lesquelles on ne juge pas encore un camp : une
+/// journée de travail.
+pub const RECENT_EVIDENCE_HOURS: f32 = 24.0;
 
 /// Les activités de subsistance dont on compte le rendement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -67,6 +75,16 @@ pub struct Yields {
     /// Ce qu'on a vu faire : l'expérience récente moyenne des proches.
     seen_h: [f32; PURSUITS],
     seen_net: [f32; PURSUITS],
+    /// Heures et kcal nettes du jour, toutes activités : relevées à minuit
+    /// par le camp (`take_day`).
+    day_h: f32,
+    day_net: f32,
+    /// La part de `day_net` venue de chaque activité.
+    day_net_by: [f32; PURSUITS],
+    /// Jours vécus, effacés comme l'expérience (demi-vie d'un mois) : le
+    /// dénominateur de l'habitude **par jour**, trajets et jours sans
+    /// subsistance compris.
+    own_days: f32,
 }
 
 impl Yields {
@@ -77,12 +95,52 @@ impl Yields {
         self.cost[p as usize] += extra_kcal;
         self.own_h[p as usize] += 1.0;
         self.own_net[p as usize] -= extra_kcal as f32;
+        self.day_h += 1.0;
+        self.day_net -= extra_kcal as f32;
+        self.day_net_by[p as usize] -= extra_kcal as f32;
     }
 
     /// Des kcal acquises par cette activité.
     pub fn gain(&mut self, p: Pursuit, kcal: f64) {
         self.kcal[p as usize] += kcal.max(0.0);
         self.own_net[p as usize] += kcal.max(0.0) as f32;
+        self.day_net += kcal.max(0.0) as f32;
+        self.day_net_by[p as usize] += kcal.max(0.0) as f32;
+    }
+
+    /// Les heures et kcal nettes du jour écoulé, remises à zéro.
+    pub fn take_day(&mut self) -> (f32, f32) {
+        let day = (self.day_h, self.day_net);
+        (self.day_h, self.day_net) = (0.0, 0.0);
+        self.day_net_by = [0.0; PURSUITS];
+        self.own_days += 1.0;
+        day
+    }
+
+    /// La part de chaque activité dans les kcal nettes du jour en cours (à lire
+    /// avant `take_day`).
+    pub fn day_net_by(&self) -> [f32; PURSUITS] {
+        self.day_net_by
+    }
+
+    /// La part de chaque activité dans l'habitude (kcal nettes du mois).
+    pub fn habit_net_by(&self) -> [f32; PURSUITS] {
+        self.own_net
+    }
+
+    /// L'habitude par jour vécu : jours du mois et kcal nettes de sa propre
+    /// subsistance, toutes activités — ce que rapporte une journée, jours de
+    /// marche d'un camp à l'autre compris.
+    pub fn habit_per_day(&self) -> (f32, f32) {
+        (self.own_days, self.own_net.iter().sum())
+    }
+
+    /// L'habitude : heures et kcal nettes du mois, la sienne et celle des
+    /// proches, toutes activités confondues.
+    pub fn habit(&self) -> (f32, f32) {
+        let h = self.own_h.iter().chain(&self.seen_h).sum();
+        let n = self.own_net.iter().chain(&self.seen_net).sum();
+        (h, n)
     }
 
     /// Une heure passe : l'expérience et le souvenir de ce qu'on a vu
@@ -93,6 +151,9 @@ impl Yields {
             self.own_h[p] *= keep;
             self.own_net[p] *= keep;
             self.seen_h[p] *= keep;
+            if p == 0 {
+                self.own_days *= keep;
+            }
             self.seen_net[p] *= keep;
         }
     }

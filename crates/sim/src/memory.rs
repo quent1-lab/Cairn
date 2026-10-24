@@ -97,10 +97,105 @@ pub struct Place {
     pub pursuit_hours: [f32; crate::yields::PURSUITS],
     /// Kcal acquises sur le lieu, par activité.
     pub kcal: [f32; crate::yields::PURSUITS],
+    /// MEM-3 : la même chose, récente — kcal acquises et heures de
+    /// subsistance qui s'effacent (demi-vie `crate::yields::RECENT_HALF_LIFE_DAYS`,
+    /// celle du registre du camp : ce que le lieu rend en ce moment), à la
+    /// date de `last`.
+    pub recent_kcal: f32,
+    pub recent_h: f32,
+    /// Ce qu'on y a vu pousser : le fourrage de la tuile où l'on se tenait,
+    /// en moyenne sur les heures de jour passées là (lu en passant, à la
+    /// chasse comme en explorant : voir, c'est connaître ; la nuit, on ne voit
+    /// pas les plantes), et ces heures.
+    pub seen_forage: f32,
+    pub seen_h: u32,
+    /// MEM-3 par saison (décision de l'utilisateur, 2026-10-23) : la même
+    /// chose par quart d'année vécu (`quarter_of`) — kcal acquises, heures de
+    /// subsistance, fourrage vu (somme et heures de jour). Un lieu riche en
+    /// plantes l'été ne dit rien de ce qu'il rend l'hiver.
+    pub q_kcal: [f32; 4],
+    pub q_h: [f32; 4],
+    pub q_seen_sum: [f32; 4],
+    pub q_seen_h: [f32; 4],
     /// Heures à y boire.
     pub drinks: u16,
     /// Nuits à y dormir.
     pub nights: u16,
+}
+
+/// Un lieu quitté repousse (MEM-3, plan validé par l'utilisateur) : ce qu'on
+/// attend d'un lieu revient de son rendement récent vers son rendement de long
+/// terme avec cette demi-vie — celle de la repousse du modèle (une prairie
+/// rasée remonte à mi-hauteur en ~2 mois, `ecology::GROWTH_RATE_PER_DAY`).
+pub const REGROW_HALF_LIFE_DAYS: f64 = 60.0;
+
+impl Place {
+    /// Heures de subsistance vécues sur le lieu.
+    pub fn work_hours(&self) -> f32 {
+        self.pursuit_hours.iter().sum()
+    }
+
+    /// Le rendement de long terme du lieu (kcal par heure de subsistance).
+    pub fn long_term(&self) -> f64 {
+        let h = f64::from(self.work_hours());
+        if h <= 0.0 { 0.0 } else { f64::from(self.kcal.iter().sum::<f32>()) / h }
+    }
+
+    /// Ce qu'on attend du lieu au tick `tick`, en kcal acquises par heure de
+    /// subsistance : le rendement récent juste après l'avoir quitté, le
+    /// rendement de long terme une fois qu'il a repoussé.
+    pub fn expected(&self, tick: u64) -> f64 {
+        let h = f64::from(self.work_hours());
+        if h <= 0.0 {
+            return 0.0;
+        }
+        let long = f64::from(self.kcal.iter().sum::<f32>()) / h;
+        if self.recent_h <= 0.0 {
+            return long;
+        }
+        let recent = f64::from(self.recent_kcal / self.recent_h);
+        let days = tick.saturating_sub(self.last) as f64 / cairn_core::TICKS_PER_DAY as f64;
+        long + (recent - long) * 0.5f64.powf(days / REGROW_HALF_LIFE_DAYS)
+    }
+}
+
+/// Le quart d'année d'un tick (0 à 3) : le moment de l'année qu'un humain
+/// reconnaît par ce qu'il vit (la durée du jour, le froid), pas l'étiquette
+/// de saison du climat, que la simulation ne lit pas.
+pub fn quarter_of(tick: u64) -> usize {
+    ((tick / cairn_core::TICKS_PER_DAY) % cairn_core::DAYS_PER_YEAR * 4 / cairn_core::DAYS_PER_YEAR) as usize
+}
+
+impl Place {
+    /// Ce que le lieu rend à ce moment de l'année (kcal par heure de
+    /// subsistance), s'il y a été travaillé : le rendement récent juste après
+    /// l'avoir quitté, celui de la saison une fois qu'il a repoussé. `None` :
+    /// on ne l'a pas travaillé à ce moment de l'année.
+    pub fn expected_in_season(&self, tick: u64) -> Option<f64> {
+        let q = quarter_of(tick);
+        if self.q_h[q] <= 0.0 {
+            return None;
+        }
+        let long = f64::from(self.q_kcal[q] / self.q_h[q]);
+        if self.recent_h <= 0.0 {
+            return Some(long);
+        }
+        let recent = f64::from(self.recent_kcal / self.recent_h);
+        let days = tick.saturating_sub(self.last) as f64 / cairn_core::TICKS_PER_DAY as f64;
+        Some(long + (recent - long) * 0.5f64.powf(days / REGROW_HALF_LIFE_DAYS))
+    }
+
+    /// Le rendement de la saison seul, et ses heures.
+    pub fn season_long(&self, tick: u64) -> Option<(f64, f64)> {
+        let q = quarter_of(tick);
+        (self.q_h[q] > 0.0).then(|| (f64::from(self.q_kcal[q] / self.q_h[q]), f64::from(self.q_h[q])))
+    }
+
+    /// Le fourrage vu à ce moment de l'année : (moyenne, heures de jour).
+    pub fn season_seen(&self, tick: u64) -> Option<(f64, f64)> {
+        let q = quarter_of(tick);
+        (self.q_seen_h[q] > 0.0).then(|| (f64::from(self.q_seen_sum[q] / self.q_seen_h[q]), f64::from(self.q_seen_h[q])))
+    }
 }
 
 /// Le lieu (maille de 2 km) d'une position.
@@ -201,6 +296,7 @@ impl Memory {
         tick: u64,
         pursuit: Option<crate::yields::Pursuit>,
         kcal: [f64; crate::yields::PURSUITS],
+        forage: Option<u8>,
         drank: bool,
         slept: bool,
     ) {
@@ -211,9 +307,28 @@ impl Memory {
                 self.places.remove(&k);
             }
         }
-        let place = self.places.entry(key).or_insert(Place { first: tick, ..Place::default() });
+        let place = self.places.entry(key).or_insert(Place { first: tick, last: tick, ..Place::default() });
+        let hours_since = tick.saturating_sub(place.last) as f64;
+        let keep = 0.5f64.powf(hours_since / (crate::yields::RECENT_HALF_LIFE_DAYS * 24.0)) as f32;
+        place.recent_kcal *= keep;
+        place.recent_h *= keep;
+        if pursuit.is_some() {
+            place.recent_h += 1.0;
+        }
+        place.recent_kcal += kcal.iter().sum::<f64>() as f32;
         place.last = tick;
         place.hours = place.hours.saturating_add(1);
+        let q = quarter_of(tick);
+        if let Some(f) = forage {
+            place.seen_h += 1;
+            place.seen_forage += (f32::from(f) - place.seen_forage) / place.seen_h as f32;
+            place.q_seen_sum[q] += f32::from(f);
+            place.q_seen_h[q] += 1.0;
+        }
+        if pursuit.is_some() {
+            place.q_h[q] += 1.0;
+        }
+        place.q_kcal[q] += kcal.iter().sum::<f64>() as f32;
         if let Some(p) = pursuit {
             place.pursuit_hours[p as usize] += 1.0;
         }
@@ -365,10 +480,10 @@ mod tests {
         let camp = (10.0, 10.0);
         let bush = (10.0 + PLACE_TILES * 3.0, 10.0);
         for h in 0..10 {
-            mem.live_hour(bush, h, Some(Pursuit::Gather), [500.0, 0.0], false, false);
+            mem.live_hour(bush, h, Some(Pursuit::Gather), [500.0, 0.0], Some(100), false, false);
         }
-        mem.live_hour(camp, 10, None, [0.0; 2], true, false);
-        mem.live_hour(camp, 11, None, [0.0; 2], false, true);
+        mem.live_hour(camp, 10, None, [0.0; 2], Some(50), true, false);
+        mem.live_hour(camp, 11, None, [0.0; 2], Some(50), false, true);
         assert_eq!(mem.places.len(), 2, "deux lieux de 2 km distincts");
         let b = mem.places[&place_of(bush)];
         assert_eq!((b.first, b.last, b.hours), (0, 9, 10));
@@ -376,5 +491,61 @@ mod tests {
         assert_eq!(b.kcal[Pursuit::Gather as usize], 5000.0, "la cueillette du lieu");
         let c = mem.places[&place_of(camp)];
         assert_eq!((c.drinks, c.nights, c.kcal), (1, 1, [0.0; 2]));
+    }
+
+    #[test]
+    fn un_lieu_epuise_vaut_peu_puis_repousse() {
+        use crate::yields::Pursuit;
+        use cairn_core::TICKS_PER_DAY;
+        let mut mem = Memory::default();
+        let spot = (10.0, 10.0);
+        // Deux mois riches (1 000 kcal/h), puis un mois épuisé (100 kcal/h).
+        let mut t = 0;
+        for (days, kcal) in [(60, 1000.0), (30, 100.0)] {
+            for _ in 0..days {
+                for _ in 0..6 {
+                    mem.live_hour(spot, t, Some(Pursuit::Gather), [kcal, 0.0], Some(100), false, false);
+                    t += 1;
+                }
+                t += TICKS_PER_DAY - 6;
+            }
+        }
+        let p = mem.places[&place_of(spot)];
+        let now = p.expected(t);
+        assert!(now < 400.0, "juste quitté, il est épuisé : {now:.0} kcal/h");
+        let later = p.expected(t + 240 * TICKS_PER_DAY);
+        let long = f64::from(p.kcal[0] / p.pursuit_hours[0]);
+        assert!((later - long).abs() < 0.1 * long, "huit mois après, il a repoussé : {later:.0} contre {long:.0}");
+    }
+
+    /// Un lieu riche l'été et pauvre l'hiver ne vaut pas, l'hiver, un lieu
+    /// pauvre l'été et riche l'hiver — ce que la mémoire de toute l'année
+    /// (`expected`) disait à l'inverse.
+    #[test]
+    fn un_lieu_se_juge_sur_ce_qu_il_rend_a_ce_moment_de_l_annee() {
+        use crate::yields::Pursuit;
+        use cairn_core::TICKS_PER_DAY;
+        let (a, b) = ((10.0, 10.0), (10.0 + PLACE_TILES * 3.0, 10.0));
+        let mut mem = Memory::default();
+        let day = |d: u64| d * TICKS_PER_DAY;
+        // L'été (jours 180-209) puis l'hiver (jours 0-29 de l'année suivante).
+        for d in 180..210 {
+            for h in 0..6 {
+                mem.live_hour(a, day(d) + h, Some(Pursuit::Gather), [1000.0, 0.0], Some(150), false, false);
+                mem.live_hour(b, day(d) + 8 + h, Some(Pursuit::Gather), [200.0, 0.0], Some(60), false, false);
+            }
+        }
+        for d in 360..390 {
+            for h in 0..6 {
+                mem.live_hour(a, day(d) + h, Some(Pursuit::Gather), [50.0, 0.0], Some(10), false, false);
+                mem.live_hour(b, day(d) + 8 + h, Some(Pursuit::Gather), [400.0, 0.0], Some(80), false, false);
+            }
+        }
+        let winter = day(360 + 365 + 10); // l'hiver d'après, un an plus tard
+        let (pa, pb) = (mem.places[&place_of(a)], mem.places[&place_of(b)]);
+        assert!(pa.expected(winter) > pb.expected(winter), "toute l'année, A paraît meilleur");
+        let (va, vb) = (pa.expected_in_season(winter).unwrap(), pb.expected_in_season(winter).unwrap());
+        assert!(vb > 3.0 * va, "l'hiver, B rend bien plus que A : {vb:.0} contre {va:.0}");
+        assert!(pa.expected_in_season(day(360 + 90 + 10)).is_none(), "au printemps, on n'y a jamais travaillé");
     }
 }

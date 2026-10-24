@@ -1041,9 +1041,589 @@ régulateur sans faire bouger le camp.
 le froid mordent, régulerait autrement ; le régime des enfants (5-14 ans) n'a pas été lu ici ;
 la faune stable n'a pas été confrontée à la chasse (prises par jour non lues).
 
-## L'instrument de cause de mort corrigé (2026-10-23, reporté de `exp/camp-memoire`)
-Une mort lente revient à la cause qui a le plus usé la santé sur la dernière semaine
-(`Physiology::worn`, `cause_of_death`), plus à la morsure de la dernière heure. Trouvé en lisant les
-morts « de soif » des bandes mobiles en froid : des corps affamés et transis depuis des jours,
-achevés par quelques heures de soif. **Les causes de mort mesurées avant ce commit mêlent la faim
-et le froid à la soif.** Le détail est sur la branche `exp/camp-memoire` (MAR.md, fin).
+## MAR-6b + MEM-3 — le camp se lève vers les lieux dont la bande se souvient (branche `exp/camp-memoire`, 2026-10-20)
+Ordre revu le 2026-10-20 (run à deux foyers : le camp immobile fait stagner le monde) ; MEM-4a
+sans effet tant que le camp ne bouge pas. Reprise de MAR-6b (a'') sur `main` (règle de départ :
+le camp, jugé par jour d'adulte qu'on y passe, rend moins que l'habitude — Charnov ; Batek
+8,2 j par camp), avec **un changement** : la destination ne lit plus le stock réel des plantes
+ni le nombre réel de bouches par maille (omniscience, MEM.md), mais **la carte vécue des
+membres** (`Memory::places`, MEM-1) — kcal acquises par heure de subsistance sur le lieu de
+2 km de chaque source connue hors du pays battu ; un lieu sans 48 h vécues vaut la moyenne des
+lieux connus (ni préféré ni écarté) ; sans rien de vécu, on ne part pas. Gibier vu et trajet
+pesés comme avant. Test `le_camp_part_vers_le_lieu_dont_on_se_souvient_qu_il_rendait` (rouge :
+l'ancienne destination lisait le monde) ; `une_bande_leve_le_camp_quand_le_pays_s_epuise` donne
+désormais à la bande un mois vécu au camp.
+Non encore : la repousse d'un lieu quitté (un lieu épuisé reste jugé épuisé), la saison, le
+danger ; MEM-4a (sources) n'est pas dans la branche.
+Rappel (a'') : foyers à 250-1 260 km en 10 ans, populations effondrées, faute de mémoire.
+Prédictions, `longue` 10 ans, 4 seeds × 2 scènes, départ j135, contre `main` (même binaire de banc) :
+1. Distance du foyer médian au départ à l'an 10 : médiane des runs ≤ 30 km, et aucune run
+   au-delà de 200 km (a'' : 250-1 260). Réfuterait : une run > 200 km.
+2. Levées du camp (jours où le foyer d'un clan bouge de plus de 1 km) : 5 à 40 par clan et par
+   an (Hadza ~12, Batek ~40).
+3. Population à l'an 10 ≥ 70 % de `main` sur ≥ 6/8 runs.
+4. Exposition au feu ou au cuivre : non prédite (à lire).
+
+### Débat (2026-10-20, pré-mortem, contradicteur Opus)
+1. *La mémoire départagerait peu : 92 % du temps dans ~10 mailles autour d'un camp jamais levé,
+   presque toutes exclues ; au-delà, peu de lieux à 48 h vécues : tout vaut la moyenne, le gibier
+   et le trajet décident, comme (a'').* — **Retenu.** Action : relever, à chaque levée, la part de
+   candidats et la destination lus dans la mémoire (banc `marche` 90 j d'abord). Seuil : moins de
+   30 % des destinations lues dans la mémoire → MEM-3 n'est pas testé.
+2. *`(1 + game)` compte un troupeau par témoin : dix adultes, facteur 11, qui écrase la mémoire.* —
+   **Retenu, bug** (un troupeau reste un troupeau) : compté une fois par maille de 2 km, correctif
+   à part avec test rouge. Action : relever les trois facteurs du lieu retenu.
+3. *La prédiction 2 (5-40 levées/an) juge la règle de départ de (a''), pas MEM-3.* — **Retenu** :
+   elle sort du verdict de MEM-3, elle reste un relevé.
+4. *Mémoire de vie entière : le camp qu'on vient d'épuiser garde sa bonne moyenne → navette ; la
+   prédiction 1 ne la verrait pas.* — **Retenu.** Le plan validé de MEM-3 disait « un lieu quitté
+   repousse » : la valeur d'un lieu suit son rendement **récent** (demi-vie 30 j, celle des
+   rendements appris), et revient vers son rendement de long terme à mesure que le temps passe
+   depuis le dernier passage (demi-vie 60 j : la repousse du modèle, une prairie rasée à mi-hauteur
+   en ~2 mois, `ecology::GROWTH_RATE_PER_DAY`). Mesures : distance maximale, chemin par an, part des
+   levées vers un ancien camp, durée des séjours.
+5. *Population jugée sur un instant contre un témoin pathologique.* — **Retenu** : effectif moyen
+   des ans 5-10 et causes de mort, contre `main` et (a'').
+6. *Le froid n'est pas prédit : sans huttes rebâties, la bande qui part perd sa chaleur au premier
+   hiver.* — **Retenu** : prédiction ajoutée (morts de froid en scène froide en hausse).
+7. *Une prise de 60 000 kcal tombe sur la maille de l'abattage.* — **Retenu** comme lecture :
+   rendements de chasse et de cueillette des lieux retenus lus à part.
+8. *Commentaire de tête de `camp.rs` périmé.* — **Retenu**, corrigé.
+
+### Prédictions révisées après le pré-mortem (avant tout banc)
+Correctifs faits : gibier compté par troupeau (d957678) ; valeur d'un lieu = rendement récent
+(demi-vie 4 j, celle du registre du camp) qui revient vers le long terme avec la repousse
+(demi-vie 60 j) (test `un_lieu_epuise_vaut_peu_puis_repousse`). Instrument : `Sim::camp_moves`
+(chaque levée : candidats, lus dans la mémoire, facteurs), lu par `marche` et `longue`.
+**Étape 1, banc `marche` 90 j × 8 runs** (exp/camp-memoire contre `main`) :
+- Seuil : si moins de 30 % des destinations sont jugées sur la mémoire, MEM-3 n'est pas
+  testé — on n'engage pas la run longue, on regarde pourquoi.
+- Prédiction : 30-80 % des destinations jugées sur la mémoire ; gibier présent au lieu
+  retenu ≤ 60 % ; retours vers un ancien camp ≥ 10 % des levées.
+- Relevé (hors verdict de MEM-3, il juge la règle de départ) : levées par clan.
+**Étape 2, `longue` 10 ans × 8** (si l'étape 1 passe) :
+1. Distance du foyer au départ : maximum sur 10 ans ≤ 200 km sur 8/8 ; médiane à l'an 10 ≤ 30 km.
+2. Population moyenne des ans 5-10 ≥ 70 % de `main` sur ≥ 6/8.
+3. Scène froide : morts de froid en hausse contre `main` (les huttes restent derrière) — lu à part.
+
+### Étape 1 — mesurée (banc `marche` 90 j × 8 runs, 6b721d6) contre `main` (1e960f8)
+- **101 levées** ; destination jugée sur la mémoire **41 %** (seuil 30 % : passé ; prédit 30-80 % :
+  tenu) ; candidats connus 47 % (5,6 sur 11,9) ; vers un ancien camp **11 %** (≥ 10 % : tenu).
+- **Gibier vu au lieu retenu : 91 %** (prédit ≤ 60 % : **réfuté**). Facteurs moyens du lieu
+  retenu : mémoire 1 535 kcal/h contre 899 par défaut (×1,7) ; gibier **×3,9** ; trajet ×0,94 ;
+  distance médiane 5,9 km (p90 9). Même compté par troupeau, le gibier décide.
+- Par run (chemin du foyer, km/an ; déplacement net en 90 j ; levées) : t42 156 ; 6,9 ; 6 ·
+  t7 581 ; 42 ; 22 · t1337 159 ; 6,8 ; 7 · t2024 657 ; 80 ; 23 · f42 70 ; 5,3 ; 4 · f7 512 ; 45 ;
+  20 · f1337 188 ; 14 ; 8 · f2024 219 ; 6,1 ; 11. Réel : ~160-175 km/an de déplacements
+  résidentiels. **5 runs dans l'ordre réel, 3 qui dérivent** (42-80 km nets en 90 j).
+- Marche totale 7,6 → 7,1 h/j ; **vers l'eau 1,39 → 0,98 h/j (−30 %)** : le camp se pose à une
+  source.
+Lecture : la mémoire est lue (41 %), mais le facteur multiplicatif du gibier (1 + mailles où l'on
+a vu du gibier, jusqu'à ×4) l'écrase ; les runs qui dérivent sont celles qui suivent des
+troupeaux. Le gibier compte déjà dans la mémoire (les kcal de chasse d'un lieu) : le facteur le
+compte deux fois, et l'information « gibier vu ces trois derniers jours » pèse plus que tout ce
+qu'on sait du pays. Question à l'utilisateur avant l'étape 2.
+
+### Choix 1 de l'utilisateur (2026-10-20) : le gibier vu ne pèse plus sur la destination
+Le score d'une source candidate devient mémoire × trajet ; la chasse y entre par les kcal
+tirées du lieu. Test `le_gibier_vu_ne_l_emporte_pas_sur_ce_dont_on_se_souvient`, vu rouge
+(1 000 contre 600 kcal/h, un troupeau près du second : l'ancien score choisissait le second).
+Prédictions, banc `marche` 90 j × 8 runs, contre l'étape 1 :
+1. Aucune run au-delà de 30 km de déplacement net du foyer en 90 j (étape 1 : 42, 45, 80).
+2. Chemin du foyer de 70 à 300 km/an sur ≥ 6/8 runs (réel ~160-175).
+3. Destinations jugées sur la mémoire ≥ 41 % ; retours vers un ancien camp ≥ 11 %.
+Réfuterait 1 : une run au-delà de 40 km.
+
+### Choix 1 — mesuré (banc `marche` 90 j × 8 runs, ee90893)
+| run | chemin km/an | net 90 j (km) | levées |
+|---|---|---|---|
+| t42 | 149 | 8,4 | 7 |
+| t7 | 300 | 23,6 | 12 |
+| t1337 | 72 | 5,7 | 3 |
+| t2024 | 591 | **33,0** | 25 |
+| f42 | 78 | 0,0 | 4 |
+| f7 | 678 | 2,0 | 38 |
+| f1337 | 113 | 10,7 | 5 |
+| f2024 | 108 | 0,0 | 8 |
+102 levées ; destination sur la mémoire **46 %** ; vers un ancien camp **19 %** ; gibier présent
+au lieu retenu 79 % (il est là où l'on a chassé) ; distance médiane 5,2 km ; eau 1,0 h/j.
+1. Aucune run > 30 km nets : **manquée de peu** (t2024 : 33 ; seuil de réfutation 40 non atteint ;
+   étape 1 : 42, 45, 80). 2. 70-300 km/an sur ≥ 6/8 : **tenue (6/8)** ; f7 fait la navette (38
+   levées, 2 km nets), t2024 parcourt. 3. Mémoire ≥ 41 %, retours ≥ 11 % : **tenue** (46 ; 19).
+Étape 1 passée → étape 2 (`longue` 10 ans × 8, contre `main`).
+
+### Étape 2 — mesurée (`longue` 10 ans × 8, camp-memoire ee90893 contre `main` 38dca99, départ j135)
+| run | pop moy. ans 5-10 main → camp | foyer au départ, max (km) | levées (mém. ; retours) | soif ; faim ; froid main → camp | feu vu ; techs main → camp |
+|---|---|---|---|---|---|
+| t42 | 62 → 62 | 324 | 613 (375 ; 217) | 4→4 ; 0→0 ; 0→0 | 0→0 ; 0→0 |
+| t7 | 49 → 31 | 460 | 902 (622 ; 438) | 9→14 ; 1→6 ; 0→0 | 42→26 ; 1→1 |
+| t1337 | 65 → 50 | 173 | 608 (462 ; 268) | 4→20 ; 0→7 ; 0→0 | 0→1 ; 0→1 |
+| t2024 | 57 → 46 | 550 | 906 (442 ; 244) | 19→11 ; 3→4 ; 0→0 | 5→37 ; 1→3 |
+| f42 | 75 → 26 | 147 | 615 (470 ; 351) | 4→26 ; 0→17 ; 6→12 | 0→6 ; 3→6 |
+| f7 | 23 → 43 | 457 | 973 (538 ; 356) | 7→21 ; 6→7 ; 3→0 | 0→28 ; 1→6 |
+| f1337 | 94 → 27 | 24 | 467 (446 ; 406) | 3→25 ; 0→15 ; 2→16 | 0→0 ; 1→1 |
+| f2024 | 94 → 49 | 193 | 861 (730 ; 527) | 4→21 ; 0→7 ; 0→5 | 0→36 ; 1→3 |
+1. Foyer ≤ 200 km sur 8/8 : **réfutée** (4/8 ; 324-550 km pour les quatre autres).
+2. Population ≥ 70 % de `main` sur ≥ 6/8 : **réfutée** (4/8 ; f42, f1337 à 29-35 %).
+3. Froid en hausse en scène froide : **tenue sur 3/4** (f7 en baisse).
+Ce que la mobilité apporte : **le monde s'ouvre** — feu vu sur 6/8 runs (2/8 sur `main`), plus
+de techniques sur 5/8 (jusqu'à 6 contre 1). Ce qu'elle coûte : **la soif ×2 à ×8 et la faim**
+sur 6/8, le froid en scène froide.
+Lecture : 47 à 97 levées par an (Batek ~44, Hadza ~12) ; 35-87 % reviennent à un ancien camp,
+mais les autres avancent : la bande dérive pas à pas. Deux mécanismes possibles, non
+départagés : (a) la **règle de départ** (de a'') lève trop souvent, et chaque levée sort du pays
+battu (au-delà du rayon de résidence) ; (b) **l'inconnu vaut la moyenne** des lieux connus :
+juste après avoir épuisé son pays, tout lieu inconnu bat les lieux connus récemment exploités,
+et la bande s'enfonce dans l'inconnu. La soif : à lire (arrivée à une source qu'un membre
+connaît par ouï-dire, enfants qui suivent mal ?).
+
+## Où le concept a été manqué (2026-10-20, relevé par l'utilisateur)
+Décision : « si un humain a déjà vu un endroit lors de la chasse ou de l'exploration, on peut
+comparer cet emplacement avec d'autres connus. On ne peut pas comparer un endroit que l'on ne
+connaît pas. Cette analyse aurait dû être faite avant les runs. »
+L'erreur, en trois couches :
+1. **Une valeur donnée à l'inconnu** (« la moyenne des lieux connus ») : l'omniscience que MEM-3
+   devait retirer, revenue sous la forme d'une ignorance traitée comme un savoir moyen.
+2. **Des candidates connues par ouï-dire** : toute source qu'un membre connaît, y compris
+   apprise d'autrui dans un pays où personne n'est allé.
+3. **Un seuil de 48 h de subsistance** qui rangeait parmi les inconnus les lieux vus en chassant
+   ou en explorant.
+Signes ignorés : le pré-mortem (point 1 : « presque toutes les candidates reçoivent la valeur
+par défaut ») et l'étape 1 (54 % des destinations sans mémoire) — mesurés au lieu d'être
+corrigés. Leçon (ajoutée à la méthode du chantier) : quand une valeur par défaut tient lieu de
+savoir, demander d'abord si l'agent **peut** savoir ; un pré-mortem qui touche le concept se
+corrige avant de mesurer.
+
+## MEM-3 corrigé — on ne compare que ce qu'on a vu (2026-10-20)
+- Candidates : les sources hors du pays battu **dont le lieu de 2 km a été parcouru de jour par
+  un membre** ; les autres n'ont pas de valeur et ne sont pas candidates.
+- Un lieu travaillé vaut ce qu'il a rendu (récent, puis repoussé) ; un lieu **seulement vu** vaut
+  le fourrage qu'on y a vu (`Place::seen_forage`, lu de jour sur la tuile où l'on se tient) ×
+  ce que rapporte, sur les lieux à la fois vus et travaillés par la bande, une unité de fourrage
+  vu (kcal/h) — la comparaison s'apprend.
+- Sans lieu comparable hors du pays, la bande reste.
+Tests : `on_ne_part_pas_vers_un_pays_ou_personne_n_est_alle` (rouge : l'ancienne règle partait
+vers l'inconnu valu à la moyenne), `un_lieu_vu_se_compare_par_ce_qu_on_y_a_vu_pousser` (rouge :
+l'ancienne lui donnait la moyenne) ; `une_bande_leve_le_camp_quand_le_pays_s_epuise` passe
+désormais de jour au pays de la source.
+Prédictions, banc `marche` 90 j × 8 runs, contre le choix 1 (ee90893) :
+1. Déplacement net du foyer ≤ 20 km sur 8/8 runs en 90 j (choix 1 : jusqu'à 33).
+2. Retours vers un ancien camp ≥ 30 % des levées (choix 1 : 19 %).
+3. Levées : moins nombreuses qu'au choix 1 (102) — moins de candidates.
+Réfuterait 1 : une run au-delà de 30 km.
+Puis `longue` 10 ans × 8 si 1 tient : foyer ≤ 200 km sur 8/8 ; population ≥ 70 % de `main` sur ≥ 6/8.
+
+### MEM-3 corrigé — mesuré (banc `marche` 90 j × 8 runs, 72cae9f) contre le choix 1 (ee90893)
+| run | chemin km/an | net 90 j (km) | levées |
+|---|---|---|---|
+| t42 | 57 | 4,6 | 3 |
+| t7 | 435 | 19,6 | 18 |
+| t1337 | 132 | 4,8 | 6 |
+| t2024 | 692 | **56,5** | 34 |
+| f42 | 95 | 6,0 | 7 |
+| f7 | 805 | 8,0 | 37 |
+| f1337 | 209 | 6,4 | 9 |
+| f2024 | 102 | 4,8 | 7 |
+121 levées ; candidats connus **99 %** (10,0 sur 10,2) ; destination travaillée 96 % ; vers un
+ancien camp **32 %** ; distance médiane 5,4 km.
+1. Net ≤ 20 km sur 8/8 : **réfutée** (t2024 : 56,5). 2. Retours ≥ 30 % : **tenue** (32 %).
+3. Moins de levées : **réfutée** (121 contre 102).
+Lecture : le concept est corrigé, mais **ce n'était pas le moteur de la dérive** : presque toutes
+les sources que connaît la bande sont dans des lieux qu'un membre a vus (99 %) ; l'inconnu ne
+pesait que sur une minorité de choix. Ce qui reste : **la fréquence des levées** — 3 à 37 en
+90 j selon la run (Hadza ~3, Batek ~11) — chacune d'au moins le rayon de résidence (~5 km).
+Les runs qui dérivent (t2024, t7) et celle qui fait la navette (f7) sont celles qui lèvent le
+camp le plus souvent. La cause est en amont, dans la **règle de départ** (a'') : un camp jugé
+sur quelques jours, contre une habitude d'un mois où entrent les grosses prises (60 000 kcal) —
+le défaut déjà relevé en octobre (« prises bosselées contre habitude lissée »).
+Run longue non engagée (prédiction 1 réfutée).
+
+## Ce qui déclenche une levée, et le camp jugé sur la cueillette (choix 1 de l'utilisateur, 2026-10-20)
+Instrument (observation, sans effet) : chaque levée relève ce que rendait le camp et
+l'habitude (kcal nettes par jour d'adulte), la part de la chasse dans chacun, et les jours
+passés au camp. Puis **un changement** (décision de l'utilisateur : « idée 1 ») : le camp et
+l'habitude se jugent **hors chasse** — ce qui s'épuise autour d'un camp, ce sont les plantes ;
+le gibier bouge et ses prises (60 000 kcal d'un coup) sont trop irrégulières pour juger un lieu
+en quelques jours.
+Prédictions, banc `marche` 90 j × 8 runs, règle actuelle (instrument seul) et règle hors chasse
+lancées ensemble :
+1. Règle actuelle : la chasse fait plus de la moitié de l'habitude dans ≥ 50 % des levées, et
+   dans ≥ 40 % des levées le camp rendait **hors chasse** autant ou plus que l'habitude hors
+   chasse (levées déclenchées par l'absence d'une prise, pas par l'épuisement).
+2. Règle hors chasse : levées divisées par ≥ 2 (121) ; aucune run au-delà de 20 km nets en 90 j.
+3. Jours au camp (médiane) : ≥ 8 (Batek 8,2).
+Réfuterait 1 : la chasse < 25 % de l'habitude dans la plupart des levées (alors elle ne
+déclenche pas).
+
+### Mesuré (banc `marche` 90 j × 8 runs, départ j135 : printemps-été) — règle actuelle (6c970db, instrument seul) et hors chasse (820a3b7)
+**Ce qui déclenche, sous la règle actuelle** (121 levées, médianes ; p10-p90) :
+- camp 4 093 kcal nettes/jour d'adulte (2 601-5 779), dont chasse **−95** (coût sans prise) ;
+  habitude 5 496 (4 445-8 294), dont chasse **1 517** (596-5 709) ;
+- hors chasse : camp 3 926 contre habitude 3 367 — **dans 88 % des levées, la cueillette du camp
+  rendait autant ou plus que d'habitude** ; la chasse fait plus de la moitié de l'habitude dans
+  31 % des levées ; **2 jours au camp** en médiane (p90 9).
+1. Chasse > ½ de l'habitude dans ≥ 50 % des levées : **réfutée** (31 %) ; camp hors chasse ≥
+   habitude hors chasse dans ≥ 40 % : **tenue, et de loin** (88 %). Les levées ne viennent pas de
+   l'épuisement du pays mais du **creux de chasse** : quelques jours sans prise au camp, contre
+   une habitude qui contient des prises.
+**Règle hors chasse : aucune levée en 90 jours, sur 8/8 runs** (marche vers l'eau revenue à
+1,4 h/j). 2. Levées divisées par ≥ 2 : **réfutée par l'autre bout** (÷ ∞). 3. ≥ 8 jours au camp :
+sans objet.
+Lecture, aux deux bouts : avec la chasse, la bande part pour un bruit ; sans elle, la cueillette
+d'un camp ne baisse jamais sous l'habitude **au printemps et en été** — la saison où les plantes
+repoussent (r = 0,08/j) et où une maille ne s'épuise pas en 90 j (déjà vu en MAR-6c). Le banc ne
+couvre pas l'hiver : c'est le régime où le pays devrait s'épuiser (règle 2). Mesure suivante :
+la règle hors chasse sur une année entière.
+
+### Règle hors chasse sur deux ans (`longue` 2 ans × 8, 820a3b7, départ j135) — contre `main` au jour 720 (38dca99)
+| run | levées (retours) | foyer à l'an 2 ; max (km) | pop main → hors chasse | soif ; faim ; froid (hors chasse) |
+|---|---|---|---|---|
+| t42 | 89 (42) | 12 ; 17 | 56 → 53 | 2 ; 0 ; 0 |
+| t7 | 85 (32) | 63 ; 68 | 50 → 51 | 0 ; 0 ; 0 |
+| t1337 | 92 (44) | 27 ; 31 | 58 → 57 | 0 ; 0 ; 0 |
+| t2024 | 90 (38) | 67 ; 67 | 59 → 53 | 2 ; 0 ; 0 |
+| f42 | 114 (84) | 8 ; 17 | 66 → **27** | 15 ; 6 ; 20 |
+| f7 | 119 (75) | 22 ; 30 | 33 → 56 | 8 ; 7 ; 4 |
+| f1337 | 110 (91) | 1 ; 9 | 85 → 72 | 0 ; 0 ; 1 |
+| f2024 | 116 (80) | 11 ; 21 | 75 → 75 | 1 ; 0 ; 0 |
+**Une mobilité saisonnière émerge, sans être écrite** : aucune levée de mai à septembre (la
+saison où les plantes repoussent), puis les levées d'octobre à février, et de nouveau la
+seconde année (levées cumulées par mois, t42 : 0 pendant 5 mois, 28 à l'hiver, plat jusqu'à
+l'été suivant, 89 à la fin du second hiver). ~45 levées par an (Batek ~44, Hadza ~12), mais
+**concentrées sur 4-5 mois** : un camp tous les 3 jours environ en saison maigre (trop).
+Foyers à 9-68 km au plus en 2 ans (règle de la chasse : 300-550 km en 10 ans) ; 36 à 83 % des
+levées reviennent à un ancien camp. Population au niveau de `main` sur 6/8 (f42 : 27 contre 66,
+froid et soif ; f7 : 56 contre 33). Feu vu sur 3/8 (1/8 sur `main`).
+Ce que j'ai pu manquer : 2 ans seulement (la dérive sur 10 ans n'est pas jugée ; t7 et t2024
+avancent de ~30 km/an) ; la fréquence en saison maigre n'est pas comparée aux séjours d'hiver
+réels ; f42 s'effondre de froid : les huttes restent derrière.
+
+### Règle hors chasse sur dix ans (`longue` 10 ans × 8, 820a3b7) contre `main` (38dca99)
+| run | pop moy. ans 5-10 main → hc | foyer, max (km) | levées/an (retours) | soif ; faim ; froid main → hc | feu vu |
+|---|---|---|---|---|---|
+| t42 | 62 → 63 | 66 | 56 (68 %) | 4→4 ; 0→0 ; 0→0 | 0→0 |
+| t7 | 49 → 40 | 180 | 61 (57 %) | 9→15 ; 1→2 ; 0→0 | 42→35 |
+| t1337 | 65 → 64 | 156 | 63 (58 %) | 4→5 ; 0→0 ; 0→0 | 0→29 |
+| t2024 | 57 → 56 | 202 | 60 (53 %) | 19→7 ; 3→0 ; 0→0 | 5→4 |
+| f42 | 75 → **5** | 54 | 41 (75 %) | 4→24 ; 0→9 ; 6→36 | 0→2 |
+| f7 | 23 → 31 | 83 | 66 (70 %) | 7→21 ; 6→18 ; 3→9 | 0→22 |
+| f1337 | 94 → **35** | 28 | 56 (79 %) | 3→16 ; 0→11 ; 2→15 | 0→0 |
+| f2024 | 94 → 62 | 58 | 64 (73 %) | 4→17 ; 0→7 ; 0→3 | 0→12 |
+1. Foyer ≤ 200 km sur 8/8 : **tenue sur 7/8** (t2024 : 202) — règle de la chasse : 324-550 km.
+2. Population ≥ 70 % de `main` sur ≥ 6/8 : **réfutée de peu (5/8)** : **tempéré 4/4** (82-102 %),
+   froid 1/4 (f42 s'éteint presque, f1337 à 37 %).
+3. Froid en hausse en scène froide : **tenue 4/4** ; soif et faim aussi.
+Feu vu sur 5/8 (2/8 sur `main`). Levées 41-66 par an, retours 53-79 %.
+**Lecture** : en pays tempéré, le mécanisme fait ce qu'il doit (mobilité bornée, population
+tenue, le monde s'ouvre). En pays froid, **lever le camp en hiver tue** : froid, soif et faim
+montent ensemble. La cause est dans la règle de départ : elle compare le camp à l'**habitude** du
+mois écoulé, qui contient l'automne ; en hiver, tout le pays rend peu, et la bande part quand
+même — vers un lieu qui ne rendra pas mieux, en laissant ses huttes. Le théorème de la valeur
+marginale compare le lieu à ce qu'on peut attendre **ailleurs**, trajet compris : la mémoire
+datée des lieux (MEM-3) le permet. Les huttes laissées derrière (MAR-6b (b)) aggravent le même
+hiver.
+
+## MAR-6b c — partir seulement si un lieu connu promet mieux (solution 3 de l'utilisateur, étape 1 ; 2026-10-22)
+Changement (`camp::daily`) : la bande lève le camp si la meilleure destination connue (MEM-3)
+promet, trajet compris, plus que ce que la bande attend du lieu de son camp (sa mémoire datée :
+le rendement récent) — plus contre l'habitude du mois. En hiver, si tous les lieux connus rendent
+peu, on reste. Le rapport « kcal/h par unité de fourrage vu » s'apprend désormais sur le
+rendement **de long terme** des lieux travaillés (sinon un camp qu'on vient d'épuiser faisait
+paraître épuisé tout pays vu). Les deux pursuits comptent de part et d'autre (même biais de la
+maille d'abattage des deux côtés). Test `une_bande_leve_le_camp_quand_le_pays_s_epuise` revu
+(dates du vécu alignées sur l'horloge du test, derniers jours épuisés ou non) ; **pas de test
+rouge dédié à l'hiver** (dette, à écrire si la mesure garde la règle). Huttes : étape 2, après.
+Prédictions, `longue` 10 ans × 8 contre `main` (38dca99) et la règle hors chasse (820a3b7) :
+1. Scène froide : population moyenne des ans 5-10 ≥ 70 % de `main` sur ≥ 3/4 (hors chasse : 1/4).
+2. Tempéré : ≥ 70 % de `main` sur 4/4 (tenu par hors chasse) ; foyer ≤ 200 km sur 8/8.
+3. Levées : moins qu'hors chasse (41-66/an), surtout l'hiver.
+
+### MAR-6b c — mesuré (`longue` 10 ans × 8, b7ce1ec)
+| run | pop moy. ans 5-10 main ; hors chasse ; c | foyer max (km) | levées/an (retours) | soif ; faim ; froid (c) | feu vu (c) |
+|---|---|---|---|---|---|
+| t42 | 62 ; 63 ; **66** | 98 | 28 (31 %) | 4 ; 0 ; 0 | 57 |
+| t7 | 49 ; 40 ; **51** | 133 | 33 (45 %) | 8 ; 2 ; 0 | 50 |
+| t1337 | 65 ; 64 ; **67** | 73 | 21 (44 %) | 4 ; 0 ; 0 | 0 |
+| t2024 | 57 ; 56 ; **68** | 112 | 34 (30 %) | 4 ; 0 ; 0 | 30 |
+| f42 | 75 ; 5 ; **9** | 117 | 23 (31 %) | 30 ; 5 ; 41 | 0 |
+| f7 | 23 ; 31 ; **46** | 280 | 63 (44 %) | 24 ; 12 ; 5 | 30 |
+| f1337 | 94 ; 35 ; **32** | 32 | 31 (70 %) | 30 ; 20 ; 6 | 0 |
+| f2024 | 94 ; 62 ; **61** | 330 | 53 (30 %) | 11 ; 8 ; 0 | 36 |
+1. Froid ≥ 70 % de `main` sur ≥ 3/4 : **réfutée** (1/4 : f7). 2. Tempéré ≥ 70 % sur 4/4 :
+**tenue, au-dessus de `main` sur 4/4** (103-119 %) ; foyer ≤ 200 km : **6/8** (f7 280, f2024 330).
+3. Moins de levées : **tenue** (21-34/an en tempéré contre 56-63 hors chasse ; Hadza ~12, Batek ~44).
+Lecture : en tempéré, la règle « un lieu connu promet mieux » donne enfin des bandes mobiles,
+bornées, **plus nombreuses que les bandes immobiles**, qui voient le feu (3/4 runs). En froid, la
+mort vient du froid et de la soif (f42 : 41 et 30 ; f1337 : soif 30, faim 20) : l'étape 2 (les
+huttes rebâties au nouveau camp) vise ce bout-là.
+
+## MAR-6b c + b — les huttes rebâties au nouveau camp (solution 3, étape 2 ; 2026-10-23)
+Reprise de l'essai (b) (0009b85, cherry-pick a4faad9) sur MAR-6b c : une structure à plus du
+rayon de résidence du camp de son clan est laissée derrière (abandonnée, reprise seulement par
+d'autres occupants) ; le clan, s'il a froid, en désire une nouvelle au camp. Test
+`un_clan_qui_leve_le_camp_laisse_sa_hutte_et_en_desire_une_autre` (vu rouge à l'époque) ; le test
+de surchasse, rouge sur l'ancienne branche, passe ici.
+Prédictions, `longue` 10 ans × 8 contre MAR-6b c (b7ce1ec) :
+1. Scène froide : morts de froid en baisse sur ≥ 3/4 ; population moyenne des ans 5-10 ≥ 70 %
+   de `main` sur ≥ 2/4 (c : 1/4).
+2. Tempéré : inchangé à ±10 % (pas de huttes sans froid).
+Réfuterait 1 : froid en hausse ou égal sur ≥ 2/4.
+
+### MAR-6b c + b — mesuré (`longue` 10 ans × 8) contre c (b7ce1ec)
+| run | pop 5-10 main ; c ; c+b | froid c → c+b | soif c → c+b | foyer max c+b (km) | levées c → c+b |
+|---|---|---|---|---|---|
+| t42 | 62 ; 66 ; 68 | 0 → 0 | 4 → 3 | 319 | 277 → 380 |
+| t7 | 49 ; 51 ; 46 | 0 → 0 | 8 → 5 | 307 | 327 → 428 |
+| t1337 | 65 ; 67 ; **48** | 0 → 0 | 4 → 11 | 218 | 210 → 604 |
+| t2024 | 57 ; 68 ; 65 | 0 → 0 | 4 → 16 | **622** | 340 → 502 |
+| f42 | 75 ; 9 ; 18 | 41 → 17 | 30 → 18 | 70 | 229 → 210 |
+| f7 | 23 ; 46 ; 39 | 5 → 1 | 24 → 29 | 243 | 626 → 486 |
+| f1337 | 94 ; 32 ; 34 | 6 → 12 | 30 → 20 | 25 | 310 → 323 |
+| f2024 | 94 ; 61 ; 57 | 0 → 4 | 11 → 24 | 179 | 528 → 410 |
+1. Froid en baisse sur ≥ 3/4 : **réfutée** (2/4 ; f1337 et f2024 en hausse) ; population ≥ 70 %
+   de `main` sur ≥ 2/4 : **réfutée** (1/4). 2. Tempéré inchangé à ±10 % : **réfutée** (t1337 −28 %),
+   et les levées montent de 30 à 190 % en tempéré, les foyers partent à 218-622 km.
+Lecture : les huttes rebâties ne sauvent pas le froid, et **dérèglent le tempéré** : laisser derrière
+toutes les structures (la hutte du chef comprise) multiplie les levées — mécanisme non lu. **Non
+retenu** : l'étape 2 est défaite (revert), MAR-6b c reste. Ce que le froid garde : **la soif**
+(18-30 morts en 10 ans contre 3-4 sur `main`), avant le froid lui-même.
+
+## La soif des bandes mobiles en pays froid (instrument, 2026-10-23 ; décision de l'utilisateur : suite 1)
+Relevé (`longue`, fichier `<csv>.soif.csv`) : à l'heure d'avant chaque mort de soif, âge, distance
+à la source connue la plus proche, à la vraie source la plus proche (2 km), au camp, jours depuis
+la dernière levée, en marche ou non. Réserve : chercher la vraie source charge des chunks (D7 :
+l'éviction peut changer le monde) — l'instrument n'est pas garanti neutre.
+Scène froide, 4 seeds × 5 ans, MAR-6b c (b7ce1ec + instrument). Prédictions :
+1. ≥ 50 % des morts de soif à moins de 3 jours d'une levée (la bande vient d'arriver).
+2. ≥ 50 % avec une vraie source à moins de 2 km mais aucune source connue plus proche que 2 km
+   (on ne sait pas encore où boire au nouveau camp).
+3. Enfants (< 5 ans) ≥ 50 % des morts.
+
+### Soif des bandes mobiles en froid — mesuré (`longue` froid 4 seeds × 5 ans, d05a5cf)
+57 morts de soif (f42 25, f1337 17, f7 8, f2024 7). À l'heure d'avant la mort :
+- **à la source** : source connue la plus proche à 10 m en médiane (p90 1,7 km), vraie source à
+  10 m ; une source réelle à moins de 2 km dans 100 % des cas, inconnue de lui dans 9 % seulement ;
+- **au camp** (0,48 km en médiane), **pas en marche** (5 %) ;
+- **en plein hiver** : 41 des 57 entre mi-décembre et mi-février ;
+- 56 % d'enfants de moins de 5 ans, 26 % de moins d'un an ; 6,1 jours depuis la dernière levée
+  en médiane.
+1. ≥ 50 % à moins de 3 jours d'une levée : **réfutée de peu** (44 %). 2. Source réelle proche mais
+   inconnue : **réfutée** (9 %). 3. Enfants ≥ 50 % : **tenue** (56 %).
+Lecture : ce n'est pas un problème de mémoire ni de trajet — on meurt de soif **assis à côté de
+l'eau, en hiver**. Rien dans le code ne gèle l'eau (`has_fresh_water` est un drapeau fixe). Deux
+explications que ces chiffres ne départagent pas : (a) en hiver, une autre urgence (s'abriter du
+froid, dormir) l'emporte sur boire jusqu'à la mort — le choix ne bascule pas ; (b) l'instrument de
+cause : la mort est attribuée à « la plus forte morsure », et la soif peut masquer un corps qui
+meurt de froid et de faim ensemble (défaut d'instrument déjà relevé au chantier de l'eau). Pour
+les petits : ils ne boivent qu'avec leur porteur (MOR-4). Mesure suivante : l'activité et la tâche
+de l'heure d'avant, la soif, la faim, le froid et la santé, l'heure de la dernière gorgée.
+
+### Soif en froid — tranché (journal détaillé, 4 seeds × 5 ans, 57 morts « de soif »)
+Deux populations distinctes :
+- **Les petits (< 3 ans), ~20 morts** : dernière gorgée **44 à 124 h** avant (ou jamais : ils ne
+  boivent qu'avec leur porteur) ; **porteur mort dans 18 cas**. Ce sont des **orphelins** : leur mort
+  par la soif est réelle, et c'est le chantier des orphelins (MOR-4b), pas la mobilité.
+- **Les plus grands (3,5 à 42 ans), ~37 morts** : dernière gorgée **20 à 25 h** avant seulement ;
+  soif ~1, mais **faim 1,00 dans la plupart des cas**, froid 0,2-0,8, santé ~0 ; endormis, au repos
+  ou à l'abri (Sleeping 20, Idle 12, Sheltering 15 sur 57). Personne ne meurt de soif en 22 h :
+  ce sont des corps **qui meurent de faim et de froid**, et que l'instrument de cause range en
+  « soif » parce que la soif est la plus forte morsure de la dernière heure.
+Verdict : explication (b) — **la cause de mort est mal attribuée** pour les grands ; la vraie
+cause en pays froid mobile est **la faim d'hiver** (et le froid), plus les orphelins. L'explication
+(a) (une autre urgence empêche de boire) ne tient pas : on avait bu la veille.
+Conséquences : (1) l'instrument de cause doit compter ce qui a **usé la santé** sur les derniers
+jours, pas la morsure de la dernière heure — sans quoi toutes les mesures de « soif » depuis le
+chantier de l'eau mêlent faim et froid ; (2) la mobilité d'hiver en pays froid affame : à lire
+(réserves laissées au camp ? cueillette nulle partout en hiver ?).
+
+## L'instrument de cause de mort corrigé (2026-10-23, validé par l'utilisateur)
+`Physiology::worn` : l'usure de la santé par cause lente (soif, faim, froid, maladie), avec une
+demi-vie d'une semaine ; une mort lente revient à la cause qui a le plus usé le corps
+(`Physiology::cause_of_death`), une mort soudaine (violence, prédation, foudre, âge) reste
+elle-même. Test `la_cause_d_une_mort_lente_est_ce_qui_a_use_le_corps` (dix jours de jeûne puis une
+journée sans eau : `last_damage` dit soif, la nouvelle règle dit faim). Sans effet sur la dynamique
+(la cause ne sert qu'à la Chronique) : reporté aussi sur `main`. **Toutes les causes de mort
+mesurées avant ce commit mêlent la faim et le froid à la soif.**
+Remesure : `longue` froid 4 seeds × 10 ans, MAR-6b c contre `main`, tous deux avec la bonne cause.
+Prédiction : sur la branche, les morts « de soif » des plus de 3 ans passent en grande partie à la
+faim (≥ 50 %) ; sur `main`, la soif baisse aussi.
+
+### Froid mobile remesuré avec la bonne cause (`longue` froid 4 × 10 ans ; `main` f0bdec5, branche 22c985d)
+Dynamique identique à MAR-6b c (populations des ans 5-10 : 9, 46, 32, 61 — mêmes qu'en b7ce1ec) ;
+seules les causes changent.
+| run | soif ; faim ; froid ; maladie — `main` | — branche (avant correction de l'instrument) |
+|---|---|---|
+| f42 | 3 ; 4 ; 3 ; 29 | **13 ; 47 ; 14** ; 15 (30 ; 5 ; 41) |
+| f7 | 4 ; 9 ; 1 ; 20 (violence 32) | 14 ; 27 ; 1 ; 41 (24 ; 12 ; 5) |
+| f1337 | 4 ; 0 ; 1 ; 41 | 17 ; 33 ; 4 ; 44 (30 ; 20 ; 6) |
+| f2024 | 4 ; 0 ; 0 ; 30 | 10 ; 8 ; 0 ; 44 (11 ; 8 ; 0) |
+Prédiction (≥ 50 % des « soifs » des plus grands passent à la faim) : **tenue sur l'ensemble** —
+soif 95 → 54, froid 52 → 19, faim 45 → **115** (contre 13 sur `main`).
+**La bande mobile en pays froid meurt de faim**, d'abord : 115 morts de faim en 4 × 10 ans, contre
+13 pour la bande immobile. Reste à lire pourquoi (cueillette nulle partout l'hiver ? réserve du
+clan ? chasse d'hiver hors du domaine des troupeaux ? marche plus coûteuse ?).
+
+### La faim d'hiver des bandes mobiles en froid — lu (deux ans, 4 seeds, f184cb6 contre b99981d ; et les runs de 10 ans de 22c985d)
+- **Sur deux ans, l'hiver ne décroche pas** : cueillette et chasse du jour, réserve des clans et faim
+  des adultes de la bande mobile valent celles de la bande immobile (faim d'hiver 0,66 contre 0,66 ;
+  réserve plus haute : 4 400 contre 2 555) ; morts de faim 6 contre 1.
+- **Le décrochage vient ensuite, avec le gibier** (10 ans, f42 et f1337) : la bande immobile garde
+  ses troupeaux près d'elle (troupeaux à 10 km : 9 → 105 en f42, 7 → 32 en f1337) ; la bande mobile
+  **les quitte** (f42 : 3-15 puis **0** dès l'an 5, foyer à 50-115 km ; f1337 : 8-15 puis 0 aux ans
+  8-10). Sa faim et ses morts de faim suivent (f42 : 11 et 15 aux ans 2-3 ; f1337 : 12 à l'an 5,
+  4-7 aux ans 7-9).
+Lecture : en pays froid, l'hiver se passe sur la chasse ; la bande mobile choisit ses camps sur ce
+que les lieux ont rendu, **toutes saisons confondues** — un lieu riche en plantes l'été vaut autant
+en hiver dans sa mémoire — et le gibier vu ne pèse plus (choix 1). Elle part loin de son pays de
+gibier vers des pays de cueillette d'été. Deux mécanismes candidats : (a) **une mémoire des lieux
+sans saison** (le sourçage de MEM l'appuie : on connaît les ressources de son pays saison par
+saison) ; (b) le gibier absent du choix.
+
+## MEM-3 par saison (décision de l'utilisateur, 2026-10-23 : « 1 »)
+Changement : chaque lieu retient, par **quart d'année vécu** (`memory::quarter_of`, le moment de
+l'année et non l'étiquette `Season` du climat, que la simulation ne lit pas), les kcal acquises,
+les heures de subsistance et le fourrage vu. Le camp compare les lieux sur ce qu'ils rendent **à
+ce moment de l'année** (`Place::expected_in_season`, `season_seen`) ; un lieu jamais travaillé ni
+vu à ce moment de l'année n'est pas comparable. Test `un_lieu_se_juge_sur_ce_qu_il_rend_a_ce_moment_de_l_annee`
+(l'été A rend 1 000 kcal/h et B 200, l'hiver A 50 et B 400 : toute l'année, A paraît meilleur ;
+l'hiver, B l'emporte).
+Prédictions, `longue` 10 ans × 8 contre MAR-6b c (22c985d en froid, b7ce1ec en tempéré) et `main` :
+1. Froid : troupeaux à 10 km du foyer non nuls à l'an 10 sur ≥ 3/4 (c : 0 sur f42 et f1337) ;
+   morts de faim divisées par ≥ 2 (115) ; population des ans 5-10 ≥ 70 % de `main` sur ≥ 2/4.
+2. Tempéré : population ≥ 90 % de c sur 4/4.
+
+### MEM-3 par saison — mesuré (`longue` 10 ans × 8, aa51683)
+| run | pop moy. ans 5-10 main ; c ; saison | faim c → saison | soif ; froid (saison) | foyer max (km) | levées |
+|---|---|---|---|---|---|
+| t42 | 62 ; 66 ; 68 | 0 → 0 | 3 ; 0 | 105 | 329 |
+| t7 | 49 ; 51 ; 42 | 2 → 9 | 7 ; 0 | 216 | 431 |
+| t1337 | 65 ; 67 ; 62 | 0 → 0 | 3 ; 0 | 210 | 463 |
+| t2024 | 57 ; 68 ; 68 | 0 → 0 | 5 ; 0 | 144 | 428 |
+| f42 | 75 ; 9 ; 7 | 47 → 27 | 11 ; 32 | 55 | 184 |
+| f7 | 23 ; 46 ; **54** | 27 → 15 | 15 ; 0 | 307 | 576 |
+| f1337 | 94 ; 32 ; 36 | 33 → 17 | 12 ; 3 | 32 | 300 |
+| f2024 | 94 ; 61 ; **74** | 8 → 3 | 5 ; 0 | 69 | 677 |
+1. Froid : morts de faim ÷ 2 — **manqué de peu** (115 → 62, ÷ 1,85) ; population ≥ 70 % de `main` sur
+   ≥ 2/4 — **tenue** (f7, f2024) ; troupeaux à 10 km — **instrument faux** : la colonne
+   `troupeaux_10km` se mesure autour du **point de départ**, pas du camp. Pour une bande immobile
+   c'est le même lieu ; pour une bande mobile, non. La lecture « la bande mobile quitte son pays de
+   gibier » (plus haut) repose en partie sur ce chiffre : **à reprendre** avec les troupeaux autour du
+   camp courant.
+2. Tempéré ≥ 90 % de c sur 4/4 : **réfutée** (3/4 ; t7 à 82 %).
+Lecture : la saison aide en froid (faim presque ÷ 2, deux runs au niveau de `main` ou au-dessus),
+sans coût net en tempéré (une run en baisse). f42 et f1337 restent effondrées (f42 : froid 32, faim 27).
+
+## Instrument de `longue` relu et corrigé (2026-10-24, demande de l'utilisateur)
+Relu colonne par colonne pour ce qui supposait une bande immobile :
+- `troupeaux_10km` : autour du **point de départ** → autour du **camp du plus grand clan** (ou du
+  centre de la population sans clan), relevé de la veille ;
+- la nuit (`noir_dormi`) : à la latitude du départ → à celle du camp courant ;
+- `kcal_cueillette_j`, `kcal_chasse_j` : différence des sommes (un mort faisait baisser la somme) →
+  différence par humain ;
+- gardés : `foyer_depart_km`, `foyer_max_km` (le départ est voulu), dispersion (centre du jour),
+  morts cumulées, faim, techniques.
+Journal des morts lentes (`<csv>.morts.csv`, remplace `.soif.csv`) : soif, faim et froid, avec la
+cause, l'état de l'heure d'avant (relevé dès que la santé passe sous 0,2).
+Remesure : `longue` froid 4 × 10 ans, MEM-3 par saison contre `main` (mêmes corrections).
+
+### Remesure avec l'instrument corrigé (`longue` froid 4 × 10 ans ; `main` 117d0ed, branche 53362a3)
+Dynamique inchangée (populations des ans 5-10 de la branche : 7, 54, 36, 74, comme aa51683).
+- **Troupeaux autour du camp courant** (an 1/4/7/10) : `main` f42 10/46/96/105, f7 19/63/76/85,
+  f1337 7/18/16/32, f2024 7/70/75/88 ; branche f42 8/40/0/0 (bande presque éteinte), f7 4/7/11/14,
+  f1337 6/18/20/37, f2024 6/4/11/6. La bande mobile a moins de troupeaux autour d'elle (sauf
+  f1337), mais **ne les a pas « quittés »** : la lecture d'avant est corrigée.
+- **Nourriture d'hiver par personne** (kcal/j, cueillette + chasse, ~janvier-février) : la bande
+  mobile en a **autant ou plus** que l'immobile (f1337 : 2 000-3 100 contre 1 300-1 500 ; f2024 :
+  2 400-4 000 contre 1 800-3 300).
+- **Qui meurt de faim** (62 morts sur la branche, journal des morts lentes) : **des adultes** (54),
+  **loin du camp** (38 à plus de 2 km, souvent 3-5 km), **en hiver**, **quelques jours après une
+  levée** (0,2 à 7 j), en train de cueillir ou de chasser, faim 1, santé 0. Froid : 35 morts, soif 43.
+**Verdict (à confirmer par l'utilisateur)** : ce n'est pas la dureté du pays — dans le même pays,
+la bande immobile ne meurt pas de faim (0 à 9 en 10 ans), et la bande mobile a en moyenne autant à
+manger l'hiver. Ce qui tue, c'est **la dynamique d'après une levée d'hiver** : des adultes partis
+cueillir ou chasser à 3-5 km d'un camp neuf, sans revenir manger ce que la bande a. Les famines
+réelles (Kivalliq, 1916-1926 ; Keewatin, 1950) suivent l'effondrement d'une ressource, pas une
+abondance moyenne : **problème de modèle**.
+
+## Pourquoi des adultes meurent de faim loin d'un camp neuf (2026-10-24)
+Lecture du code (`brain`, « puiser dans le stock du clan ») : la réserve n'est proposée que si
+`stock > 0,1` **et** (fourrage alentour < 5 **ou** part de la maille < 0,3) **et aucun troupeau en
+vue**. Porte tout ou rien sans impossibilité physique (règle 10) : un adulte affamé qui voit un
+troupeau, ou qui se tient dans un pays « riche » sur le papier (un camp neuf), **ne pense pas à la
+réserve**, chasse ou cueille sans succès jusqu'à la mort. Une bande immobile vit dans un pays
+épuisé : la porte s'ouvre ; une bande qui vient d'arriver dans un pays neuf : elle se ferme.
+Hypothèse, prédictions (journal des morts lentes enrichi : réserve du clan, troupeau le plus proche,
+fourrage de la tuile ; froid 4 × 5 ans, même dynamique que 53362a3) :
+1. ≥ 60 % des morts de faim avec une réserve > 0,1 **et** (un troupeau à moins de 2 km ou un
+   fourrage ≥ 5) — la porte fermée sur une réserve pleine.
+Réfuterait : réserve vide (≤ 0,1) dans la plupart des morts (alors la bande n'a rien à partager).
+
+### La porte de la réserve — mesuré (froid 4 × 5 ans, 9c77968, 48 morts de faim)
+- **41 sur 48 (85 %)** meurent avec une réserve du clan > 0,1 **et** la porte fermée ; 7 avec une
+  réserve vide. Prédiction (≥ 60 %) : **tenue**.
+- Le fourrage de la tuile vaut **98 à 150** à chaque mort (seuil de la porte : 5) : la porte se ferme
+  sur la **biomasse** (le fourrage du gibier), qui reste haute l'hiver, alors que ce qu'un humain en
+  tire l'hiver est presque nul — on meurt « en train de manger » (Eating/Forage) sur une tuile riche.
+- Des réserves pleines au même moment : 1 990 à 3 735 points dans plusieurs cas.
+**Pourquoi** : la réserve n'est proposée qu'à un affamé dont le pays « ne répond plus », jugé sur la
+biomasse et sur l'absence de troupeau en vue — deux signes qui disent « il y a à manger ici » alors
+qu'en hiver ni la biomasse ni un troupeau aperçu ne nourrissent. Une bande immobile vit dans un pays
+épuisé (porte ouverte) ; une bande qui vient d'arriver ailleurs, non.
+
+## La porte de la réserve retirée (décision de l'utilisateur, 2026-10-24)
+Changement (`brain`) : la réserve du clan est une option pour tout membre quand elle n'est pas vide,
+pesée par la faim et la distance au camp ; elle se compare à la cueillette et à la chasse, chacune
+pesée par ce qu'elle rapporte à l'expérience (l'hiver, la cueillette ne rend plus et la réserve
+l'emporte d'elle-même). Test `un_affame_pense_a_la_reserve_meme_sur_une_tuile_qui_parait_riche`
+(midi, un troupeau à 200 m, réserve pleine), vu rouge. Touche aussi les bandes immobiles de `main`.
+Prédictions, `longue` 10 ans × 8, contre MEM-3 par saison (aa51683 / 53362a3) :
+1. Froid : morts de faim ÷ ≥ 2 (62) ; population des ans 5-10 ≥ 70 % de `main` sur ≥ 3/4 (saison : 2/4).
+2. Tempéré : population à ±10 % de la saison.
+3. Réserve des clans plus basse en fin d'hiver (on y puise).
+
+### Porte de la réserve retirée — mesuré (`longue` 10 ans × 8, 50c84ba) contre MEM-3 par saison (aa51683)
+| run | pop 5-10 main ; saison ; réserve | faim saison → réserve | soif ; froid (réserve) | foyer max (km) |
+|---|---|---|---|---|
+| t42 | 62 ; 68 ; 65 | 0 → 0 | 1 ; 0 | 356 |
+| t7 | 49 ; 42 ; **59** | 9 → 0 | 3 ; 0 | 385 |
+| t1337 | 65 ; 62 ; 62 | 0 → 0 | 5 ; 0 | 163 |
+| t2024 | 57 ; 68 ; 65 | 0 → 10 | 8 ; 0 | **670** |
+| f42 | 75 ; 7 ; **29** | 27 → 40 | 3 ; 0 | 136 |
+| f7 | 23 ; 54 ; 56 | 15 → 4 | 5 ; 0 | 198 |
+| f1337 | 94 ; 36 ; **49** | 17 → 9 | 7 ; 7 | 35 |
+| f2024 | 94 ; 74 ; 76 | 3 → 16 | 7 ; 1 | 275 |
+1. Froid : faim ÷ 2 — **réfutée** (62 → 69 ; en baisse sur 2/4, en hausse sur 2/4) ; population
+   ≥ 70 % de `main` sur ≥ 3/4 — **réfutée** (2/4), mais en hausse sur 3/4 (f42 7 → 29, f1337 36 → 49).
+2. Tempéré à ±10 % : **réfutée par le haut** sur t7 (+40 %), les trois autres à ±5 %.
+Ce qui change le plus : **la soif et le froid** en pays froid (43 → 22 et 35 → 8 sur les 4 runs) —
+des corps qui mangent mieux boivent et se chauffent mieux. Morts lentes en froid : 140 → 99.
+**Voisin** : les foyers dérivent plus loin (tempéré : 163-670 km, contre 105-216) — mécanisme non lu.
+Lecture : la réserve tenait derrière la porte une grande part des morts lentes ; ce qui reste, en
+froid, est une faim qui ne baisse pas partout (f42, f2024 en hausse) — à relire au journal.
+
+### 1. La faim qui reste en froid (journaux de 50c84ba, f42 et f2024)
+f42 : 40 morts de faim, **toutes réserve vide**, en décembre-janvier, au camp ou près (16 au camp),
+**28 à 49 jours après la dernière levée** (la bande ne bouge plus : aucun lieu connu ne promet mieux
+l'hiver), aucun troupeau à moins de 2 km (souvent aucun dans le rayon relevé). f2024 : 16 morts,
+15 réserve vide, surtout des enfants de 3-15 ans, en hiver. **C'est une vraie disette d'hiver** :
+plus de réserve, plus de gibier proche, plus de plantes. La bande immobile du même pays vit au
+milieu des troupeaux (96-105 à 10 km en f42), la bande mobile, partie à 130 km, non. Ce qui manque
+est en amont : arriver à l'hiver avec une réserve, ou là où est le gibier d'hiver.
+
+### 2. La dérive (comparaison saison / réserve)
+Chemin du foyer sur 10 ans : 1 060-3 860 km (106-386 km/an ; réel ~160-175), du même ordre avec
+et sans la porte ; retours vers un ancien camp 23-55 %. La distance finale au départ (25-660 km)
+varie dans les deux sens d'une variante à l'autre (plus loin sur 5/8, moins sur 3/8) : c'est
+l'issue d'une **marche presque aléatoire** (~300-500 levées de ~5,5 km : √400 × 5,5 ≈ 110 km
+attendus), pas un effet de la porte. Le défaut de fond : **aucun attachement à un domaine** — la
+bande compare les lieux connus à ~5 km, sans pays à elle vers lequel revenir.
+
+### 3. Synthèse du chantier camp + mémoire (2026-10-24)
+Ce qui marche, mesuré : la carte vécue (MEM-1, neutre, coût nul) ; le camp qui se lève sur la
+mémoire des lieux (MEM-3), **sans comparer l'inconnu**, jugé **hors chasse**, **par saison**, et
+**seulement si un lieu connu promet mieux** ; le gibier compté par troupeau ; **l'instrument de
+cause de mort** (déjà sur `main`) ; **la réserve sans porte**. En tempéré : bandes mobiles bornées en
+fréquence (21-48 levées/an), population au niveau de `main` ou au-dessus, le feu vu bien plus souvent.
+Ce qui ne tient pas encore : (a) **pas de domaine vital** — le foyer marche presque au hasard, 25 à
+670 km en 10 ans ; (b) **la disette d'hiver en froid** quand la bande arrive sans réserve loin du
+gibier ; (c) des runs froides sous `main` (f42, f1337).

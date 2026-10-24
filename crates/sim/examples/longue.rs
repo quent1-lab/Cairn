@@ -135,6 +135,14 @@ fn main() {
     let (mut dead_infants, mut dead_children) = (0usize, 0usize);
     let mut death_ages: VecDeque<(u64, f64)> = VecDeque::new(); // (jour, âge) sur 10 ans
     let mut day = 0u64;
+    // [jour, âge, km à la source connue la plus proche, km à la vraie source la
+    // plus proche (rayon de 16 chunks, ~2 km), km au camp, jours depuis la dernière
+    // levée, en marche] à l'heure d'avant chaque mort de soif.
+    let mut parched: BTreeMap<u64, ([f64; 7], String)> = BTreeMap::new();
+    let mut thirst_log: Vec<([f64; 7], String)> = Vec::new();
+    // Heure de la dernière gorgée de chacun.
+    let mut last_drink: BTreeMap<u64, u64> = BTreeMap::new();
+    let mut seen_thirst = 0usize;
     // La rencontre des foyers : morts par origine (toutes, violence, maladie),
     // naissances mixtes, contagions d'une origine à l'autre (infections
     // nouvelles du jour dont le malade source est de l'autre origine).
@@ -143,7 +151,13 @@ fn main() {
     let mut cross_contagions = 0usize;
     let mut seen_births = 0usize;
     let mut infected_yesterday: BTreeSet<(u64, usize)> = BTreeSet::new();
+    let (mut seen_moves, mut moves_back, mut max_from_start) = (0usize, 0usize, 0.0f64);
+    let mut old_camps: BTreeSet<(u64, (i64, i64))> = BTreeSet::new();
+    // Kcal acquises cumulées de chacun la veille (par humain : un mort ne doit
+    // pas faire baisser la somme du jour).
     let mut kcal_prev: BTreeMap<u64, [f64; 2]> = BTreeMap::new();
+    // Le point de référence du jour : le camp du plus grand clan, ou le centre
+    // de la population sans clan (troupeaux proches, latitude de la nuit).
     let mut ref_point: (f64, f64) = (home.0 as f64 + 0.5, home.1 as f64 + 0.5);
     let reason = loop {
         let t0 = std::time::Instant::now();
@@ -152,6 +166,87 @@ fn main() {
         let (mut adult_h, mut walk_h, mut dark_h, mut dark_sleep_h) = (0u64, 0u64, 0u64, 0u64);
         for _ in 0..TICKS_PER_DAY {
             sim.step();
+            // La soif des bandes mobiles (2026-10-23) : à chaque mort de soif,
+            // l'état de l'heure d'avant (relevé pour les seuls très assoiffés).
+            for d in &sim.deaths[seen_thirst..] {
+                if matches!(d.cause, DeathCause::Dehydration | DeathCause::Starvation | DeathCause::Hypothermia)
+                    && let Some(snap) = parched.get(&d.agent.0)
+                {
+                    let mut snap = snap.clone();
+                    snap.1 = format!("{:?},{}", d.cause, snap.1);
+                    thirst_log.push(snap);
+                }
+            }
+            seen_thirst = sim.deaths.len();
+            let tick = sim.time.tick;
+            for (_, (id, b)) in sim.agents.query::<(&AgentId, &Behavior)>().iter() {
+                if b.activity == Activity::Drinking {
+                    last_drink.insert(id.0, tick);
+                }
+            }
+            // Ce que fait chacun (pour le porteur d'un petit).
+            let doing: BTreeMap<u64, (Activity, f32, f32)> = sim
+                .agents
+                .query::<(&AgentId, &Behavior, &Physiology)>()
+                .iter()
+                .map(|(_, (id, b, p))| (id.0, (b.activity, p.thirst, p.cold)))
+                .collect();
+            let camp_of: BTreeMap<u64, ((f64, f64), u64)> = sim
+                .clans
+                .iter()
+                .map(|c| {
+                    let last = sim.camp_moves.iter().rev().find(|m| m.clan == c.id.0).map_or(c.founded_tick, |m| m.tick);
+                    (c.id.0, (c.home, last))
+                })
+                .collect();
+            type View = (u64, (f64, f64), Option<(i64, i64)>, f64, Option<u64>, Activity, String);
+            let views: Vec<View> = sim
+                .agents
+                .query::<(&AgentId, &Position, &Physiology, &cairn_sim::Memory, &Demographics, &ClanMembership, &Behavior, &cairn_sim::demography::Kinship)>()
+                .iter()
+                .filter(|(_, (_, _, p, _, _, _, _, _))| p.health < 0.2)
+                .map(|(_, (id, pos, p, mem, demo, m, b, kin))| {
+                    let carrier = sim.fosters.get(&id.0).copied().or(kin.mother).filter(|_| demo.is_infant(tick));
+                    let carried = carrier.map_or("-".to_string(), |c| {
+                        doing.get(&c.0).map_or("mort".to_string(), |(a, t, cold)| format!("{a:?}/soif{t:.2}/froid{cold:.2}"))
+                    });
+                    let since_drink = last_drink.get(&id.0).map_or(f64::NAN, |&t| (tick - t) as f64);
+                    let extra = format!(
+                        "{:?},{},{:.2},{:.2},{:.2},{:.2},{since_drink:.0},{carried}",
+                        b.activity,
+                        b.task.map_or("-".to_string(), |t| format!("{:?}", t.kind)),
+                        p.thirst,
+                        p.hunger,
+                        p.cold,
+                        p.health
+                    );
+                    (id.0, (pos.x, pos.y), mem.nearest_known_spring((pos.x, pos.y)), demo.age_years(tick), m.0.map(|c| c.0), b.activity, extra)
+                })
+                .collect();
+            parched.clear();
+            let herds_at: Vec<(f64, f64)> = if views.is_empty() {
+                Vec::new()
+            } else {
+                sim.fauna.query::<(&Herd, &Position)>().iter().map(|(_, (_, p))| (p.x, p.y)).collect()
+            };
+            let stock_of: BTreeMap<u64, f32> = sim.clans.iter().map(|c| (c.id.0, c.stock)).collect();
+            for (id, pos, known, age, clan, act, extra) in views {
+                // Ce qui ouvre ou ferme l'accès à la réserve (`brain`, « puiser dans
+                // le stock ») : réserve du clan, troupeau à portée de vue (~2 km),
+                // fourrage de la tuile.
+                let herd_km = herds_at.iter().map(|h| tiles_to_km((h.0 - pos.0).hypot(h.1 - pos.1))).fold(f64::INFINITY, f64::min);
+                let stock = clan.and_then(|c| stock_of.get(&c)).copied().unwrap_or(f32::NAN);
+                let forage = sim.world.tile(pos.0 as i64, pos.1 as i64).biomass;
+                let extra = format!("{extra},{stock:.2},{herd_km:.2},{forage}");
+                let real = sim.world.nearest_spring((pos.0 as i64, pos.1 as i64), 16);
+                let km = |s: Option<(i64, i64)>| s.map_or(f64::NAN, |s| tiles_to_km((s.0 as f64 - pos.0).hypot(s.1 as f64 - pos.1)));
+                let (camp_km, since_days) = clan.and_then(|c| camp_of.get(&c)).map_or((f64::NAN, f64::NAN), |(h, last)| {
+                    (tiles_to_km((h.0 - pos.0).hypot(h.1 - pos.1)), tick.saturating_sub(*last) as f64 / TICKS_PER_DAY as f64)
+                });
+                parched.insert(id, ([tick as f64 / TICKS_PER_DAY as f64, age, km(known), km(real), camp_km, since_days, f64::from(act == Activity::Walking)], extra));
+            }
+            // La nuit à la latitude du camp courant (pas du point de départ :
+            // une bande mobile peut s'en éloigner de centaines de km).
             let dark = sim.climate.light(ref_point.1 as i64, sim.time) == 0.0;
             for (_, (demo, behavior)) in sim.agents.query::<(&Demographics, &Behavior)>().iter() {
                 if !demo.is_adult(sim.time.tick) {
@@ -393,8 +488,8 @@ fn main() {
             }
         }
         infected_yesterday = infected_today;
-        // La faim d'hiver (2026-10-23, colonnes alignées sur `exp/camp-memoire` ;
-        // pas de levée du camp sur `main`).
+        // La faim d'hiver (2026-10-23) : kcal acquises du jour par activité
+        // (toute la population), réserve des clans, faim moyenne des adultes.
         let kcal_now: BTreeMap<u64, [f64; 2]> = sim
             .agents
             .query::<(&AgentId, &cairn_sim::yields::Yields)>()
@@ -417,9 +512,20 @@ fn main() {
             .filter(|(_, (d, _))| d.is_adult(sim.time.tick))
             .fold((0.0f32, 0u32), |a, (_, (_, p))| (a.0 + p.hunger, a.1 + 1));
         let hunger_adults = hs / hn.max(1) as f32;
+        // MAR-6b + MEM-3 : levées vers un lieu de 2 km qui a déjà été un camp
+        // du même clan ; plus grande distance d'un foyer au départ.
+        for m in &sim.camp_moves[seen_moves..] {
+            old_camps.insert((m.clan, cairn_sim::memory::place_of(m.from)));
+            moves_back += usize::from(old_camps.contains(&(m.clan, cairn_sim::memory::place_of(m.to))));
+            old_camps.insert((m.clan, cairn_sim::memory::place_of(m.to)));
+        }
+        seen_moves = sim.camp_moves.len();
+        for c in &sim.clans {
+            max_from_start = max_from_start.max(tiles_to_km((c.home.0 - home.0 as f64).hypot(c.home.1 - home.1 as f64)));
+        }
         writeln!(
             csv,
-            "{day},{:.3},{pop},{},{},{},{},{in_clan},{},{},{formed},{dissolved},{merged},{},{tension_max:.3},{tense},{hunger_mean:.3},{hunger_p90:.3},{fire},{copper},{},{disc},{forgot},{herds},{heads:.0},{packs},{predators:.0},{},{},{tps_day:.1},{tps_win:.1},{},{dead_infants},{dead_children},{:.1},{:.1},{:.2},{:.2},{},{hunted_day:.2},{walk_per_adult:.2},{dark_slept:.3},{near_herds},{camp_step_km:.3},{:.2},{inter:.2},{chief_huts},{},{},{},{},{},{},{},{},{},{dist_ab:.2},{contacts_ab},{links_ab},{mixed_clans},{mixed_births},{cross_contagions},0,0,0,NaN,{gather_day:.0},{hunt_day:.0},{stock_total:.1},{hunger_adults:.3}",
+            "{day},{:.3},{pop},{},{},{},{},{in_clan},{},{},{formed},{dissolved},{merged},{},{tension_max:.3},{tense},{hunger_mean:.3},{hunger_p90:.3},{fire},{copper},{},{disc},{forgot},{herds},{heads:.0},{packs},{predators:.0},{},{},{tps_day:.1},{tps_win:.1},{},{dead_infants},{dead_children},{:.1},{:.1},{:.2},{:.2},{},{hunted_day:.2},{walk_per_adult:.2},{dark_slept:.3},{near_herds},{camp_step_km:.3},{:.2},{inter:.2},{chief_huts},{},{},{},{},{},{},{},{},{},{dist_ab:.2},{contacts_ab},{links_ab},{mixed_clans},{mixed_births},{cross_contagions},{},{},{moves_back},{max_from_start:.2},{gather_day:.0},{hunt_day:.0},{stock_total:.1},{hunger_adults:.3}",
             day as f64 / 360.0,
             sim.births.len(),
             sim.deaths.len(),
@@ -447,6 +553,8 @@ fn main() {
             deaths_by_origin[1][1],
             deaths_by_origin[0][2],
             deaths_by_origin[1][2],
+            sim.camp_moves.len(),
+            sim.camp_moves.iter().filter(|m| m.chosen_known).count(),
         )
         .unwrap();
         csv.flush().unwrap();
@@ -490,6 +598,11 @@ fn main() {
         day as f64 / 360.0,
         started.elapsed().as_secs_f64() / 3600.0
     );
+    let mut log = std::fs::File::create(format!("{out}.morts.csv")).expect("journal des morts lentes");
+    writeln!(log, "jour,age,km_source_connue,km_source_reelle,km_camp,jours_depuis_levee,en_marche,cause,activite,tache,soif,faim,froid,sante,h_depuis_gorgee,porteur,stock_clan,km_troupeau,fourrage_tuile").unwrap();
+    for (r, extra) in &thirst_log {
+        writeln!(log, "{:.2},{:.2},{:.2},{:.2},{:.2},{:.1},{},{extra}", r[0], r[1], r[2], r[3], r[4], r[5], r[6]).unwrap();
+    }
 }
 
 /// Mémoire résidente du processus, en ko (`/proc/self/status`, Linux).

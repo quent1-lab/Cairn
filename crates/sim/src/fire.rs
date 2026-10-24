@@ -324,6 +324,7 @@ mod tests {
             chief: member,
             desired: None,
             rivalry: 0.0,
+            camp: Default::default(),
         });
 
         // Premier incendie sous leurs yeux : cela fait date.

@@ -550,6 +550,22 @@ pub struct Clan {
     /// chaud, son stock vide et sans voisin menaçant. Lue par `brain::decide`
     /// pour proposer un candidat `TaskKind::Build`.
     pub desired: Option<StructureKind>,
+    /// Ce que le clan tire du pays depuis qu'il a posé son camp
+    /// (`crate::camp`, MAR-6b) : c'est à cette aune qu'il décide de le lever.
+    pub camp: CampLedger,
+}
+
+/// Ce qu'un camp a rapporté à la bande depuis qu'elle l'a posé : heures de
+/// subsistance de ses adultes et kcal nettes, qui s'effacent avec une
+/// demi-vie de quelques jours (`yields::RECENT_HALF_LIFE_DAYS`) — le rendement
+/// **du moment**, celui que la valeur marginale compare à l'habitude.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct CampLedger {
+    pub h: f32,
+    pub net: f32,
+    /// La part de `net` venue de la chasse (relevé pour les bancs : ce qui
+    /// déclenche une levée).
+    pub net_hunt: f32,
 }
 
 /// Instantané minimal d'un clan pour la délibération (`brain::decide`) : ce
@@ -1431,13 +1447,18 @@ fn detect_clans(sim: &mut Sim) {
             let majority_new = overlap * IDENTITY_SHARE_DEN >= cluster.len() * IDENTITY_SHARE_NUM;
             if majority_old && majority_new {
                 matched[i] = true;
+                // Le foyer est le **camp** : il reste où la bande l'a posé,
+                // quoi que fasse le centroïde du jour ; seule la décision de
+                // lever le camp le déplace (`crate::camp`, MAR-6b).
+                let _ = home;
                 next.push(Clan {
                     id: clan.id,
                     founded_tick: clan.founded_tick,
                     members: cluster.clone(),
-                    home: *home,
+                    home: clan.home,
                     stock: clan.stock,
                     rivalry: clan.rivalry,
+                    camp: clan.camp,
                     chief: clan.chief, // provisoire : `elect_chiefs` le recalcule juste après
                     desired: clan.desired, // reporté ; `structures::plan` le recalcule à minuit
                 });
@@ -1478,6 +1499,7 @@ fn detect_clans(sim: &mut Sim) {
             home,
             stock: 0.0,
             rivalry: 0.0,
+            camp: Default::default(),
             desired: None, // un clan neuf n'a encore rien mesuré ; `structures::plan` décidera
         });
     }
@@ -1972,6 +1994,7 @@ mod tests {
             chief: AgentId(0),
             desired: None,
             rivalry: 0.0,
+            camp: Default::default(),
         });
         sim.clans.push(Clan {
             id: ClanId(2),
@@ -1982,6 +2005,7 @@ mod tests {
             chief: AgentId(100),
             desired: None,
             rivalry: 0.0,
+            camp: Default::default(),
         });
         let midpoint = ((home_a.0 + home_b.0) / 2.0, (home_a.1 + home_b.1) / 2.0);
         sim.spawn_herd(midpoint.0, midpoint.1, herd_population);
@@ -2059,6 +2083,7 @@ mod tests {
             chief: AgentId(id * 1000),
             desired: None,
             rivalry: 0.0,
+            camp: Default::default(),
         }
     }
 
@@ -2223,6 +2248,7 @@ mod tests {
             chief: low, // valeur de départ arbitraire : doit changer
             desired: None,
             rivalry: 0.0,
+            camp: Default::default(),
         });
 
         elect_chiefs(&mut sim);
@@ -2249,6 +2275,7 @@ mod tests {
             chief: b,
             desired: None,
             rivalry: 0.0,
+            camp: Default::default(),
         });
 
         elect_chiefs(&mut sim);

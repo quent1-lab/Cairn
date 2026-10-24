@@ -37,6 +37,8 @@ fn slot(a: Activity) -> usize {
 #[derive(Default, Clone)]
 struct Report {
     label: String,
+    /// MAR-6b + MEM-3 : les levées du camp de la run.
+    moves: Vec<cairn_sim::camp::CampMove>,
     /// [sexe][heure][activité] : heures-adulte.
     by_hour: Vec<Vec<[u64; 10]>>,
     /// [sexe] tâche → heures de marche.
@@ -249,6 +251,7 @@ fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
     r.herbivores.1 = sim.fauna_census().0;
     r.huts_built = huts.len();
     r.chief_huts = sim.structures.iter().filter(|s| s.kind == cairn_sim::StructureKind::ChiefHut).count();
+    r.moves = sim.camp_moves.clone();
     r.camp_net_km = camps.values().map(|(a, b)| cairn_core::tiles_to_km((a.0 - b.0).hypot(a.1 - b.1))).collect();
     r
 }
@@ -338,6 +341,69 @@ fn print(rs: &[Report]) {
             r.chief_huts,
             r.camp_moves,
             r.huts_built
+        );
+    }
+    // MAR-6b + MEM-3 (pré-mortem) : sur quoi se fait le choix du camp.
+    let moves: Vec<&cairn_sim::camp::CampMove> = rs.iter().flat_map(|r| r.moves.iter()).collect();
+    if !moves.is_empty() {
+        let n = moves.len() as f64;
+        let share = |f: &dyn Fn(&cairn_sim::camp::CampMove) -> bool| 100.0 * moves.iter().filter(|m| f(m)).count() as f64 / n;
+        let mean = |f: &dyn Fn(&cairn_sim::camp::CampMove) -> f64| moves.iter().map(|m| f(m)).sum::<f64>() / n;
+        let mut dist: Vec<f64> = moves.iter().map(|m| cairn_core::tiles_to_km((m.to.0 - m.from.0).hypot(m.to.1 - m.from.1))).collect();
+        dist.sort_by(f64::total_cmp);
+        // Retour vers un ancien camp : le lieu de 2 km de la destination a déjà
+        // été un camp du même clan dans la run.
+        let mut seen: std::collections::BTreeSet<(u64, (i64, i64))> = std::collections::BTreeSet::new();
+        let mut back = 0usize;
+        for r in rs {
+            seen.clear();
+            for m in &r.moves {
+                seen.insert((m.clan, cairn_sim::memory::place_of(m.from)));
+                back += usize::from(seen.contains(&(m.clan, cairn_sim::memory::place_of(m.to))));
+                seen.insert((m.clan, cairn_sim::memory::place_of(m.to)));
+            }
+        }
+        println!(
+            "\n## levées du camp (tous runs) : {} ; destination travaillée {:.0} % (sinon seulement vue) ; candidats connus {:.0} % (moy. {:.1} sur {:.1}) ; gibier vu au lieu retenu {:.0} % ; vers un ancien camp {:.0} %",
+            moves.len(),
+            share(&|m| m.chosen_known),
+            100.0 * mean(&|m| f64::from(m.known)) / mean(&|m| f64::from(m.candidates)).max(1e-9),
+            mean(&|m| f64::from(m.known)),
+            mean(&|m| f64::from(m.candidates)),
+            share(&|m| m.game > 0),
+            100.0 * back as f64 / n,
+        );
+        println!(
+            "   facteurs du lieu retenu (moy.) : attendu {:.0} kcal/h ; {:.1} kcal/h par unité de fourrage vu ; gibier ×{:.2} ; trajet ×{:.2} ; distance médiane {:.1} km (p90 {:.1})",
+            mean(&|m| m.remembered),
+            mean(&|m| m.prior),
+            mean(&|m| 1.0 + f64::from(m.game)),
+            mean(&|m| m.day),
+            dist[dist.len() / 2],
+            dist[dist.len() * 9 / 10],
+        );
+    }
+    if !moves.is_empty() {
+        let v = |f: &dyn Fn(&cairn_sim::camp::CampMove) -> f64| {
+            let mut x: Vec<f64> = moves.iter().map(|m| f(m)).collect();
+            x.sort_by(f64::total_cmp);
+            (x[x.len() / 10], x[x.len() / 2], x[x.len() * 9 / 10])
+        };
+        let show = |(a, b, c): (f64, f64, f64)| format!("{a:.0} / {b:.0} / {c:.0}");
+        println!("   déclencheurs (p10 / médiane / p90, kcal nettes par jour d'adulte) :");
+        println!("     camp {} dont chasse {} ; habitude {} dont chasse {}", show(v(&|m| m.now)), show(v(&|m| m.now_hunt)), show(v(&|m| m.habit)), show(v(&|m| m.habit_hunt)));
+        println!(
+            "     camp hors chasse {} contre habitude hors chasse {} ; jours au camp {}",
+            show(v(&|m| m.now - m.now_hunt)),
+            show(v(&|m| m.habit - m.habit_hunt)),
+            show(v(&|m| m.days_at_camp)),
+        );
+        let n = moves.len() as f64;
+        let share = |f: &dyn Fn(&cairn_sim::camp::CampMove) -> bool| 100.0 * moves.iter().filter(|m| f(m)).count() as f64 / n;
+        println!(
+            "     levées où la chasse fait plus de la moitié de l'habitude {:.0} % ; où le camp, hors chasse, rendait autant ou plus que l'habitude hors chasse {:.0} %",
+            share(&|m| m.habit_hunt > 0.5 * m.habit),
+            share(&|m| m.now - m.now_hunt >= m.habit - m.habit_hunt),
         );
     }
     println!("  (chasseurs-cueilleurs : ~160-175 km/an de déplacements résidentiels ; Batek : un camp tous les 8 j)");
