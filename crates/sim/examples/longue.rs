@@ -88,11 +88,15 @@ fn main() {
     }
 
     let mut csv = std::fs::File::create(&out).expect("fichier CSV");
+    // MAR-6d : chaque levée du camp, pour lire la forme du chemin (déplacement
+    // quadratique, rayon de giration, retours à un camp ancien).
+    let mut camps_log = std::fs::File::create(format!("{out}.camps.csv")).expect("journal des camps");
+    writeln!(camps_log, "tick,clan,de_x_km,de_y_km,vers_x_km,vers_y_km,lieu_travaille,attendu,trajet").unwrap();
     let mut camp_prev: BTreeMap<u64, (f64, f64)> = BTreeMap::new();
     let causes_head: Vec<String> = CAUSES.iter().map(|c| format!("morts_{c:?}")).collect();
     writeln!(
         csv,
-        "jour,an,pop,naissances,morts,{},clans,en_clan,taille_med,taille_max,clans_formes,clans_dissous,clans_absorbes,liens_med,tension_max,paires_tendues,faim_moy,faim_p90,expo_feu,expo_cuivre,techs_vivantes,decouvertes,oublis,troupeaux,tetes,meutes,predateurs,mailles_faune,chunks,tps_jour,tps_30j,rss_mo,morts_nourrissons,morts_enfants,age_med_deces_10a,age_med_vivants,disp_med_km,disp_max_km,tailles_clans,chasse_tetes,marche_h_adulte,noir_dormi,troupeaux_10km,foyers_km_jour,foyer_depart_km,inter_clans_km,huttes_chef,pop_A,pop_B,pop_mixte,morts_A,morts_B,morts_violence_A,morts_violence_B,morts_maladie_A,morts_maladie_B,dist_AB_km,contacts_AB_100m,liens_AB,clans_mixtes,naissances_mixtes,contagions_AB,levees,levees_memoire,levees_retour,foyer_max_km,kcal_cueillette_j,kcal_chasse_j,stock_clans,faim_moy_adultes",
+        "jour,an,pop,naissances,morts,{},clans,en_clan,taille_med,taille_max,clans_formes,clans_dissous,clans_absorbes,liens_med,tension_max,paires_tendues,faim_moy,faim_p90,expo_feu,expo_cuivre,techs_vivantes,decouvertes,oublis,troupeaux,tetes,meutes,predateurs,mailles_faune,chunks,tps_jour,tps_30j,rss_mo,morts_nourrissons,morts_enfants,age_med_deces_10a,age_med_vivants,disp_med_km,disp_max_km,tailles_clans,chasse_tetes,marche_h_adulte,noir_dormi,troupeaux_10km,foyers_km_jour,foyer_depart_km,inter_clans_km,huttes_chef,pop_A,pop_B,pop_mixte,morts_A,morts_B,morts_violence_A,morts_violence_B,morts_maladie_A,morts_maladie_B,dist_AB_km,contacts_AB_100m,liens_AB,clans_mixtes,naissances_mixtes,contagions_AB,levees,levees_memoire,levees_retour,foyer_max_km,kcal_cueillette_j,kcal_chasse_j,stock_clans,faim_moy_adultes,sources_bande,sources_bande_max_km,anciens_camps_candidats",
         causes_head.join(",")
     )
     .unwrap();
@@ -493,13 +497,59 @@ fn main() {
             moves_back += usize::from(old_camps.contains(&(m.clan, cairn_sim::memory::place_of(m.to))));
             old_camps.insert((m.clan, cairn_sim::memory::place_of(m.to)));
         }
+        for m in &sim.camp_moves[seen_moves..] {
+            writeln!(
+                camps_log,
+                "{},{},{:.3},{:.3},{:.3},{:.3},{},{:.1},{:.3}",
+                m.tick,
+                m.clan,
+                tiles_to_km(m.from.0),
+                tiles_to_km(m.from.1),
+                tiles_to_km(m.to.0),
+                tiles_to_km(m.to.1),
+                u8::from(m.chosen_known),
+                m.remembered,
+                m.day
+            )
+            .unwrap();
+        }
         seen_moves = sim.camp_moves.len();
+        // MAR-6d : ce que sait la bande la plus nombreuse de ses sources — combien,
+        // jusqu'où, et combien de ses anciens camps restent candidats (une source
+        // connue dans le lieu de 2 km d'un camp quitté).
+        let (band_springs, band_springs_max_km, old_candidates) = match sim
+            .clans
+            .iter()
+            .max_by_key(|c| (c.members.len(), std::cmp::Reverse(c.id.0)))
+        {
+            Some(big) => {
+                let mut springs: BTreeSet<(i64, i64)> = BTreeSet::new();
+                for (_, (membership, mem)) in sim.agents.query::<(&ClanMembership, &cairn_sim::Memory)>().iter() {
+                    if membership.0 == Some(big.id) {
+                        springs.extend(mem.springs.iter().copied());
+                    }
+                }
+                let at = |s: &(i64, i64)| (s.0 as f64 + 0.5, s.1 as f64 + 0.5);
+                let far = springs
+                    .iter()
+                    .map(|s| tiles_to_km((at(s).0 - big.home.0).hypot(at(s).1 - big.home.1)))
+                    .fold(0.0f64, f64::max);
+                let here = cairn_sim::memory::place_of(big.home);
+                let spring_places: BTreeSet<(i64, i64)> = springs.iter().map(|s| cairn_sim::memory::place_of(at(s))).collect();
+                let candidates = old_camps
+                    .iter()
+                    .filter(|(clan, place)| *clan == big.id.0 && *place != here && spring_places.contains(place))
+                    .count();
+                (springs.len(), far, candidates)
+            }
+            None => (0, 0.0, 0),
+        };
         for c in &sim.clans {
             max_from_start = max_from_start.max(tiles_to_km((c.home.0 - home.0 as f64).hypot(c.home.1 - home.1 as f64)));
         }
         writeln!(
             csv,
-            "{day},{:.3},{pop},{},{},{},{},{in_clan},{},{},{formed},{dissolved},{merged},{},{tension_max:.3},{tense},{hunger_mean:.3},{hunger_p90:.3},{fire},{copper},{},{disc},{forgot},{herds},{heads:.0},{packs},{predators:.0},{},{},{tps_day:.1},{tps_win:.1},{},{dead_infants},{dead_children},{:.1},{:.1},{:.2},{:.2},{},{hunted_day:.2},{walk_per_adult:.2},{dark_slept:.3},{near_herds},{camp_step_km:.3},{:.2},{inter:.2},{chief_huts},{},{},{},{},{},{},{},{},{},{dist_ab:.2},{contacts_ab},{links_ab},{mixed_clans},{mixed_births},{cross_contagions},{},{},{moves_back},{max_from_start:.2},{gather_day:.0},{hunt_day:.0},{stock_total:.1},{hunger_adults:.3}",
+            "{day},{:.3},{pop},{},{},{},{},{in_clan},{},{},{formed},{dissolved},{merged},{},{tension_max:.3},{tense},{hunger_mean:.3},{hunger_p90:.3},{fire},{copper},{},{disc},{forgot},{herds},{heads:.0},{packs},{predators:.0},{},{},{tps_day:.1},{tps_win:.1},{},{dead_infants},{dead_children},{:.1},{:.1},{:.2},{:.2},{},{hunted_day:.2},{walk_per_adult:.2},{dark_slept:.3},{near_herds},{camp_step_km:.3},{:.2},{inter:.2},{chief_huts},{},{},{},{},{},{},{},{},{},{dist_ab:.2},{contacts_ab},{links_ab},{mixed_clans},{mixed_births},{cross_contagions},{},{},{moves_back},{max_from_start:.2},{gather_day:.0},{hunt_day:.0},{stock_total:.1},{hunger_adults:.3},{band_springs},{band_springs_max_km:.2},{old_candidates}",
             day as f64 / 360.0,
             sim.births.len(),
             sim.deaths.len(),
