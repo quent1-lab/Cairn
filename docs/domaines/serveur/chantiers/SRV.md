@@ -54,4 +54,4 @@ quatre processus sur deux cœurs, non isolé.
 - L'horizon : 1 100 ticks. La cadence chutera quand la population et la faune croîtront
   (PERF : ~10 ticks/s à 170 humains) ; une semaine sans fuite (critère BRIEF) n'est pas
   mesurée.
-- `scene.rs` recopie la scène du banc : deux copies qui peuvent diverger.
+- ~~`scene.rs` recopie la scène du banc~~ : réglé le 2026-10-24, `scenario::reference` partagé (banc `marche` 20 j × 4 runs identique avant/après).

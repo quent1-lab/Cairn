@@ -20,10 +20,9 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use cairn_core::{TICKS_PER_DAY, WorldSeed, km_to_tiles};
+use cairn_core::TICKS_PER_DAY;
 use cairn_sim::social::{BOND_THRESHOLD, RESIDENCE_RADIUS_TILES};
-use cairn_sim::{ClanEventKind, Sim, fauna, scenario};
-use cairn_worldgen::Biome;
+use cairn_sim::{ClanEventKind, scenario};
 
 const CAUSES: [&str; 5] = ["morts", "sans lien", "trop petit", "dispersé", "autre"];
 /// Délai de retour suivi au plus (jours).
@@ -97,32 +96,7 @@ fn main() {
 
 fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
     // Même scène que le banc `acceptation`.
-    let n_agents = if cold { 60 } else { 40 };
-    let mut sim = Sim::new(WorldSeed(seed), 16384);
-    scenario::start_on_day(&mut sim, start_day);
-    let seed_point = (km_to_tiles(1500.0) as i64, km_to_tiles(2100.0) as i64);
-    let home = if cold {
-        scenario::find_home_where(
-            &mut sim,
-            seed_point,
-            1.0..=5.0,
-            &[Biome::TemperateForest, Biome::Taiga, Biome::Grassland],
-        )
-        .unwrap_or_else(|| scenario::find_home(&mut sim, seed_point))
-    } else {
-        scenario::find_home(&mut sim, seed_point)
-    };
-    scenario::populate(&mut sim, home, n_agents, 2);
-    for i in 0..4i64 {
-        let angle = i as f64 * 1.57;
-        let (x, y) = (
-            home.0 + (angle.cos() * km_to_tiles(4.0)) as i64,
-            home.1 + (angle.sin() * km_to_tiles(4.0)) as i64,
-        );
-        if sim.world.tile(x, y).is_walkable() {
-            sim.spawn_pack(x as f64, y as f64, fauna::PACK_START);
-        }
-    }
+    let (mut sim, _, _) = scenario::reference(seed, cold, start_day);
     let mut r = Report { label: format!("{} {seed}", if cold { "froid" } else { "tempéré" }), ..Report::default() };
     // Clans de l'heure d'avant : (id, membres, fondé au tick).
     let mut prev: Vec<(u64, Vec<u64>, u64)> = Vec::new();

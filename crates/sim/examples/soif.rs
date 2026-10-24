@@ -16,9 +16,8 @@
 
 use std::collections::BTreeMap;
 
-use cairn_core::{TICKS_PER_DAY, WorldSeed, km_to_tiles, tiles_to_km};
-use cairn_sim::{AgentId, Behavior, ClanMembership, DeathCause, Demographics, Kinship, Memory, Physiology, Position, Sim, fauna, scenario};
-use cairn_worldgen::Biome;
+use cairn_core::{TICKS_PER_DAY, tiles_to_km};
+use cairn_sim::{AgentId, Behavior, ClanMembership, DeathCause, Demographics, Kinship, Memory, Physiology, Position, scenario};
 
 #[derive(Default, Clone)]
 struct Report {
@@ -97,24 +96,7 @@ fn main() {
 }
 
 fn run(seed: u64, cold: bool, days: u64, start_day: u64) -> Report {
-    let n_agents = if cold { 60 } else { 40 };
-    let mut sim = Sim::new(WorldSeed(seed), 16384);
-    scenario::start_on_day(&mut sim, start_day);
-    let seed_point = (km_to_tiles(1500.0) as i64, km_to_tiles(2100.0) as i64);
-    let home = if cold {
-        scenario::find_home_where(&mut sim, seed_point, 1.0..=5.0, &[Biome::TemperateForest, Biome::Taiga, Biome::Grassland])
-            .unwrap_or_else(|| scenario::find_home(&mut sim, seed_point))
-    } else {
-        scenario::find_home(&mut sim, seed_point)
-    };
-    scenario::populate(&mut sim, home, n_agents, 2);
-    for i in 0..4i64 {
-        let angle = i as f64 * 1.57;
-        let (x, y) = (home.0 + (angle.cos() * km_to_tiles(4.0)) as i64, home.1 + (angle.sin() * km_to_tiles(4.0)) as i64);
-        if sim.world.tile(x, y).is_walkable() {
-            sim.spawn_pack(x as f64, y as f64, fauna::PACK_START);
-        }
-    }
+    let (mut sim, _, _) = scenario::reference(seed, cold, start_day);
     let mut r = Report { label: format!("{} {seed}", if cold { "froid" } else { "tempéré" }), ..Report::default() };
     let mut last: BTreeMap<u64, String> = BTreeMap::new();
     let mut seen_deaths = 0usize;

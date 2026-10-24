@@ -24,8 +24,7 @@ use cairn_sim::exposure::{Exposure, Exposures};
 use cairn_sim::fauna::Herd;
 use cairn_sim::social::BOND_THRESHOLD;
 use cairn_sim::tech::TechEventKind;
-use cairn_sim::{Activity, AgentId, Behavior, ClanEventKind, ClanMembership, DeathCause, Demographics, Physiology, Position, Sim, fauna, scenario};
-use cairn_worldgen::Biome;
+use cairn_sim::{Activity, AgentId, Behavior, ClanEventKind, ClanMembership, DeathCause, Demographics, Physiology, Position, Sim, scenario};
 
 const STOP_TPS: f64 = 1.0;
 /// Plafond mémoire par défaut (deux runs sur la machine) ; un argument le relève
@@ -63,30 +62,14 @@ fn main() {
     let stop_rss_kb: u64 = args.next().and_then(|s| s.parse::<u64>().ok()).map_or(STOP_RSS_KB, |mo| mo * 1000);
 
     // Même scène que `acceptation`.
-    let n_agents = agents_arg.unwrap_or(if cold { 60 } else { 40 });
-    let mut sim = Sim::new(WorldSeed(seed), 16384);
+    let n_agents = agents_arg.unwrap_or(scenario::reference_agents(cold));
+    let mut sim = Sim::new(WorldSeed(seed), scenario::REFERENCE_CAPACITY);
     scenario::start_on_day(&mut sim, start_day);
-    let seed_point = (km_to_tiles(1500.0) as i64, km_to_tiles(2100.0) as i64);
-    let home = if cold {
-        scenario::find_home_where(
-            &mut sim,
-            seed_point,
-            1.0..=5.0,
-            &[Biome::TemperateForest, Biome::Taiga, Biome::Grassland],
-        )
-        .unwrap_or_else(|| scenario::find_home(&mut sim, seed_point))
-    } else {
-        scenario::find_home(&mut sim, seed_point)
-    };
+    let home = scenario::reference_home(&mut sim, cold, scenario::reference_seed_point());
     let mut homes = vec![home];
     if second_km > 0.0 {
         let point = (home.0 + km_to_tiles(second_km) as i64, home.1);
-        let second = if cold {
-            scenario::find_home_where(&mut sim, point, 1.0..=5.0, &[Biome::TemperateForest, Biome::Taiga, Biome::Grassland])
-                .unwrap_or_else(|| scenario::find_home(&mut sim, point))
-        } else {
-            scenario::find_home(&mut sim, point)
-        };
+        let second = scenario::reference_home(&mut sim, cold, point);
         homes.push(second);
     }
     // L'origine de chacun : 0 et 1 les deux foyers, 2 un enfant de parents
@@ -97,16 +80,7 @@ fn main() {
         for (_, id) in sim.agents.query::<&AgentId>().iter() {
             origin.entry(id.0).or_insert(k as u8);
         }
-        for i in 0..4i64 {
-            let angle = i as f64 * 1.57;
-            let (x, y) = (
-                home.0 + (angle.cos() * km_to_tiles(4.0)) as i64,
-                home.1 + (angle.sin() * km_to_tiles(4.0)) as i64,
-            );
-            if sim.world.tile(x, y).is_walkable() {
-                sim.spawn_pack(x as f64, y as f64, fauna::PACK_START);
-            }
-        }
+        scenario::reference_packs(&mut sim, home);
     }
     if homes.len() == 2 {
         let d = ((homes[0].0 - homes[1].0) as f64).hypot((homes[0].1 - homes[1].1) as f64);
