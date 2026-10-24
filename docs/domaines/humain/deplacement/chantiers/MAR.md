@@ -1525,3 +1525,22 @@ Relu colonne par colonne pour ce qui supposait une bande immobile :
 Journal des morts lentes (`<csv>.morts.csv`, remplace `.soif.csv`) : soif, faim et froid, avec la
 cause, l'état de l'heure d'avant (relevé dès que la santé passe sous 0,2).
 Remesure : `longue` froid 4 × 10 ans, MEM-3 par saison contre `main` (mêmes corrections).
+
+### Remesure avec l'instrument corrigé (`longue` froid 4 × 10 ans ; `main` 117d0ed, branche 53362a3)
+Dynamique inchangée (populations des ans 5-10 de la branche : 7, 54, 36, 74, comme aa51683).
+- **Troupeaux autour du camp courant** (an 1/4/7/10) : `main` f42 10/46/96/105, f7 19/63/76/85,
+  f1337 7/18/16/32, f2024 7/70/75/88 ; branche f42 8/40/0/0 (bande presque éteinte), f7 4/7/11/14,
+  f1337 6/18/20/37, f2024 6/4/11/6. La bande mobile a moins de troupeaux autour d'elle (sauf
+  f1337), mais **ne les a pas « quittés »** : la lecture d'avant est corrigée.
+- **Nourriture d'hiver par personne** (kcal/j, cueillette + chasse, ~janvier-février) : la bande
+  mobile en a **autant ou plus** que l'immobile (f1337 : 2 000-3 100 contre 1 300-1 500 ; f2024 :
+  2 400-4 000 contre 1 800-3 300).
+- **Qui meurt de faim** (62 morts sur la branche, journal des morts lentes) : **des adultes** (54),
+  **loin du camp** (38 à plus de 2 km, souvent 3-5 km), **en hiver**, **quelques jours après une
+  levée** (0,2 à 7 j), en train de cueillir ou de chasser, faim 1, santé 0. Froid : 35 morts, soif 43.
+**Verdict (à confirmer par l'utilisateur)** : ce n'est pas la dureté du pays — dans le même pays,
+la bande immobile ne meurt pas de faim (0 à 9 en 10 ans), et la bande mobile a en moyenne autant à
+manger l'hiver. Ce qui tue, c'est **la dynamique d'après une levée d'hiver** : des adultes partis
+cueillir ou chasser à 3-5 km d'un camp neuf, sans revenir manger ce que la bande a. Les famines
+réelles (Kivalliq, 1916-1926 ; Keewatin, 1950) suivent l'effondrement d'une ressource, pas une
+abondance moyenne : **problème de modèle**.
