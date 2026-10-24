@@ -495,16 +495,17 @@ fn build_candidates(
     }
 
     // — Puiser dans le stock du clan : le pendant collectif de la cueillette
-    //   et de la chasse (BRIEF §5.1). Même garde que le désespoir alimentaire
-    //   de l'errance plus bas — rien de local ne répond — pour qu'un membre
-    //   ne vide le stock commun que quand il en a vraiment besoin, pas parce
-    //   qu'il existe. La cible est le foyer du clan : le stock se puise sur
-    //   place, il ne se livre pas.
+    //   et de la chasse (BRIEF §5.1). La cible est le foyer du clan : le stock
+    //   se puise sur place, il ne se livre pas. Plus de porte (2026-10-24,
+    //   décision de l'utilisateur) : la réserve se compare à la cueillette et
+    //   à la chasse, chacune pesée par ce qu'elle rapporte à l'expérience —
+    //   l'hiver, la cueillette ne rend plus et la réserve l'emporte d'elle-même.
+    //   L'ancienne porte (fourrage < 5 ou maille épuisée, et aucun troupeau en
+    //   vue) se fermait sur la biomasse du gibier, haute l'hiver : 85 % des
+    //   morts de faim des bandes mobiles en froid, réserve pleine.
     if let Some(clan_id) = clan
         && let Some(view) = clan_views.get(&clan_id)
         && view.stock > MIN_STOCK_WORTH_TRIP
-        && (forage_biomass < FORAGE_MIN_BIOMASS || share_here < LEAN_SHARE)
-        && nearest_herd.is_none()
     {
         let urgency = Curve::Logistic { steepness: 6.0, midpoint: 0.4 }.eval(phys.hunger);
         let target = (view.home.0.floor() as i64, view.home.1.floor() as i64);

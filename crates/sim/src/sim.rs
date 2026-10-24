@@ -4886,6 +4886,40 @@ mod tests {
 
     /// Le pendant du dépôt : puiser dans le stock au foyer réduit la faim
     /// **et** le stock, du même montant — ni nourriture créée, ni perdue.
+    /// Un affamé qui voit passer un troupeau, la réserve du clan pleine, pense à
+    /// y puiser (2026-10-24) : l'ancienne porte (fourrage < 5 ou maille épuisée,
+    /// et aucun troupeau en vue) la lui fermait.
+    #[test]
+    fn un_affame_pense_a_la_reserve_meme_sur_une_tuile_qui_parait_riche() {
+        let (mut sim, home) = scenario_au_foyer(5, 1, 0);
+        sim.time.tick = 135 * cairn_core::TICKS_PER_DAY + 12; // midi : on voit le troupeau
+        let id = sim.agents.query::<&AgentId>().iter().next().map(|(_, a)| *a).unwrap();
+        let rich = sim.world.tile(home.0, home.1).biomass;
+        assert!(rich >= 5, "la tuile du foyer porte du fourrage ({rich})");
+        for (_, (phys, m)) in sim.agents.query_mut::<(&mut Physiology, &mut ClanMembership)>() {
+            phys.hunger = 0.9;
+            m.0 = Some(social::ClanId(1));
+        }
+        sim.clans.push(Clan {
+            id: social::ClanId(1),
+            founded_tick: 0,
+            members: [id].into_iter().collect(),
+            home: (home.0 as f64 + 300.5, home.1 as f64 + 0.5),
+            stock: 50.0,
+            chief: id,
+            desired: None,
+            rivalry: 0.0,
+            camp: Default::default(),
+        });
+        // Un troupeau passe à 200 m : la chasse a échoué jusqu'ici, il ne nourrit pas.
+        sim.spawn_herd(home.0 as f64 + 100.0, home.1 as f64 + 0.5, 30.0);
+        let motivations = sim.inspect_agent(id).expect("l'agent délibère");
+        assert!(
+            motivations.iter().any(|m| m.kind == TaskKind::EatFromStock),
+            "la réserve pleine doit être une option pour un affamé"
+        );
+    }
+
     #[test]
     fn puiser_dans_le_stock_reduit_la_faim_et_le_stock_a_parts_egales() {
         let mut sim = Sim::new(WorldSeed(42), 512);

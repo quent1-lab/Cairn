@@ -1569,3 +1569,14 @@ Réfuterait : réserve vide (≤ 0,1) dans la plupart des morts (alors la bande 
 biomasse et sur l'absence de troupeau en vue — deux signes qui disent « il y a à manger ici » alors
 qu'en hiver ni la biomasse ni un troupeau aperçu ne nourrissent. Une bande immobile vit dans un pays
 épuisé (porte ouverte) ; une bande qui vient d'arriver ailleurs, non.
+
+## La porte de la réserve retirée (décision de l'utilisateur, 2026-10-24)
+Changement (`brain`) : la réserve du clan est une option pour tout membre quand elle n'est pas vide,
+pesée par la faim et la distance au camp ; elle se compare à la cueillette et à la chasse, chacune
+pesée par ce qu'elle rapporte à l'expérience (l'hiver, la cueillette ne rend plus et la réserve
+l'emporte d'elle-même). Test `un_affame_pense_a_la_reserve_meme_sur_une_tuile_qui_parait_riche`
+(midi, un troupeau à 200 m, réserve pleine), vu rouge. Touche aussi les bandes immobiles de `main`.
+Prédictions, `longue` 10 ans × 8, contre MEM-3 par saison (aa51683 / 53362a3) :
+1. Froid : morts de faim ÷ ≥ 2 (62) ; population des ans 5-10 ≥ 70 % de `main` sur ≥ 3/4 (saison : 2/4).
+2. Tempéré : population à ±10 % de la saison.
+3. Réserve des clans plus basse en fin d'hiver (on y puise).
