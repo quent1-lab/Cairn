@@ -93,6 +93,10 @@ Les feux (`fire`) naissent 10 % des jours, à 0,5-3 km d'un humain, sur une tuil
 
 **Diffusion et oubli.** Une technologie passe à un voisin à 5 % par rencontre (toutes les 4 h) s'il en tient les préalables ; une technologie sans porteur vivant est perdue. **Commerce** : un clan qui maîtrise le cuivre sans avoir vu d'étain envoie son meilleur marcheur vers l'étain le plus proche.
 
+### 1.7 bis Le serveur (`cairn-server`, SRV-1, 2026-10-24)
+
+Un fil `simulation` possède le `Sim` (pas de verrou : personne d'autre n'y touche), avance au pas fixe visé (20 ticks/s ; un pas trop long ralentit le monde sans sauter de tick) et publie à 5 Hz : pour chaque observateur abonné, `WorldSnapshot::from_sim` de **sa** région, encodé une fois, déposé dans une boîte `watch` qui ne garde que le dernier (`hub`). Les connexions (axum, tokio sur un fil) envoient `Hello` (seed, tick), lisent `Subscribe`, relaient les octets ; elles servent aussi le bundle du client. Scène : celle du banc d'acceptation (`scene.rs`, recopiée). Côté client, `live.rs` (`?live=1`) régénère le terrain depuis la seed avec la configuration **par défaut** (celle de `Sim::new` ; le mode local garde l'humidité rapide), s'abonne d'abord au monde entier pour trouver le peuple, puis à l'écran plus 25 %, et interpole entre deux instantanés. Pas encore sur le fil : Chronique, inspection, gestes divins (SRV-1b). Détail : `docs/domaines/serveur/`.
+
 ### 1.8 La divinité et le récit
 
 **Foi** (`faith`) : individuelle, née d'avoir été témoin d'une intervention, transmise par la parole, décroissante. **Interventions** (`divine::invoke`) : foudre, fertilité, peste, pluie, sécheresse, révélation (à un individu), signe — chacune ambivalente par le lieu choisi. **Culte** (`cult`) : l'agrégat des croyances des membres d'un clan, recalculé à la demande. **Chronique** (`chronicle`) : le journal de ce qui fait date, raconté avec des noms dérivés de la seed (`names`).
@@ -176,6 +180,7 @@ Demande de l'utilisateur : chaque chantier a un code, chaque étape un jalon num
 | **MEM** | La mémoire des lieux (décision de l'utilisateur, 2026-10-16 ; forme validée 2026-10-17) | ✔ MEM-1 la carte vécue (maille 2 km, par quart d'année) · ✗ MEM-4a les sources oubliées par l'usage (sans effet tant que le camp ne bougeait pas, −13 % de débit ; `exp/mem4a`, à reprendre) · ✔ MEM-3 le camp lit la mémoire (on ne compare que ce qu'on a vu ; par saison) · ○ MEM-2 ce qu'on se raconte · ○ le danger dans la mémoire | `docs/domaines/humain/cognition/chantiers/MEM.md` |
 | **CUR** | La curiosité n'élargit qu'à peine le territoire connu (critère BRIEF « les curieux explorent plus loin, mesurablement ») | ○ lire pourquoi : test sur 4 seeds, curieux/ternes 1,03-1,30 (1,12 en tout) ; banc d'acceptation, r curiosité ↔ territoire de −0,35 à +0,37 selon le run — déjà avant MAR | test `les_curieux_explorent_plus_loin` |
 | **BAN** | Bandes sans limite de taille | ○ (ligne « Bandes » ci-dessous) | — |
+| **SRV** | Le serveur (phase 6) | ✔ SRV-1 observer (fil de simulation, WebSocket, `?live=1`) · ○ SRV-1b Chronique, inspection, gestes divins sur le fil · ○ SRV-2 persistance (après D7) | `docs/domaines/serveur/chantiers/SRV.md` |
 | **D13** | Violence | ▶ prototype R1 en attente de décision | ligne D13 |
 | **D2**, **D9**, **D7**, **PERF**, **D1/D3**, **D6/D5/D8** | voir le tableau ci-dessous | — | — |
 
@@ -189,7 +194,7 @@ Relecture du 2026-10-24, après le report du camp et de la mémoire sur `main` (
 - **Le serveur** (phase 6) : l'utilisateur veut voir la simulation dans son navigateur — `protocol` porte déjà les instantanés (`snapshot`), `client` le rendu ; il manque le crate `server`. **D7** (l'éviction change le monde) ne bloque que la persistance, pas l'observation ; **PERF** (~10 tps pour 170 humains et ~30 000 têtes, cible 20) compte dès qu'on regarde tourner le monde.
 
 1. **Témoin de `main`** : acceptation 5 ans × 8 + test CUR (une demi-journée de calcul, en tâche de fond).
-2. **SRV-1 — voir le monde dans le navigateur** : crate `server` (tokio + axum), la simulation en tâche de fond, un WebSocket qui pousse les instantanés d'une région (`protocol::snapshot`) au client WASM existant. Sans persistance.
+2. ✔ **SRV-1 — voir le monde dans le navigateur** (2026-10-24) : crate `server`, mode observateur `?live=1` ; reste à le regarder dans un vrai navigateur (pas de navigateur sur la machine). Puis **SRV-1b** : Chronique, inspection, gestes divins sur le fil.
 3. **MAR-6d** le domaine vital ; puis **BAN**, **D13** (run à deux foyers à refaire avec des bandes mobiles).
 4. **Orphelins** (MOR-4b) ; **MOR-5c3** plusieurs germes ; **MOR-4c** ; relire la soif (EAU, MOR-4) avec la bonne cause.
 5. **SRV-2** — persistance (snapshots, journal), après **D7** ; **PERF** avant de laisser tourner 24/7.

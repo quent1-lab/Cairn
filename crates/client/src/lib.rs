@@ -16,6 +16,7 @@
 // L'initialiseur du thread_local est déjà `const` ; ce lint le signale à tort.
 #![allow(clippy::missing_const_for_thread_local)]
 
+mod live;
 pub mod palette;
 pub mod render;
 
@@ -81,6 +82,11 @@ thread_local! {
 #[wasm_bindgen(start)]
 pub fn start() -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
+    // `?live=1` (ou `?server=hôte:port`) : on observe le monde du serveur au
+    // lieu d'en faire tourner un dans l'onglet.
+    if query_param_u64("live").is_some() || query_param_present("server") {
+        return live::start();
+    }
     let mut app = App::new()?;
     // Hook `?ticks=N` : pré-avance la simulation avant le premier rendu. Sert
     // à démarrer « plus tard » et à vérifier le moteur hors navigateur
@@ -1591,6 +1597,13 @@ fn query_param_u64(key: &str) -> Option<u64> {
         .and_then(|v| v.parse::<u64>().ok())
 }
 
+/// Le paramètre `?clé=…` est-il présent, quelle que soit sa valeur ?
+fn query_param_present(key: &str) -> bool {
+    let search = window().location().search().unwrap_or_default();
+    let needle = format!("{key}=");
+    search.trim_start_matches('?').split('&').any(|kv| kv.starts_with(&needle))
+}
+
 /// Lit un champ `<input>` numérique par id ; renvoie `fallback` s'il est
 /// absent ou illisible.
 fn read_u64(id: &str, fallback: u64) -> u64 {
@@ -1635,7 +1648,12 @@ fn sex_age_color(sex: Sex, adult: bool) -> &'static str {
 /// angle d'or (~137°) plutôt qu'une palette figée, pour que deux clans
 /// voisins en id restent visuellement distincts même si beaucoup coexistent.
 fn clan_color(id: cairn_sim::ClanId) -> String {
-    let hue = (id.0.wrapping_mul(137) % 360) as f64;
+    clan_color_u64(id.0)
+}
+
+/// Même teinte, depuis l'identifiant tel que le fil le transporte.
+fn clan_color_u64(id: u64) -> String {
+    let hue = (id.wrapping_mul(137) % 360) as f64;
     format!("hsl({hue}, 70%, 55%)")
 }
 

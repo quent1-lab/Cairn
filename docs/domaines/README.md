@@ -18,7 +18,7 @@ Arbre :
 - `humain/` — `cognition/` (cerveau, mémoire, rendements), `deplacement/` (marche, camp),
   `alimentation/` (cueillette, chasse, partage, stock), `corps/` (énergie, soif, maladie,
   enfance, mort), `societe/` (liens, clans, conflits)
-- `faune/`, `flore/`, `monde/`, `technique/`, `divin/`, `performance/`
+- `faune/`, `flore/`, `monde/`, `technique/`, `divin/`, `performance/`, `serveur/` (le serveur, le fil, l'observation)
 
 Ailleurs :
 - `docs/CODE.md` — la carte globale du code et **l'ordre des chantiers** (§5).

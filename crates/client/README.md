@@ -20,6 +20,10 @@ automatiquement autour.
 
 ## Hooks d'URL (debug / démarrage)
 
+- `?live=1` — **mode observateur** : le monde tourne sur `cairn-server`, le
+  client ne fait que le regarder (voir `docs/COMMANDES.md`, « Serveur »).
+  `?server=hôte:port` pour un autre serveur que celui qui a servi la page.
+
 - `?ticks=N` — pré-avance la simulation de N ticks avant le premier rendu.
 - `?static=1` — rend **une seule** frame puis s'arrête (pas de boucle) ; sert
   aux captures reproductibles.

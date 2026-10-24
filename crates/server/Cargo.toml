@@ -1,0 +1,16 @@
+[package]
+name = "cairn-server"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+cairn-core.workspace = true
+cairn-sim.workspace = true
+cairn-worldgen.workspace = true
+cairn-protocol.workspace = true
+# Serveur HTTP + WebSocket (BRIEF §8.4, phase 6). La poignée de main
+# WebSocket, le tramage et un serveur HTTP qui tienne plusieurs connexions
+# sont très au-delà des ~50 lignes que la règle n°2 met en balance. axum
+# (sur tokio) est le choix du BRIEF ; on n'en prend que le WebSocket.
+tokio = { version = "1", features = ["rt", "net", "sync", "time", "macros"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws"] }
