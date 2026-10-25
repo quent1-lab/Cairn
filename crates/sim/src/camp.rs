@@ -149,6 +149,30 @@ impl BandPlace {
     fn seen_mean(&self) -> f64 {
         if self.seen_h > 0.0 { self.seen_sum / self.seen_h } else { 0.0 }
     }
+
+    /// Ce qu'on attend du lieu, compte tenu de ce qu'on en sait (MAR-6d,
+    /// décision de l'utilisateur du 2026-10-25, option 1) : quelques heures
+    /// vécues disent peu, et l'estimation est tirée vers ce que rendent en
+    /// moyenne les lieux de la bande (`prior`), d'autant moins qu'on y a vécu
+    /// longtemps. Sans cela, le meilleur de centaines de lieux connus était
+    /// d'abord celui qu'on surestimait (rendu réalisé 0,76 de l'attendu sous
+    /// 20 h vécues, 0,95 au-delà de 500 h).
+    fn estimate(&self, prior: f64) -> f64 {
+        (self.worked_value + prior * PRIOR_HOURS) / (self.worked_h + PRIOR_HOURS)
+    }
+}
+
+/// Le poids de la moyenne de la bande dans l'estimation d'un lieu, en heures
+/// vécues : un lieu où l'on a travaillé autant d'heures est jugé à mi-chemin
+/// entre ce qu'il a rendu et la moyenne. Choix non sourcé, lu sur la mesure
+/// d'avant (le biais est fort sous 100 h, presque nul au-delà de 500 h).
+const PRIOR_HOURS: f64 = 100.0;
+
+/// Ce que rendent en moyenne les lieux travaillés de la bande, à ce moment
+/// de l'année (kcal par heure de subsistance).
+fn band_prior(band: &BandDay) -> f64 {
+    let (v, h) = band.places.values().fold((0.0, 0.0), |a, p| (a.0 + p.worked_value, a.1 + p.worked_h));
+    if h > 0.0 { v / h } else { 0.0 }
 }
 
 impl BandDay {
@@ -240,7 +264,7 @@ pub(crate) fn daily(sim: &mut Sim) {
         let Some(here) = band.places.get(&crate::memory::place_of(clan.home)).filter(|p| p.worked_h > 0.0) else {
             continue;
         };
-        let here_value = here.worked_value / here.worked_h;
+        let here_value = here.estimate(band_prior(band));
         let night = observe_night(clan.home, band, here_value, tick, clan.id.0);
         let mut moved = false;
         if let Some((dest, mut choice)) = choose_destination(clan.home, band)
@@ -354,6 +378,7 @@ fn choose_destination(home: (f64, f64), band: &BandDay) -> Option<((f64, f64), C
         (a.0 + p.long_value, a.1 + p.seen_mean() * p.worked_h)
     });
     let per_forage = (den > 0.0).then(|| num / den);
+    let prior = band_prior(band);
     let mut best: Option<(f64, (f64, f64), CampMove)> = None;
     let (mut candidates, mut known) = (0u32, 0u32);
     for &spring in &band.springs {
@@ -368,7 +393,7 @@ fn choose_destination(home: (f64, f64), band: &BandDay) -> Option<((f64, f64), C
         // pays où personne n'est allé, n'a pas de valeur — ni bonne ni moyenne.
         let Some(place) = band.places.get(&crate::memory::place_of(p)) else { continue };
         let (remembered, worked) = if place.worked_h > 0.0 {
-            (place.worked_value / place.worked_h, true)
+            (place.estimate(prior), true)
         } else if let Some(k) = per_forage
             && place.seen_h > 0.0
         {
@@ -500,5 +525,30 @@ mod tests {
         band.see_game(poor); // un troupeau vu près du lieu le moins bon
         let (dest, _) = choose_destination(home, &band).expect("une destination");
         assert_eq!(place_of(dest), at(rich), "on va où le pays rendait, pas où l'on a vu passer un troupeau");
+    }
+
+    /// MAR-6d, option 1 : un lieu à peine vécu, qui a rendu beaucoup en
+    /// quelques heures, ne l'emporte pas sur un lieu bien connu un peu moins
+    /// bon — son estimation est tirée vers la moyenne de la bande.
+    #[test]
+    fn un_lieu_a_peine_vecu_ne_l_emporte_pas_sur_un_lieu_bien_connu() {
+        let home = (0.0, 0.0);
+        let d = 2.5 * PLACE_TILES;
+        let (glimpse, known) = ((d as i64, 0), (-d as i64, 0));
+        let mut band = BandDay::default();
+        band.springs.extend([glimpse, known]);
+        let lived = |kcal_h: f64, h: f64| BandPlace {
+            worked_value: kcal_h * h,
+            long_value: kcal_h * h,
+            worked_h: h,
+            nohunt_value: kcal_h * h,
+            seen_sum: 100.0 * h,
+            seen_h: h,
+        };
+        band.places.insert(at((0, 0)), lived(1400.0, 1000.0)); // le camp
+        band.places.insert(at(glimpse), lived(3000.0, 5.0)); // cinq heures, une belle prise
+        band.places.insert(at(known), lived(1600.0, 1000.0));
+        let (dest, _) = choose_destination(home, &band).expect("une destination");
+        assert_eq!(place_of(dest), at(known), "le lieu bien connu, pas l'aperçu flatteur");
     }
 }

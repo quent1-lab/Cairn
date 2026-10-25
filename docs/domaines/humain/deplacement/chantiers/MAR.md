@@ -1913,3 +1913,47 @@ Rendu réalisé au camp suivant / attendu, selon les heures vécues du lieu rete
 - **Cause retenue : un lieu peu vécu est jugé comme s'il était connu.** Le changement à faire
   est l'incertitude dans la valeur d'un lieu — l'option « désusage + incertitude » proposée
   le 2026-10-24. **Question à l'utilisateur** (la forme).
+
+## MAR-6d, étape 3 — juger un lieu selon ce qu'on en sait (2026-10-25)
+
+**Décision de l'utilisateur (2026-10-25)** : option 1, l'estimation tirée vers la moyenne ;
+« si ce n'est pas suffisant, on refait une analyse et on met l'option 2 (la prudence) en face
+d'une autre possibilité ».
+
+**Le changement (un seul)** : la valeur d'un lieu travaillé (et celle du camp, même règle) est
+`(kcal vécues + moyenne de la bande × 100 h) / (heures vécues + 100 h)`. La moyenne : ce que
+rendent les lieux travaillés de la bande, à ce moment de l'année. Les lieux seulement vus ne
+changent pas (5 % des levées). Choix non sourcé : 100 h, lu sur la courbe d'avant (biais fort
+sous 100 h, presque nul au-delà de 500 h), pas réglé sur un nombre de levées.
+
+**Prédictions (avant)**, 2 ans × 8, contre `mar6d-nuits` (= cap256) :
+- P9 levées en baisse sur ≥ 6/8, de −25 à −50 %. Réfutée si < 5/8 en baisse.
+- P10 rendu réalisé / attendu plus proche de 1 : ≥ 0,85 en médiane sur ≥ 6/8 (avant 0,70-0,89).
+- P11 anciens camps candidats et retours : pas de baisse de plus de 10 points sur ≥ 6/8.
+- P12 voisins : dégradation seulement si population et morts de faim empirent ensemble sur ≥ 7/8.
+- Seuil : P9 tenue → garder et passer à 10 ans ; P9 réfutée → nouvelle analyse.
+
+**Mesure** (2 ans × 8, `mar6d-moyenne` contre `mar6d-nuits` = cap256) :
+
+| run | levées | retours % | retours > 30 j % | anc. camps cand. | foyer 2 ans km | giration an 2 km | réalisé/attendu | pop | faim ; froid |
+|---|---|---|---|---|---|---|---|---|---|
+| t42 | 208 → 176 | 35 → 68 | 9 → 29 | 16 → 24 | 34 → 11 | 9,4 → 6,5 | 0,82 → 0,90 | 53 → 53 | 0 ; 0 → 0 ; 0 |
+| t7 | 262 → 176 | 52 → 57 | 11 → 17 | 25 → 18 | 9 → 24 | 12,1 → 9,5 | 0,79 → 0,81 | 46 → 49 | 0 ; 0 → 1 ; 0 |
+| t1337 | 190 → 100 | 28 → 53 | 4 → 12 | 6 → 8 | 115 → 37 | 25,9 → 10,3 | 0,82 → 0,94 | 56 → 56 | 0 ; 0 → 0 ; 0 |
+| t2024 | 296 → 256 | 34 → 36 | 4 → 11 | 10 → 14 | 32 → 45 | 26,3 → 5,0 | 0,68 → 0,88 | 52 → 59 | 0 ; 0 → 0 ; 0 |
+| f42 | 234 → 154 | 44 → 52 | 12 → 8 | 20 → 16 | — → 70 | 10,4 → 5,7 | 0,76 → 0,83 | 4 → 28 | 31 ; 15 → 31 ; 0 |
+| f7 | 459 → 235 | 41 → 57 | 7 → 17 | 19 → 29 | 109 → 37 | 23,5 → 8,4 | 0,76 → 0,79 | 69 → 50 | 2 ; 0 → 5 ; 0 |
+| f1337 | 181 → 91 | 58 → 52 | 23 → 12 | 21 → 5 | 18 → 38 | 6,1 → 5,0 | 0,85 → 0,95 | 64 → 51 | 5 ; 0 → 12 ; 1 |
+| f2024 | 263 → 108 | 30 → 44 | 5 → 19 | 14 → 20 | 78 → 12 | 20,4 → 6,5 | 0,65 → 0,92 | 63 → 71 | 3 ; 1 → 0 ; 0 |
+
+(réalisé/attendu : le « ici » de la première nuit jugée au nouveau camp sur l'attendu du
+journal des levées, les deux estimés par la même règle.)
+- **P9 tenue** : levées en baisse sur 8/8 (−14 à −59 %), soit 45-128 par an (Aché 75-100).
+- P10 à moitié : réalisé/attendu en hausse sur 8/8, ≥ 0,85 sur 5/8 (prédit 6/8).
+- P11 tenue : retours en hausse sur 7/8 ; anciens camps candidats en baisse de plus de 10 sur
+  f1337 seulement.
+- P12 : pas de dégradation commune (population en baisse sur 3/8, en hausse sur 4/8 ; faim en
+  hausse sur f7 et f1337 ; le froid ne tue plus en f42).
+- **Le domaine se dessine** : giration de l'an 2 en baisse sur 7/8 (26 → 5 km en t2024,
+  24 → 8 en f7), retours de plus de 30 jours en hausse sur 6/8.
+- Seuil : P9 tenue → gardé ; mesure à 10 ans × 8 contre le témoin `main` (`longue_r`).
