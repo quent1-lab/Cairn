@@ -2059,3 +2059,14 @@ liste (O(n)) ; elle regarde d'abord l'index des âges. Sorties de `longue` 2 ans
 (t42, f42, hors débit et mémoire) ; débit sur 30 j, minimum 15,5 → 18,2 et 14,5 → 18,6,
 médiane 19,9 → 24,8 et 48,3 → 65,1 (un autre banc tournait en parallèle dans les deux cas).
 Le minimum reste sous 20 : le reste du coût n'est pas lu (à profiler, PERF).
+
+**Profil par phase** (feature `profile`, `longue` 1 an t42 ; `main` contre la branche e3bf7e8) :
+`3t echanges` 2,3 s → **80 s**, `5 ecologie` 50 → 128 s, `2 execution` 69 → 44 s,
+`1 deliberation` 44 → 36 s. La parole coûte ~37 ms par passe (toutes les 4 h) : chaque paire à
+portée se redit ses 256 sources, ~600 000 rappels par passe. L'écologie ne lit pas la mémoire :
+son doublement vient de la trajectoire (à lire dans PERF).
+**Essai annulé** : sauter les paires qui savent exactement la même chose. Ni gain (75 s), ni
+résultat identique (t42 diffère au jour 253) : une source apprise d'un premier interlocuteur peut
+en évincer une autre, qu'un second réapprend — l'ordre des paroles compte. Le seul remède serait
+de changer la règle de l'échange (union des savoirs entendus, âge le plus récent, puis oubli des
+plus anciennes) : un changement de comportement, à mesurer comme tel.
