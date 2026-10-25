@@ -38,6 +38,11 @@ use crate::yields::{RECENT_EVIDENCE_HOURS, RECENT_HALF_LIFE_DAYS, Yields};
 /// Distance (tuiles) en deçà de laquelle un troupeau vu près d'un lieu compte
 /// pour ce lieu : la portée du regard d'un chasseur (~2 km) et un peu plus.
 const GAME_NEAR_TILES: f64 = km_to_tiles(3.0);
+/// Heures d'installation d'un nouveau camp, par adulte : un camp hadza se
+/// monte en « moins de deux heures », une tente évenk en 10-15 min (MAR-6d,
+/// étape 2 ; sources de seconde main, `MAR.md`). La borne haute : 2 h.
+const SETUP_HOURS: f64 = 2.0;
+
 /// Fraîcheur d'un troupeau vu, pour qu'il compte dans le choix d'un lieu :
 /// le gibier bouge (même échelle que `brain::GAME_MEMORY_DAYS`).
 const GAME_FRESH_TICKS: u64 = 3 * TICKS_PER_DAY;
@@ -61,6 +66,7 @@ pub struct CampMove {
     pub remembered: f64,
     pub prior: f64,
     pub game: u32,
+    /// Heures perdues par le départ (trajet et installation), par adulte.
     pub day: f64,
     /// Ce qui a déclenché la levée (kcal nettes par jour d'adulte) : ce que
     /// rendait le camp et l'habitude, et la part de la chasse dans chacun ;
@@ -82,6 +88,9 @@ struct BandDay {
     /// Jours d'adulte et kcal nettes de l'habitude (le mois).
     habit_h: f32,
     habit_net: f32,
+    /// Heures de subsistance et jours vécus de ses adultes, le mois.
+    work_h: f32,
+    work_days: f32,
     day_net_hunt: f32,
     habit_net_hunt: f32,
     springs: BTreeSet<(i64, i64)>,
@@ -149,6 +158,9 @@ pub(crate) fn daily(sim: &mut Sim) {
         }
         band.habit_h += hh;
         band.habit_net += hn;
+        let (wh, wd) = yields.work_per_day();
+        band.work_h += wh;
+        band.work_days += wd;
         band.habit_net_hunt += yields.habit_net_by()[crate::yields::Pursuit::Hunt as usize];
         band.springs.extend(mem.springs.iter().copied());
         // Ce que chaque lieu rend **à ce moment de l'année** (MEM-3 par saison,
@@ -201,9 +213,13 @@ pub(crate) fn daily(sim: &mut Sim) {
             continue;
         };
         let here_value = here.worked_value / here.worked_h;
-        if let Some((dest, mut choice)) = choose_destination(clan.home, band)
-            && choice.remembered * choice.day > here_value
-        {
+        // MAR-6d, étape 2 : la valeur marginale sur le séjour qu'on peut
+        // attendre — celui que la bande a l'habitude de faire, la moyenne de
+        // ses propres séjours — et non sur une seule journée.
+        let moves = sim.camp_moves.iter().filter(|m| m.clan == clan.id.0).count();
+        let stay_days = tick.saturating_sub(clan.founded_tick) as f64 / TICKS_PER_DAY as f64 / (moves + 1) as f64;
+        let work_h = if band.work_days > 0.0 { f64::from(band.work_h / band.work_days) } else { 0.0 };
+        if let Some((dest, mut choice)) = choose_destination(clan.home, band, here_value, work_h, stay_days) {
             choice.tick = tick;
             choice.clan = clan.id.0;
             choice.now = f64::from(now);
@@ -221,10 +237,20 @@ pub(crate) fn daily(sim: &mut Sim) {
 }
 
 /// Le lieu du prochain camp : une source connue hors du pays battu (au-delà
-/// du rayon de résidence), là où la bande se souvient que la subsistance
-/// rendait le mieux par heure, pesée par le trajet à l'échelle d'une journée
-/// de marche.
-fn choose_destination(home: (f64, f64), band: &BandDay) -> Option<((f64, f64), CampMove)> {
+/// du rayon de résidence), là où partir rapporte le plus — s'il rapporte.
+///
+/// La valeur marginale (Charnov) sur le séjour attendu (MAR-6d, étape 2) : ce
+/// qu'on gagne là-bas sur ce qu'on rend ici, `(attendu − ici) × heures de
+/// subsistance par jour × jours de séjour`, contre ce que le départ fait
+/// perdre, `ici × (heures de trajet + installation)`. `None` si aucun lieu
+/// connu ne vaut le départ.
+fn choose_destination(
+    home: (f64, f64),
+    band: &BandDay,
+    here: f64,
+    work_h_per_day: f64,
+    stay_days: f64,
+) -> Option<((f64, f64), CampMove)> {
     // Ce que vaut, en kcal par heure, une unité de fourrage vu : appris sur les
     // lieux que la bande a à la fois vus et travaillés. C'est ce qui permet de
     // comparer un lieu seulement vu (en chassant, en explorant) à un lieu exploité.
@@ -261,13 +287,13 @@ fn choose_destination(home: (f64, f64), band: &BandDay) -> Option<((f64, f64), C
             .iter()
             .filter(|z| ((z.0 as f64 + 0.5) * side - p.0).hypot((z.1 as f64 + 0.5) * side - p.1) <= GAME_NEAR_TILES)
             .count();
-        let day = 1.0 / (1.0 + d / (WALK_TILES_PER_TICK * 24.0));
+        let lost_h = d / WALK_TILES_PER_TICK + SETUP_HOURS;
         // Le gibier vu ne s'y ajoute pas (décision de l'utilisateur, 2026-10-20) :
         // la chasse compte déjà dans ce que la bande se souvient d'y avoir tiré,
         // et un troupeau vu ces trois derniers jours pesait plus que tout ce
         // qu'on savait du pays (étape 1 : gibier au lieu retenu 91 %, ×3,9).
         // Il reste relevé (`CampMove::game`).
-        let score = remembered * day;
+        let score = (remembered - here) * work_h_per_day * stay_days - here * lost_h;
         if score > 0.0 && best.is_none_or(|(b, _, _)| score > b) {
             let choice = CampMove {
                 tick: 0,
@@ -280,7 +306,7 @@ fn choose_destination(home: (f64, f64), band: &BandDay) -> Option<((f64, f64), C
                 remembered,
                 prior: per_forage.unwrap_or(0.0),
                 game: game as u32,
-                day,
+                day: lost_h,
                 now: 0.0,
                 habit: 0.0,
                 now_hunt: 0.0,
@@ -320,10 +346,10 @@ mod tests {
         let (rich, poor) = ((d as i64, 0), (-d as i64, 0));
         let mut band = BandDay::default();
         band.springs.extend([rich, poor]);
-        assert!(choose_destination(home, &band).is_none(), "rien de vécu : on ne part pas");
+        assert!(choose_destination(home, &band, 0.0, 6.0, 10.0).is_none(), "rien de vécu : on ne part pas");
         band.places.insert(at(rich), worked(2000.0, 100.0));
         band.places.insert(at(poor), worked(100.0, 100.0));
-        let (dest, _) = choose_destination(home, &band).expect("une destination");
+        let (dest, _) = choose_destination(home, &band, 0.0, 6.0, 10.0).expect("une destination");
         assert_eq!(place_of(dest), at(rich), "vers le lieu qui rendait");
     }
 
@@ -339,10 +365,10 @@ mod tests {
         band.springs.extend([known_poor, heard]);
         band.places.insert(at(rich_home), worked(3000.0, 100.0)); // le pays qu'on quitte
         band.places.insert(at(known_poor), worked(200.0, 30.0));
-        let (dest, _) = choose_destination(home, &band).expect("une destination");
+        let (dest, _) = choose_destination(home, &band, 0.0, 6.0, 10.0).expect("une destination");
         assert_eq!(place_of(dest), at(known_poor), "le connu, même pauvre, plutôt que l'inconnu");
         band.places.remove(&at(known_poor));
-        assert!(choose_destination(home, &band).is_none(), "seul l'inconnu reste : on ne part pas");
+        assert!(choose_destination(home, &band, 0.0, 6.0, 10.0).is_none(), "seul l'inconnu reste : on ne part pas");
     }
 
     /// Un lieu seulement vu (en chassant, en explorant) se compare aux lieux
@@ -357,7 +383,7 @@ mod tests {
         band.places.insert(at(rich_home), worked(500.0, 50.0)); // 10 kcal/h par unité de fourrage
         band.places.insert(at(poor), worked(200.0, 20.0));
         band.places.insert(at(seen_rich), BandPlace { seen_sum: 100.0 * 10.0, seen_h: 10.0, ..BandPlace::default() });
-        let (dest, choice) = choose_destination(home, &band).expect("une destination");
+        let (dest, choice) = choose_destination(home, &band, 0.0, 6.0, 10.0).expect("une destination");
         assert_eq!(place_of(dest), at(seen_rich), "le pays vu riche l'emporte sur le pays travaillé pauvre");
         assert!(!choice.chosen_known);
         assert!((choice.remembered - 1000.0).abs() < 1.0, "100 de fourrage vu × 10 kcal/h : {}", choice.remembered);
@@ -376,7 +402,40 @@ mod tests {
         band.places.insert(at(rich), worked(1000.0, 100.0));
         band.places.insert(at(poor), worked(600.0, 100.0));
         band.see_game(poor); // un troupeau vu près du lieu le moins bon
-        let (dest, _) = choose_destination(home, &band).expect("une destination");
+        let (dest, _) = choose_destination(home, &band, 0.0, 6.0, 10.0).expect("une destination");
         assert_eq!(place_of(dest), at(rich), "on va où le pays rendait, pas où l'on a vu passer un troupeau");
+    }
+
+    /// MAR-6d, étape 2 : un lieu à peine meilleur ne vaut pas le départ quand
+    /// on ne reste que quelques jours — le trajet et l'installation coûtent
+    /// plus que ce qu'on y gagnera ; sur un long séjour, il le vaut.
+    #[test]
+    fn un_lieu_a_peine_meilleur_ne_vaut_pas_le_depart_d_un_court_sejour() {
+        let home = (0.0, 0.0);
+        let d = 2.5 * PLACE_TILES; // 5 km : 1,25 h de marche, plus 2 h d'installation
+        let better = (d as i64, 0);
+        let mut band = BandDay::default();
+        band.springs.insert(better);
+        band.places.insert(at(better), worked(1150.0, 100.0)); // 15 % de mieux qu'ici
+        // 150 kcal/h × 6 h × 3 jours = 2 700 gagnées, contre 1 000 × 3,25 h perdues.
+        assert!(choose_destination(home, &band, 1000.0, 6.0, 3.0).is_none(), "trois jours : on reste");
+        // Dix jours : 9 000 gagnées contre 3 250 perdues.
+        assert!(choose_destination(home, &band, 1000.0, 6.0, 10.0).is_some(), "dix jours : on part");
+    }
+
+    /// Le trajet se paie en heures qu'on ne travaille pas : un lieu un peu
+    /// meilleur mais à 60 km perd contre un bon lieu à 5 km.
+    #[test]
+    fn le_trajet_se_paie_en_heures_perdues() {
+        let home = (0.0, 0.0);
+        let (near, far) = ((2.5 * PLACE_TILES) as i64, (30.0 * PLACE_TILES) as i64);
+        let (near, far) = ((near, 0), (-far, 0));
+        let mut band = BandDay::default();
+        band.springs.extend([near, far]);
+        band.places.insert(at(near), worked(1300.0, 100.0));
+        band.places.insert(at(far), worked(1350.0, 100.0));
+        let (dest, choice) = choose_destination(home, &band, 1000.0, 6.0, 5.0).expect("une destination");
+        assert_eq!(place_of(dest), at(near), "le proche, pas le lointain à peine meilleur");
+        assert!((choice.day - 3.25).abs() < 0.01, "1,25 h de marche et 2 h d'installation : {}", choice.day);
     }
 }

@@ -135,6 +135,12 @@ impl Yields {
         (self.own_days, self.own_net.iter().sum())
     }
 
+    /// Heures de sa propre subsistance et jours vécus, le mois (même
+    /// effacement que l'habitude) : ce qu'une journée donne d'heures de travail.
+    pub fn work_per_day(&self) -> (f32, f32) {
+        (self.own_h.iter().sum(), self.own_days)
+    }
+
     /// L'habitude : heures et kcal nettes du mois, la sienne et celle des
     /// proches, toutes activités confondues.
     pub fn habit(&self) -> (f32, f32) {

@@ -1788,3 +1788,57 @@ utilisés par un homme, > 1 200 connus d'un groupe, retrouvés après 50-60 ans 
 SOURCES). Le binaire `mar6d-cap256` est exactement ce code : la mesure de 2 ans × 8 ci-dessus
 vaut pour lui. L'oubli au fil du temps n'est pas ajouté : à 50-60 ans de souvenir, il serait
 sans effet sur l'horizon des bancs.
+
+## MAR-6d, étape 2 — le coût du départ (2026-10-25)
+
+**Lecture** (`camp.rs`, `choose_destination` et `daily`) : on part si `attendu là-bas ×
+1/(1 + d / 96 km) > rendu ici`. Ce facteur est celui de la valeur marginale (Charnov) avec un
+séjour d'**un jour** : il ne compte ni l'installation, ni la durée pendant laquelle le
+nouveau lieu rendra mieux. L'abri, lui, se bâtit en un tick sur la réserve (6 unités).
+
+**Sources** (sous-agent `sourceur`, 2026-10-25, tout de seconde main) : installer un camp
+hadza, « moins de deux heures » (les femmes) ; tente évenk 10-15 min ; igloo 1-6 h. Levées par
+an : Hadza 7, Ju/'hoansi 5,5, moyenne de la base de Marlowe 7,4, Aché 75-100 (Marlowe, via
+résumé) ; Hadza : un camp toutes les 2 à 5 semaines (Marlowe 2010). Rien sur la journée de
+déménagement elle-même.
+
+**Le changement (un seul)** : la valeur marginale avec le séjour attendu et le coût du départ.
+Pour chaque lieu connu : gain = (attendu là-bas − rendu ici) × heures de subsistance par jour
+× séjour attendu ; coût = rendu ici × (heures de trajet + **2 h** d'installation). On part vers
+le lieu au meilleur gain net, s'il est positif. Le **séjour attendu** est la moyenne des
+séjours de la bande elle-même (jours depuis sa fondation / camps) ; les **heures de subsistance
+par jour** sont celles de ses adultes (`Yields`, le mois). Le facteur de trajet disparaît (le
+coût du trajet le remplace). Choix non sourcé : 2 h (borne haute hadza).
+
+**Prédictions (écrites avant)**, 2 ans × 8, témoin `mar6d-cap256` (ca81a78) :
+- P6 levées en baisse sur ≥ 6/8, de −20 à −50 % (témoin 181-459 en 2 ans). Réfutée si < 5/8.
+- P7 les anciens camps restent candidats (médiane ≥ 5 sur ≥ 6/8) et les retours ne baissent
+  pas de plus de 10 points sur ≥ 6/8.
+- P8 (ce que je crois) : les levées restent bien au-dessus du réel (> 40 par an) : la
+  rétroaction va dans le mauvais sens — plus les séjours s'allongent, plus le gain attendu
+  d'un départ grandit. Si les levées tombent sous 40 par an sur ≥ 5/8, je me trompe.
+- Seuil : P6 tenue → garder ; P6 réfutée → le coût du départ n'est pas ce qui manque, relire
+  (candidat : la malédiction du gagnant — avec 256 lieux estimés, le meilleur l'emporte
+  presque toujours sur ici par le seul bruit des estimations).
+
+**Mesure** (2 ans × 8, `mar6d-cout` contre `mar6d-cap256`) :
+
+| run | levées 256 → coût | retours % | anciens camps cand. méd | foyer à 2 ans km | pop | morts faim ; froid (256 → coût) |
+|---|---|---|---|---|---|---|
+| t42 | 208 → 152 | 35 → 45 | 16 → 28 | 34 → 47 | 53 → 57 | 0 ; 0 → 0 ; 0 |
+| t7 | 262 → 334 | 52 → 46 | 25 → 13 | 9 → 88 | 46 → 54 | — |
+| t1337 | 190 → 194 | 28 → 34 | 6 → 13 | 115 → 53 | 56 → 54 | — |
+| t2024 | 296 → 344 | 34 → 29 | 10 → 14 | 32 → 77 | 52 → 61 | — |
+| f42 | 234 → 306 | 44 → 33 | 20 → 20 | — → 61 | 4 → 30 | 31 ; 15 → 18 ; 0 |
+| f7 | 459 → 312 | 41 → 41 | 19 → 27 | 109 → 40 | 69 → 65 | 2 ; 0 → 2 ; 0 |
+| f1337 | 181 → 147 | 58 → 38 | 21 → 22 | 18 → 34 | 64 → 45 | 5 ; 0 → 8 ; 0 |
+| f2024 | 263 → 219 | 30 → 17 | 14 → 15 | 78 → 88 | 63 → 85 | 3 ; 1 → 0 ; 0 |
+
+- **P6 réfutée** : levées en baisse sur 4/8 seulement (73-172 par an, réel 5-100).
+- P7 tenue : anciens camps candidats ≥ 13 en médiane sur 7/8 ; retours en baisse de plus de
+  10 points sur 2/8 seulement.
+- P8 tenue : bien au-dessus de 40 levées par an partout.
+- Le froid ne tue plus en f42 (15 → 0), mais sur une seule seed et 2 ans.
+- **Verdict** : le coût du départ, à ce qu'il coûte réellement (trajet et 2 h), n'est pas ce qui
+  fait partir la bande. Changement **annulé** (commit puis retour, pour l'histoire) selon le
+  seuil écrit avant. Deux réfutations de suite (étape 1 : P1, P2 ; étape 2 : P6) → contre-lecture.
