@@ -1842,3 +1842,74 @@ coût du trajet le remplace). Choix non sourcé : 2 h (borne haute hadza).
 - **Verdict** : le coût du départ, à ce qu'il coûte réellement (trajet et 2 h), n'est pas ce qui
   fait partir la bande. Changement **annulé** (commit puis retour, pour l'histoire) selon le
   seuil écrit avant. Deux réfutations de suite (étape 1 : P1, P2 ; étape 2 : P6) → contre-lecture.
+
+### Débat (2026-10-25, contre-lecture après deux réfutations)
+1. La porte de départ est saturée : on part dès que la preuve le permet. → **Retenu, vérifié**
+   sur les journaux existants : 67 % des levées à 1-2 jours de la précédente (cap256 ; témoin
+   42 %). La question est pourquoi le meilleur lieu gagne dès la 2ᵉ nuit.
+2. « Ici » et « là-bas » ne sont pas jugés sur la même grandeur (ici : rendement récent d'une
+   maille qu'on épuise ; là-bas : repoussé vers la saison ; ici : la seule maille du foyer).
+   → **Retenu** : à mesurer (contrefactuels ci-dessous).
+3. La queue de la chasse : une prise sur un lieu peu travaillé donne un attendu énorme. →
+   **Retenu, vérifié** : attendu du lieu retenu, médiane ~1 300 kcal/h, p90 5 700-8 200, max
+   178 771.
+4. La malédiction du gagnant (ma candidate) : signature à vérifier (rendu réalisé < attendu,
+   écart qui décroît avec les heures vécues). → **Retenu** dans la même mesure.
+5. Lieux seulement vus : **vérifié**, 4-5 % des levées seulement — écarté comme cause.
+6. L'étape 2 ne pouvait pas tester le coût réel (le départ ne coûte presque rien dans le
+   modèle : l'abri en un tick). → **Retenu** : noté ; rendre le départ physiquement coûteux
+   reste un axe (question à l'utilisateur plus tard).
+7. « < 40 levées par an » frôle le réglage vers un critère. → **Retenu** : on juge la cause par
+   les contrefactuels, pas par un nombre de levées visé.
+8. Changement de quart d'année : à vérifier dans la même mesure.
+
+### Contrefactuels (instrument d'observation, `Sim::camp_nights`, `<out>.nuits.csv`)
+Chaque nuit où la bande peut juger : le camp jugé comme aujourd'hui, sur sa saison, sur le
+rayon de résidence ; le meilleur et le deuxième score ; pour le meilleur lieu, ses heures
+vécues et la part de la chasse ; et si l'on partirait encore sous chaque règle : ici sur sa
+saison (`alt_saison`), ici sur le rayon (`alt_rayon`), hors chasse des deux côtés
+(`alt_hors_chasse`), lieux travaillés seuls (`alt_travailles`), attendu moins ~attendu/√h
+(`alt_marge`).
+
+**Prédictions (avant de lire)**, 2 ans × 8, comparées aux nuits où l'on part aujourd'hui :
+- C1 lieux travaillés seuls : quasi pas de baisse (< 10 %) — 5 % des levées vont vers un lieu vu.
+- C2 hors chasse : la plus forte baisse, −40 à −70 % des départs, dans le même sens sur 8/8.
+- C3 ici sur sa saison : baisse de −20 à −50 %.
+- C4 ici sur le rayon : baisse plus faible que C3.
+- C5 marge d'incertitude : baisse de −10 à −40 % ; et le rendu réalisé au camp suivant
+  (le « ici » de la première nuit jugée après une levée) inférieur à l'attendu de plus de 30 %
+  en médiane.
+- La cause est celle dont la règle fait le plus tomber les départs, dans le même sens sur
+  4 seeds × 2 scènes ; ensuite, un seul changement, à proposer à l'utilisateur.
+
+**Mesure** (2 ans × 8, binaire `mar6d-nuits` = ca81a78 + instrument ; sorties identiques à
+`mar6d-cap256` sur 8/8, hors débit et mémoire). Variation des départs sous chaque règle :
+
+| run | nuits | départs | travaillés seuls | hors chasse | ici sur sa saison | ici sur le rayon | marge 1/√h | réalisé / attendu (méd.) |
+|---|---|---|---|---|---|---|---|---|
+| t42 | 537 | 208 | −1 % | +22 % | +1 % | +156 % | **−48 %** | 0,87 |
+| t7 | 894 | 262 | −1 % | +82 % | −31 % | +197 % | **−39 %** | 0,85 |
+| t1337 | 565 | 190 | −1 % | +44 % | −6 % | +172 % | **−52 %** | 0,87 |
+| t2024 | 644 | 296 | −4 % | +46 % | −17 % | +98 % | **−45 %** | 0,72 |
+| f42 | 491 | 234 | −2 % | +28 % | +1 % | +94 % | **−38 %** | 0,81 |
+| f7 | 1290 | 459 | −5 % | +71 % | −15 % | +136 % | **−42 %** | 0,81 |
+| f1337 | 781 | 181 | −2 % | +112 % | +11 % | +269 % | **−33 %** | 0,89 |
+| f2024 | 512 | 263 | −0 % | +32 % | −13 % | +81 % | **−35 %** | 0,70 |
+
+Rendu réalisé au camp suivant / attendu, selon les heures vécues du lieu retenu (8 runs) :
+< 20 h 0,76 (788 levées) ; 20-100 h 0,73 (481) ; 100-500 h 0,89 (645) ; > 500 h 0,95 (173).
+
+- C1 tenue (−0 à −5 %).
+- **C2 réfutée, à l'envers** : sans la chasse, on partirait **plus** (+22 à +112 %) — la chasse
+  gonfle « ici » plus que « là-bas ». La queue de la chasse (point 3) n'est pas la cause.
+- C3 réfutée (−31 à +11 %, sens variable).
+- C4 réfutée à l'envers : la maille du foyer rend **mieux** que le rayon (+81 à +269 % de départs
+  si l'on jugeait ici sur le rayon) — pas de biais d'« ici » trop bas.
+- **C5 tenue en sens, 8/8** : la marge d'incertitude fait tomber les départs de 33 à 52 %, la
+  plus forte baisse partout. Le rendu réalisé est sous l'attendu (0,70-0,89, prédiction
+  « > 30 % » tenue sur 2/8 seulement), et **l'écart disparaît quand le lieu est bien connu**
+  (0,76 sous 20 h vécues, 0,95 au-delà de 500 h) : c'est la signature de la malédiction du
+  gagnant — le meilleur de ~250 estimations est d'abord celui qu'on surestime.
+- **Cause retenue : un lieu peu vécu est jugé comme s'il était connu.** Le changement à faire
+  est l'incertitude dans la valeur d'un lieu — l'option « désusage + incertitude » proposée
+  le 2026-10-24. **Question à l'utilisateur** (la forme).

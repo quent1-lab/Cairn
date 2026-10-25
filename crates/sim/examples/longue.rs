@@ -92,6 +92,10 @@ fn main() {
     // quadratique, rayon de giration, retours à un camp ancien).
     let mut camps_log = std::fs::File::create(format!("{out}.camps.csv")).expect("journal des camps");
     writeln!(camps_log, "tick,clan,de_x_km,de_y_km,vers_x_km,vers_y_km,lieu_travaille,attendu,trajet").unwrap();
+    // MAR-6d (contre-lecture) : chaque nuit jugée, et les règles concurrentes.
+    let mut nights_log = std::fs::File::create(format!("{out}.nuits.csv")).expect("journal des nuits");
+    writeln!(nights_log, "tick,clan,parti,ici,ici_saison,ici_rayon,connus,meilleur,second,meilleur_h,meilleur_chasse,meilleur_travaille,alt_saison,alt_rayon,alt_hors_chasse,alt_travailles,alt_marge").unwrap();
+    let mut seen_nights = 0usize;
     let mut camp_prev: BTreeMap<u64, (f64, f64)> = BTreeMap::new();
     let causes_head: Vec<String> = CAUSES.iter().map(|c| format!("morts_{c:?}")).collect();
     writeln!(
@@ -514,6 +518,17 @@ fn main() {
             .unwrap();
         }
         seen_moves = sim.camp_moves.len();
+        for n in &sim.camp_nights[seen_nights..] {
+            writeln!(
+                nights_log,
+                "{},{},{},{:.1},{:.1},{:.1},{},{:.1},{:.1},{:.1},{:.3},{},{},{},{},{},{}",
+                n.tick, n.clan, u8::from(n.moved), n.here, n.here_long, n.here_radius, n.known, n.best, n.second,
+                n.best_h, n.best_hunt, u8::from(n.best_worked), u8::from(n.alt_long), u8::from(n.alt_radius),
+                u8::from(n.alt_nohunt), u8::from(n.alt_worked), u8::from(n.alt_margin)
+            )
+            .unwrap();
+        }
+        seen_nights = sim.camp_nights.len();
         // MAR-6d : ce que sait la bande la plus nombreuse de ses sources — combien,
         // jusqu'où, et combien de ses anciens camps restent candidats (une source
         // connue dans le lieu de 2 km d'un camp quitté).
