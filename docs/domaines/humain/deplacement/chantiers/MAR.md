@@ -2024,3 +2024,32 @@ journal des levées, les deux estimés par la même règle.)
 **P16 (écrite avant la mesure du témoin)** : déplacement quadratique moyen des camps entre deux
 dates séparées de 1, 2, 4, 8 ans. Témoin : croît à peu près linéairement (diffusion). Variante
 `moyenne` : plateau — le rapport MSD(8 ans) / MSD(4 ans) ≤ 1,3 sur ≥ 5/8 (≈ 2 pour une diffusion).
+
+**Témoin avec instrument, 10 ans × 8** (`mar6d-temoin`) — déplacement quadratique des camps
+(√MSD, km, à 1 / 2 / 4 / 8 ans ; rapport MSD 8 ans / 4 ans) :
+
+| run | témoin | variante `moyenne` |
+|---|---|---|
+| t42 | 55 / 100 / 196 / 321 ; 2,69 | 8 / 9 / 7 / — (clan recomposé) |
+| t7 | 43 / 80 / 152 / 303 ; 4,00 | 23 / 21 / 28 / 27 ; **0,97** |
+| t1337 | 48 / 81 / 132 / 159 ; 1,44 | 24 / 32 / 38 / 75 ; 3,89 |
+| t2024 | 77 / 147 / 284 / 537 ; 3,59 | 16 / 20 / 28 / 29 ; **1,05** |
+| f42 | 19 / 28 / 34 / 71 ; 4,45 | 19 / 21 / 24 / 35 ; 2,11 |
+| f7 | 26 / 43 / 86 / 148 ; 2,94 | 19 / 33 / 60 / 91 ; 2,25 |
+| f1337 | 16 / 19 / 19 / 14 ; 0,57 | 10 / 11 / 11 / 16 ; 1,96 |
+| f2024 | 31 / 55 / 108 / 199 ; 3,42 | 14 / 14 / 14 / 14 ; **1,03** |
+
+- Le témoin diffuse (et plus vite qu'une marche aléatoire : rapports 2,7-4,5, sauf f1337).
+- **P16 réfutée** : plateau sur 3/7 seulement (t7, t2024, f2024). Mais l'échelle tombe de 3 à
+  20 fois à 4 ans sur 7/8 (t2024 : 284 → 28 km) : **la bande diffuse beaucoup plus lentement, et
+  se pose dans un pays sur 3 runs** ; elle ne se pose pas encore partout.
+
+**Acceptation 5 ans × 8 de la branche** (35010e8, `out/mar6d/acc/`) contre `main` (832a803) :
+- Population finale plus basse sur 6/8 (61 → 48, 61 → 51, 56 → 36…), **naissances en baisse sur
+  7/8** (31 → 28, 30 → 26, 37 → 31…).
+- **Débit plancher sous 20 ticks/s sur 4/8** (17,4-19,7 ; `main` 24-73) : la parole échange 256
+  sources par paire et par jour (`exchange_knowledge`, `remember_spring` en O(n)).
+- Curiosité ↔ territoire connu : r positif sur 8/8 (0,13-0,76 ; `main` NaN-0,47) — le critère
+  CUR se lit mieux à l'échelle du banc, alors que le test court tombe sur 1337.
+- Marche 21-28 km/j, inchangée ; feu en froid 2/4 (`main` 3/4).
+- **Report bloqué** par la natalité (non expliquée) et le débit.
