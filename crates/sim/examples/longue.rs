@@ -637,6 +637,9 @@ fn main() {
         day as f64 / 360.0,
         started.elapsed().as_secs_f64() / 3600.0
     );
+    // Où passe le temps, par phase (sous la feature `profile`).
+    #[cfg(feature = "profile")]
+    print!("{}", sim.prof.report());
     let mut log = std::fs::File::create(format!("{out}.morts.csv")).expect("journal des morts lentes");
     writeln!(log, "jour,age,km_source_connue,km_source_reelle,km_camp,jours_depuis_levee,en_marche,cause,activite,tache,soif,faim,froid,sante,h_depuis_gorgee,porteur,stock_clan,km_troupeau,fourrage_tuile").unwrap();
     for (r, extra) in &thirst_log {
