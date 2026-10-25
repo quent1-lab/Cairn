@@ -1994,3 +1994,33 @@ journal des levées, les deux estimés par la même règle.)
   f2024 0 → 8) ; la soif et la faim varient dans les deux sens. Une bande qui reste dans son pays
   y croise plus souvent ses voisins (D13) ; la natalité plus basse n'est pas lue (deux fois plus
   de levées : effort, nourrissons portés ?). Voisins à lire avant le report.
+
+### Débat (2026-10-25, contre-lecture du jalon)
+1. La mesure à 10 ans mêle trois changements (désusage, 256, moyenne) ; le doublement des levées
+   vient sans doute du 256, et la baisse de population n'est attribuée à aucun. → **Retenu** :
+   10 ans × 8 sur `mar6d-cap256`.
+2. Pas de giration ni de déplacement quadratique du témoin ; un maximum de 108-132 km peut être
+   une diffusion plus lente ; « 50-500 km² » mélange dispersion des camps et aire parcourue.
+   → **Retenu** : 10 ans × 8 du témoin avec instrument (`mar6d-temoin`), déplacement quadratique
+   à 1, 2, 4, 8 ans sur les journaux des levées des trois bras ; la comparaison aux Baka est
+   retirée tant qu'elle n'est pas faite sur la même grandeur.
+3. P14 réinterprétée après lecture. → **Retenu** : « la bande cesse de s'éloigner » devient une
+   prédiction (P16 ci-dessous), jugée sur le déplacement quadratique.
+4. Moins de naissances et plus de violence : un décompte, pas une cause ; autre explication :
+   l'estimation tire toutes les bandes vers les mêmes lieux réputés. → **Retenu** : instrument
+   (naissances par femme fertile et par an, rencontres entre bandes) avant le report.
+5. `PRIOR_HOURS` ajusté sur son propre symptôme ; moyenne pondérée par les heures (dominée par
+   les lieux épuisés) ; la queue de la chasse reste (1 h vécue à 178 771 → ~3 000). → **Retenu** :
+   sensibilité à 50 et 200 h (2 ans × 8) ; l'estimation séparée cueillette / chasse et le poids
+   déduit des variances sont des axes, à proposer à l'utilisateur.
+6. Tests rouges : la surchasse mesure une zone fixe que des chasseurs plus mobiles quittent ; les
+   curieux se noient dans le partage des sources en 14 jours. → **Retenu** : à lire (positions du
+   camp, écart curieux − ternes sur 4 seeds, deux bras), jamais en baissant les seuils.
+7. P10 circulaire (l'attendu est rétréci). → **Retenu** : P10 retirée ; à remplacer par le
+   rendement brut au nouveau camp contre les derniers jours de l'ancien.
+8. Régime : jour 135, 10 ans, f42 trop petit pour renseigner. → Noté.
+**Le report sur `main` attend les points 1, 2, 4 et 6.**
+
+**P16 (écrite avant la mesure du témoin)** : déplacement quadratique moyen des camps entre deux
+dates séparées de 1, 2, 4, 8 ans. Témoin : croît à peu près linéairement (diffusion). Variante
+`moyenne` : plateau — le rapport MSD(8 ans) / MSD(4 ans) ≤ 1,3 sur ≥ 5/8 (≈ 2 pour une diffusion).
