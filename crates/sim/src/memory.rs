@@ -497,7 +497,7 @@ mod tests {
         // L'ancien camp, où l'on buvait encore la semaine dernière.
         mem.remember_spring(old_camp, 5_000);
         // Une source d'ici, découverte aujourd'hui : la mémoire déborde.
-        mem.remember_spring((500, 5), 5_100);
+        mem.remember_spring((-500, 5), 5_100);
         assert!(mem.springs.contains(&old_camp), "l'ancien camp, vu récemment, reste connu");
         assert!(!mem.springs.contains(&(0, 5)), "s'oublie la source la moins récemment vue");
     }

@@ -1957,3 +1957,40 @@ journal des levées, les deux estimés par la même règle.)
 - **Le domaine se dessine** : giration de l'an 2 en baisse sur 7/8 (26 → 5 km en t2024,
   24 → 8 en f7), retours de plus de 30 jours en hausse sur 6/8.
 - Seuil : P9 tenue → gardé ; mesure à 10 ans × 8 contre le témoin `main` (`longue_r`).
+
+**Prédictions à 10 ans × 8 (écrites avant)**, `mar6d-moyenne` contre `longue_r` (`main`) :
+- P13 distance finale du foyer au départ en baisse sur ≥ 6/8, médiane ≤ 100 km (témoin 230).
+- P14 un domaine borné : distance finale / distance max ≤ 0,6 sur ≥ 5/8 (témoin 0,7-1,0, presque
+  toujours ≥ 0,95) — la bande revient.
+- P15 voisins : population moyenne des ans 5-10 et morts de faim ne se dégradent pas ensemble
+  sur ≥ 7/8.
+
+**Mesure à 10 ans × 8** (`mar6d-moyenne`, 44f92b1, contre `longue_r` = `main`, départ jour 135) :
+
+| run | foyer fin / max km, témoin | variante | pop moy. ans 5-10 | morts de faim | levées (10 ans) | giration ans 6-10 km |
+|---|---|---|---|---|---|---|
+| t42 | 354 / 356 | **32 / 39** | 65 → 58 | 0 → 0 | 447 → 990 | 5,1 |
+| t7 | 384 / 385 | **42 / 65** | 59 → 47 | 0 → 1 | 359 → 782 | 12,6 |
+| t1337 | 156 / 163 | 126 / 132 | 62 → 69 | 0 → 0 | 444 → 602 | 10,0 |
+| t2024 | 663 / 670 | **20 / 55** | 65 → 56 | 10 → 0 | 481 → 590 | 4,9 |
+| f42 | 129 / 136 | 88 / 108 | 29 → 26 | 40 → 34 | 305 → 700 | 9,6 |
+| f7 | 192 / 198 | 122 / 127 | 56 → 36 | 4 → 10 | 292 → 746 | 7,4 |
+| f1337 | 25 / 35 | 32 / 41 | 49 → 46 | 9 → 15 | 212 → 517 | 4,2 |
+| f2024 | 269 / 275 | **34 / 36** | 76 → 72 | 16 → 0 | 507 → 401 | 6,9 |
+
+- **P13 tenue** : distance finale en baisse sur 7/8, médiane 38 km (témoin 230).
+- **P14 réfutée telle qu'écrite** : fin/max ≤ 0,6 sur 2/8 seulement. Mais le maximum lui-même
+  est borné (36-132 km contre 35-670) : la bande ne revient pas forcément à son point de départ,
+  elle **cesse de s'en éloigner**. Le rapport fin/max était une mauvaise statistique pour un
+  domaine qui se pose ailleurs que le départ ; la giration des camps (ans 6-10 : **4 à 13 km**,
+  soit ~50-500 km² — Baka 205 ± 109) dit le domaine.
+- **P15 tenue au sens écrit** (population en baisse **et** faim en hausse ensemble sur 3/8), **mais
+  la population des ans 5-10 baisse sur 6/8** (−5 à −36 %, f7 56 → 36) : à expliquer avant tout
+  report.
+- **Les levées ont doublé par rapport à `main`** (40-99 par an contre 21-51) : la bande bouge
+  plus, mais dans un pays à elle. Le réel : Hadza 7, Ju/'hoansi 5,5, Aché 75-100.
+- D'où vient la baisse de population (10 ans, témoin → variante) : **moins de naissances** sur
+  6/8 (57 → 47, 51 → 40, 74 → 60…) et **plus de morts violentes** sur 3/8 (t7 0 → 7, t2024 2 → 11,
+  f2024 0 → 8) ; la soif et la faim varient dans les deux sens. Une bande qui reste dans son pays
+  y croise plus souvent ses voisins (D13) ; la natalité plus basse n'est pas lue (deux fois plus
+  de levées : effort, nourrissons portés ?). Voisins à lire avant le report.
