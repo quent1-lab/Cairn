@@ -2053,3 +2053,9 @@ dates séparées de 1, 2, 4, 8 ans. Témoin : croît à peu près linéairement 
   CUR se lit mieux à l'échelle du banc, alors que le test court tombe sur 1337.
 - Marche 21-28 km/j, inchangée ; feu en froid 2/4 (`main` 3/4).
 - **Report bloqué** par la natalité (non expliquée) et le débit.
+
+**Coût de la parole à 256 sources** : `remember_spring` cherchait chaque source entendue dans la
+liste (O(n)) ; elle regarde d'abord l'index des âges. Sorties de `longue` 2 ans identiques
+(t42, f42, hors débit et mémoire) ; débit sur 30 j, minimum 15,5 → 18,2 et 14,5 → 18,6,
+médiane 19,9 → 24,8 et 48,3 → 65,1 (un autre banc tournait en parallèle dans les deux cas).
+Le minimum reste sous 20 : le reste du coût n'est pas lu (à profiler, PERF).

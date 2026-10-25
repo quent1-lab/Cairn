@@ -232,9 +232,13 @@ impl Memory {
     /// Mémorise une source. Au-delà du plafond, la plus lointaine de `from`
     /// est oubliée : on retient l'eau *utile*.
     pub fn remember_spring(&mut self, spring: (i64, i64), seen: u64) {
+        // L'âge se tient pour chaque source connue : le chercher là d'abord
+        // évite de parcourir la liste (256 entrées) pour chacune des sources
+        // qu'on se redit chaque jour — presque toutes déjà connues.
+        let known = self.spring_seen.contains_key(&spring) || self.springs.contains(&spring);
         let last = self.spring_seen.entry(spring).or_insert(seen);
         *last = (*last).max(seen);
-        if self.springs.contains(&spring) {
+        if known {
             return;
         }
         self.springs.push(spring);
