@@ -8,5 +8,5 @@ Codes de ce domaine : D2, D13, BAN, D9
 | Code | Registre (copié de `docs/CODE.md` §5.1, 2026-10-16) | Fichier |
 |---|---|---|
 | BAN | ○ (ligne « Bandes » ci-dessous) | — |
-| D13 | ▶ prototype R1 en attente de décision | chantiers/D13.md |
+| D13 | ▶ prototype R1 en attente de décision ; ○ la cible d'un raid (le rival le plus proche, souvent un petit enfant ; révélé par MAR-6d, 2026-10-26) | chantiers/D13.md |
 | D2 | clans (dissolution) | chantiers/D2.md |
