@@ -2070,3 +2070,28 @@ résultat identique (t42 diffère au jour 253) : une source apprise d'un premier
 en évincer une autre, qu'un second réapprend — l'ordre des paroles compte. Le seul remède serait
 de changer la règle de l'échange (union des savoirs entendus, âge le plus récent, puis oubli des
 plus anciennes) : un changement de comportement, à mesurer comme tel.
+
+**Décision de l'utilisateur (2026-10-25, soir)** : tout consigner ; tester la nouvelle règle
+d'échange des sources ; si elle ne suffit pas, le débit va au chantier PERF, suivi comme problème
+vu. D'accord pour le reste (natalité à instrumenter, report bloqué jusque-là).
+
+## MAR-6d, étape 4 — l'échange des sources : on réunit ce qu'on entend (2026-10-25)
+
+**Le changement (un seul)** : à chaque passe de parole, chacun réunit les sources de tous ses
+interlocuteurs (en gardant pour chacune l'âge le plus récent), les ajoute à ce qu'il sait, puis
+oublie les moins récemment vues au-delà de 256. Avant : il les apprenait une à une, dans l'ordre
+des paires, chaque nouvelle pouvant en évincer une autre — ~600 000 rappels par passe.
+**Prédictions (avant)**, 2 ans × 8 contre `mar6d-moyenne` (= e3bf7e8, sorties identiques) :
+- P17 la phase `3t echanges` baisse de 60 à 85 % (profil, t42, 1 an).
+- P18 débit plancher sur 30 j ≥ 20 ticks/s sur ≥ 6/8 (avant : 14,5-15,5 sur t42/f42).
+- P19 comportement : pas de décalage de même sens sur ≥ 6/8 pour les levées, les retours, la
+  population et les sources connues de la bande (la règle ne change que l'ordre des oublis).
+
+**Mesure** (2 ans × 8, `mar6d-echange` contre `mar6d-moyenne` ; **régime : trois runs sur deux
+cœurs**, les débits ne sont pas comparables) :
+- P19 tenue : levées, retours, population et sources de la bande **identiques sur 7/8** ; f2024
+  s'écarte (levées 108 → 132, population 71 → 82) — la règle ne change que l'ordre des oublis.
+- P17 : `3t echanges` 80 → 48 s par an (profil t42, 1 an) sous une charge plus forte ; rapportée
+  à `2 execution` (même charge), la parole coûte −55 %. À refaire seul sur la machine (P18 aussi).
+- Gardé (comportement inchangé, règle plus simple : ce qu'on retient ne dépend plus de l'ordre
+  des paroles). Le débit reste un **problème ouvert** si la mesure seule ne passe pas 20.

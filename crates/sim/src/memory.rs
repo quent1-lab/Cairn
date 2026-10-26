@@ -256,6 +256,43 @@ impl Memory {
         }
     }
 
+    /// Ce qu'on a entendu dire en une passe de parole (MAR-6d, étape 4) : les
+    /// sources de tous ses interlocuteurs réunies, chacune avec l'âge le plus
+    /// récent qu'on en a entendu — **triées par source, sans doublon**. On les
+    /// ajoute à ce qu'on sait, puis on oublie les moins récemment vues
+    /// au-delà de la capacité : ce qu'on retient ne dépend plus de l'ordre dans
+    /// lequel on a parlé à chacun.
+    pub fn learn(&mut self, heard: &[((i64, i64), u64)]) {
+        for &(spring, seen) in heard {
+            match self.spring_seen.get_mut(&spring) {
+                Some(last) => *last = (*last).max(seen),
+                None => {
+                    if !self.springs.contains(&spring) {
+                        self.springs.push(spring);
+                    }
+                    self.spring_seen.insert(spring, seen);
+                }
+            }
+        }
+        let excess = self.springs.len().saturating_sub(MAX_KNOWN_SPRINGS);
+        if excess > 0 {
+            // Les moins récemment vues ; à égalité, les plus anciennement apprises.
+            let mut order: Vec<(u64, usize)> =
+                self.springs.iter().enumerate().map(|(i, s)| (self.spring_seen_at(*s), i)).collect();
+            order.sort_unstable();
+            let mut drop = vec![false; self.springs.len()];
+            for &(_, i) in &order[..excess] {
+                drop[i] = true;
+                self.spring_seen.remove(&self.springs[i]);
+            }
+            let mut i = 0;
+            self.springs.retain(|_| {
+                i += 1;
+                !drop[i - 1]
+            });
+        }
+    }
+
     /// Quand cette source a été vue pour la dernière fois (0 : inconnue).
     pub fn spring_seen_at(&self, spring: (i64, i64)) -> u64 {
         self.spring_seen.get(&spring).copied().unwrap_or(0)
@@ -385,16 +422,20 @@ pub(crate) fn exchange_knowledge(sim: &mut Sim) {
             entity,
             id: *id,
             pos: (pos.x, pos.y),
-            springs: mem.springs.iter().map(|&s| (s, mem.spring_seen_at(s))).collect(),
+            springs: {
+                let mut v: Vec<_> = mem.springs.iter().map(|&s| (s, mem.spring_seen_at(s))).collect();
+                v.sort_unstable();
+                v
+            },
             shown: yields.shown(),
         })
         .collect();
     views.sort_unstable_by_key(|v| v.id.0);
 
-    // Ce que chacun apprend (l'union des sources de ses interlocuteurs), et ce
-    // qu'il voit faire (MAR-6a : la somme de leur expérience récente, et leur
+    // À qui chacun a parlé (il apprend l'union de leurs sources), et ce qu'il
+    // voit faire (MAR-6a : la somme de leur expérience récente, et leur
     // nombre).
-    let mut heard: Vec<Vec<((i64, i64), u64)>> = vec![Vec::new(); views.len()];
+    let mut partners: Vec<Vec<usize>> = vec![Vec::new(); views.len()];
     let mut seen: Vec<(Shown, u32)> = vec![(([0.0; PURSUITS], [0.0; PURSUITS]), 0); views.len()];
     let add = |acc: &mut (Shown, u32), other: &Shown| {
         for p in 0..PURSUITS {
@@ -410,8 +451,8 @@ pub(crate) fn exchange_knowledge(sim: &mut Sim) {
             if d2 > TALK_RADIUS_TILES * TALK_RADIUS_TILES {
                 continue;
             }
-            heard[i].extend(&b.springs);
-            heard[j].extend(&a.springs);
+            partners[i].push(j);
+            partners[j].push(i);
             add(&mut seen[i], &b.shown);
             add(&mut seen[j], &a.shown);
         }
@@ -425,14 +466,23 @@ pub(crate) fn exchange_knowledge(sim: &mut Sim) {
             yields.observe(sum_h.map(|x| x / k), sum_net.map(|x| x / k));
         }
     }
-    for (view, learned) in views.iter().zip(heard) {
-        if learned.is_empty() {
+    let mut heard: Vec<((i64, i64), u64)> = Vec::new();
+    for (view, others) in views.iter().zip(&partners) {
+        if others.is_empty() {
             continue;
         }
+        heard.clear();
+        for &k in others {
+            heard.extend_from_slice(&views[k].springs);
+        }
+        // Par source, l'âge le plus récent : triées par (source, âge), on garde
+        // la dernière de chaque source.
+        heard.sort_unstable();
+        heard.reverse();
+        heard.dedup_by_key(|e| e.0);
+        heard.reverse();
         if let Ok(mem) = sim.agents.query_one_mut::<&mut Memory>(view.entity) {
-            for (spring, seen) in learned {
-                mem.remember_spring(spring, seen);
-            }
+            mem.learn(&heard);
         }
     }
 }
@@ -591,5 +641,25 @@ mod tests {
         let (va, vb) = (pa.expected_in_season(winter).unwrap(), pb.expected_in_season(winter).unwrap());
         assert!(vb > 3.0 * va, "l'hiver, B rend bien plus que A : {vb:.0} contre {va:.0}");
         assert!(pa.expected_in_season(day(360 + 90 + 10)).is_none(), "au printemps, on n'y a jamais travaillé");
+    }
+
+    /// MAR-6d, étape 4 : ce qu'on entend en une passe se réunit avant d'oublier
+    /// — deux sources récentes entendues font oublier les deux plus anciennes,
+    /// et une source ancienne entendue ne chasse pas une récente.
+    #[test]
+    fn ce_qu_on_entend_se_reunit_puis_on_oublie_les_plus_anciennes() {
+        let mut mem = Memory::default();
+        for i in 0..MAX_KNOWN_SPRINGS as i64 {
+            mem.remember_spring((i * 10, 0), 100 + i as u64);
+        }
+        let mut heard = vec![((-10, 0), 50), ((-20, 0), 9_000), ((-30, 0), 9_001), ((10, 0), 8_000)];
+        heard.sort_unstable();
+        mem.learn(&heard);
+        assert_eq!(mem.springs.len(), MAX_KNOWN_SPRINGS);
+        assert_eq!(mem.spring_seen.len(), MAX_KNOWN_SPRINGS);
+        assert!(mem.springs.contains(&(-20, 0)) && mem.springs.contains(&(-30, 0)), "les récentes entrent");
+        assert!(!mem.springs.contains(&(-10, 0)), "l'ancienne entendue ne chasse personne");
+        assert!(!mem.springs.contains(&(0, 0)) && !mem.springs.contains(&(20, 0)), "les deux plus anciennes s'oublient");
+        assert_eq!(mem.spring_seen_at((10, 0)), 8_000, "une source connue rajeunit");
     }
 }
