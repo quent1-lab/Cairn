@@ -35,6 +35,8 @@ use crate::sim::Sim;
 use crate::social::{ClanMembership, RESIDENCE_RADIUS_TILES};
 use crate::yields::{RECENT_EVIDENCE_HOURS, RECENT_HALF_LIFE_DAYS, Yields};
 
+const PLACE_TILES_F: f64 = crate::memory::PLACE_TILES;
+
 /// Distance (tuiles) en deçà de laquelle un troupeau vu près d'un lieu compte
 /// pour ce lieu : la portée du regard d'un chasseur (~2 km) et un peu plus.
 const GAME_NEAR_TILES: f64 = km_to_tiles(3.0);
@@ -72,6 +74,39 @@ pub struct CampMove {
     pub days_at_camp: f64,
 }
 
+/// MAR-6d (contre-lecture du 2026-10-25), observation seule : une nuit où la
+/// bande a pu juger son camp. Ce qu'elle a décidé, et ce qu'elle aurait
+/// décidé sous chaque règle concurrente — de quoi départager les causes des
+/// départs trop fréquents sans rien changer au comportement.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CampNight {
+    pub tick: u64,
+    pub clan: u64,
+    pub moved: bool,
+    /// Le camp jugé comme aujourd'hui (récent, maille du foyer), sur son
+    /// rendement de saison, et sur tout le rayon de résidence.
+    pub here: f64,
+    pub here_long: f64,
+    pub here_radius: f64,
+    pub known: u32,
+    /// Meilleur score (attendu × trajet) et le deuxième.
+    pub best: f64,
+    pub second: f64,
+    /// Le lieu au meilleur score : heures qu'on y a travaillées, part de la
+    /// chasse dans ce qu'il a rendu, travaillé ou seulement vu.
+    pub best_h: f64,
+    pub best_hunt: f64,
+    pub best_worked: bool,
+    /// Partirait-on encore : ici sur sa saison ; ici sur le rayon ; hors
+    /// chasse des deux côtés ; vers les seuls lieux travaillés ; avec une
+    /// marge d'incertitude (l'attendu moins son écart type, ~attendu/√h).
+    pub alt_long: bool,
+    pub alt_radius: bool,
+    pub alt_nohunt: bool,
+    pub alt_worked: bool,
+    pub alt_margin: bool,
+}
+
 /// Ce que la bande sait et a vécu ce jour, par clan.
 #[derive(Default)]
 struct BandDay {
@@ -104,6 +139,8 @@ struct BandPlace {
     /// doit pas faire paraître épuisé tout pays vu).
     long_value: f64,
     worked_h: f64,
+    /// La même valeur sans ce que la chasse y a rendu (observation, MAR-6d).
+    nohunt_value: f64,
     seen_sum: f64,
     seen_h: f64,
 }
@@ -112,6 +149,30 @@ impl BandPlace {
     fn seen_mean(&self) -> f64 {
         if self.seen_h > 0.0 { self.seen_sum / self.seen_h } else { 0.0 }
     }
+
+    /// Ce qu'on attend du lieu, compte tenu de ce qu'on en sait (MAR-6d,
+    /// décision de l'utilisateur du 2026-10-25, option 1) : quelques heures
+    /// vécues disent peu, et l'estimation est tirée vers ce que rendent en
+    /// moyenne les lieux de la bande (`prior`), d'autant moins qu'on y a vécu
+    /// longtemps. Sans cela, le meilleur de centaines de lieux connus était
+    /// d'abord celui qu'on surestimait (rendu réalisé 0,76 de l'attendu sous
+    /// 20 h vécues, 0,95 au-delà de 500 h).
+    fn estimate(&self, prior: f64) -> f64 {
+        (self.worked_value + prior * PRIOR_HOURS) / (self.worked_h + PRIOR_HOURS)
+    }
+}
+
+/// Le poids de la moyenne de la bande dans l'estimation d'un lieu, en heures
+/// vécues : un lieu où l'on a travaillé autant d'heures est jugé à mi-chemin
+/// entre ce qu'il a rendu et la moyenne. Choix non sourcé, lu sur la mesure
+/// d'avant (le biais est fort sous 100 h, presque nul au-delà de 500 h).
+const PRIOR_HOURS: f64 = 100.0;
+
+/// Ce que rendent en moyenne les lieux travaillés de la bande, à ce moment
+/// de l'année (kcal par heure de subsistance).
+fn band_prior(band: &BandDay) -> f64 {
+    let (v, h) = band.places.values().fold((0.0, 0.0), |a, p| (a.0 + p.worked_value, a.1 + p.worked_h));
+    if h > 0.0 { v / h } else { 0.0 }
 }
 
 impl BandDay {
@@ -159,6 +220,9 @@ pub(crate) fn daily(sim: &mut Sim) {
                 e.worked_value += v * h;
                 e.long_value += long * h;
                 e.worked_h += h;
+                let total = f64::from(place.kcal.iter().sum::<f32>());
+                let hunt = if total > 0.0 { f64::from(place.kcal[crate::yields::Pursuit::Hunt as usize]) / total } else { 0.0 };
+                e.nohunt_value += v * (1.0 - hunt) * h;
             }
             if let Some((mean, h)) = place.season_seen(tick) {
                 e.seen_sum += mean * h;
@@ -200,10 +264,13 @@ pub(crate) fn daily(sim: &mut Sim) {
         let Some(here) = band.places.get(&crate::memory::place_of(clan.home)).filter(|p| p.worked_h > 0.0) else {
             continue;
         };
-        let here_value = here.worked_value / here.worked_h;
+        let here_value = here.estimate(band_prior(band));
+        let night = observe_night(clan.home, band, here_value, tick, clan.id.0);
+        let mut moved = false;
         if let Some((dest, mut choice)) = choose_destination(clan.home, band)
             && choice.remembered * choice.day > here_value
         {
+            moved = true;
             choice.tick = tick;
             choice.clan = clan.id.0;
             choice.now = f64::from(now);
@@ -216,8 +283,87 @@ pub(crate) fn daily(sim: &mut Sim) {
             clan.home = dest;
             clan.camp = Default::default();
         }
+        sim.camp_nights.push(CampNight { moved, ..night });
     }
     sim.clans = clans;
+}
+
+/// MAR-6d, observation seule : ce que la bande aurait décidé cette nuit sous
+/// chaque règle concurrente (voir [`CampNight`]). Lit, n'écrit rien.
+fn observe_night(home: (f64, f64), band: &BandDay, here: f64, tick: u64, clan: u64) -> CampNight {
+    let here_place = band.places.get(&crate::memory::place_of(home)).copied().unwrap_or_default();
+    let here_long = if here_place.worked_h > 0.0 { here_place.long_value / here_place.worked_h } else { here };
+    let here_nohunt = if here_place.worked_h > 0.0 { here_place.nohunt_value / here_place.worked_h } else { here };
+    let (mut rv, mut rh) = (0.0, 0.0);
+    let side = PLACE_TILES_F;
+    for (k, p) in &band.places {
+        let c = ((k.0 as f64 + 0.5) * side, (k.1 as f64 + 0.5) * side);
+        if p.worked_h > 0.0 && (c.0 - home.0).hypot(c.1 - home.1) <= RESIDENCE_RADIUS_TILES {
+            rv += p.worked_value;
+            rh += p.worked_h;
+        }
+    }
+    let here_radius = if rh > 0.0 { rv / rh } else { here };
+    let (num, den) = band.places.values().filter(|p| p.worked_h > 0.0 && p.seen_h > 0.0).fold((0.0, 0.0), |a, p| {
+        (a.0 + p.long_value, a.1 + p.seen_mean() * p.worked_h)
+    });
+    let per_forage = (den > 0.0).then(|| num / den);
+    let mut n = CampNight {
+        tick,
+        clan,
+        moved: false,
+        here,
+        here_long,
+        here_radius,
+        known: 0,
+        best: 0.0,
+        second: 0.0,
+        best_h: 0.0,
+        best_hunt: 0.0,
+        best_worked: false,
+        alt_long: false,
+        alt_radius: false,
+        alt_nohunt: false,
+        alt_worked: false,
+        alt_margin: false,
+    };
+    for &spring in &band.springs {
+        let p = (spring.0 as f64 + 0.5, spring.1 as f64 + 0.5);
+        let d = (p.0 - home.0).hypot(p.1 - home.1);
+        if d < RESIDENCE_RADIUS_TILES {
+            continue;
+        }
+        let Some(place) = band.places.get(&crate::memory::place_of(p)) else { continue };
+        let (remembered, worked) = if place.worked_h > 0.0 {
+            (place.worked_value / place.worked_h, true)
+        } else if let Some(k) = per_forage
+            && place.seen_h > 0.0
+        {
+            (k * place.seen_mean(), false)
+        } else {
+            continue;
+        };
+        n.known += 1;
+        let day = 1.0 / (1.0 + d / (WALK_TILES_PER_TICK * 24.0));
+        let score = remembered * day;
+        if score > n.best {
+            n.second = n.best;
+            n.best = score;
+            n.best_h = place.worked_h;
+            n.best_hunt = if worked && place.worked_value > 0.0 { 1.0 - place.nohunt_value / place.worked_value } else { 0.0 };
+            n.best_worked = worked;
+        } else if score > n.second {
+            n.second = score;
+        }
+        n.alt_long |= score > here_long;
+        n.alt_radius |= score > here_radius;
+        if worked {
+            n.alt_nohunt |= place.nohunt_value / place.worked_h * day > here_nohunt;
+            n.alt_worked |= score > here;
+            n.alt_margin |= (remembered - remembered / place.worked_h.max(1.0).sqrt()) * day > here;
+        }
+    }
+    n
 }
 
 /// Le lieu du prochain camp : une source connue hors du pays battu (au-delà
@@ -232,6 +378,7 @@ fn choose_destination(home: (f64, f64), band: &BandDay) -> Option<((f64, f64), C
         (a.0 + p.long_value, a.1 + p.seen_mean() * p.worked_h)
     });
     let per_forage = (den > 0.0).then(|| num / den);
+    let prior = band_prior(band);
     let mut best: Option<(f64, (f64, f64), CampMove)> = None;
     let (mut candidates, mut known) = (0u32, 0u32);
     for &spring in &band.springs {
@@ -246,7 +393,7 @@ fn choose_destination(home: (f64, f64), band: &BandDay) -> Option<((f64, f64), C
         // pays où personne n'est allé, n'a pas de valeur — ni bonne ni moyenne.
         let Some(place) = band.places.get(&crate::memory::place_of(p)) else { continue };
         let (remembered, worked) = if place.worked_h > 0.0 {
-            (place.worked_value / place.worked_h, true)
+            (place.estimate(prior), true)
         } else if let Some(k) = per_forage
             && place.seen_h > 0.0
         {
@@ -304,7 +451,7 @@ mod tests {
 
     /// Un lieu travaillé 100 h qui rendait `kcal_h`, où l'on voyait `forage`.
     fn worked(kcal_h: f64, forage: f64) -> BandPlace {
-        BandPlace { worked_value: kcal_h * 100.0, long_value: kcal_h * 100.0, worked_h: 100.0, seen_sum: forage * 100.0, seen_h: 100.0 }
+        BandPlace { worked_value: kcal_h * 100.0, long_value: kcal_h * 100.0, worked_h: 100.0, nohunt_value: kcal_h * 100.0, seen_sum: forage * 100.0, seen_h: 100.0 }
     }
 
     fn at(s: (i64, i64)) -> (i64, i64) {
@@ -378,5 +525,30 @@ mod tests {
         band.see_game(poor); // un troupeau vu près du lieu le moins bon
         let (dest, _) = choose_destination(home, &band).expect("une destination");
         assert_eq!(place_of(dest), at(rich), "on va où le pays rendait, pas où l'on a vu passer un troupeau");
+    }
+
+    /// MAR-6d, option 1 : un lieu à peine vécu, qui a rendu beaucoup en
+    /// quelques heures, ne l'emporte pas sur un lieu bien connu un peu moins
+    /// bon — son estimation est tirée vers la moyenne de la bande.
+    #[test]
+    fn un_lieu_a_peine_vecu_ne_l_emporte_pas_sur_un_lieu_bien_connu() {
+        let home = (0.0, 0.0);
+        let d = 2.5 * PLACE_TILES;
+        let (glimpse, known) = ((d as i64, 0), (-d as i64, 0));
+        let mut band = BandDay::default();
+        band.springs.extend([glimpse, known]);
+        let lived = |kcal_h: f64, h: f64| BandPlace {
+            worked_value: kcal_h * h,
+            long_value: kcal_h * h,
+            worked_h: h,
+            nohunt_value: kcal_h * h,
+            seen_sum: 100.0 * h,
+            seen_h: h,
+        };
+        band.places.insert(at((0, 0)), lived(1400.0, 1000.0)); // le camp
+        band.places.insert(at(glimpse), lived(3000.0, 5.0)); // cinq heures, une belle prise
+        band.places.insert(at(known), lived(1600.0, 1000.0));
+        let (dest, _) = choose_destination(home, &band).expect("une destination");
+        assert_eq!(place_of(dest), at(known), "le lieu bien connu, pas l'aperçu flatteur");
     }
 }

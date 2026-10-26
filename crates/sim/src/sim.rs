@@ -299,6 +299,9 @@ pub struct Sim {
     pub hunted_head: f32,
     /// Les levées du camp (MAR-6b, relevé pour les bancs).
     pub camp_moves: Vec<crate::camp::CampMove>,
+    /// MAR-6d : chaque nuit où la bande a pu juger son camp, ce qu'elle
+    /// aurait décidé sous des règles concurrentes (relevé pour les bancs).
+    pub camp_nights: Vec<crate::camp::CampNight>,
     /// Nombre cumulé d'appels A* (observabilité du coût de pathfinding).
     pub path_calls: u64,
     /// Demandes de trajet refusées faute de budget (observabilité : un refus
@@ -526,6 +529,7 @@ impl Sim {
             herd_trails: BTreeMap::new(),
             hunted_head: 0.0,
             camp_moves: Vec::new(),
+            camp_nights: Vec::new(),
             path_calls: 0,
             path_denied: 0,
             shelter_ticks: 0,
@@ -3835,7 +3839,7 @@ mod tests {
         let secret = (123_456, -654_321); // n'importe où : on teste le canal
         for (_, (id, mem)) in sim.agents.query_mut::<(&AgentId, &mut Memory)>() {
             if *id == ids[0] {
-                mem.remember_spring(secret, (0.0, 0.0));
+                mem.remember_spring(secret, sim.time.tick);
             }
         }
         crate::memory::exchange_knowledge(&mut sim);

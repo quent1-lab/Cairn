@@ -28,9 +28,14 @@ use crate::sim::Sim;
 /// « explorer » ait un sens local, assez gros pour que la carte d'une vie
 /// tienne en quelques milliers d'entrées.
 pub const MEMORY_CELL_TILES: i64 = 256;
-/// Sources retenues au plus : les plus proches restent, les lointaines
-/// s'oublient — une mémoire, pas un atlas.
-pub const MAX_KNOWN_SPRINGS: usize = 16;
+/// Sources retenues au plus : une mémoire, pas un atlas. Au-delà, on oublie
+/// celle qu'on a vue le moins récemment (MAR-6d : l'oubli par désusage).
+/// « Des centaines » (MAR-6d, décision de l'utilisateur du 2026-10-24) : un
+/// homme du désert de l'Ouest en liste plus de 50 qu'il a utilisés, son groupe
+/// en connaît plus de 1 200, et un point d'eau se retrouve après 50-60 ans
+/// sans visite (SOURCES de la cognition). À 16, chacun était toujours au
+/// plafond et le pays quitté sortait de la mémoire en quelques camps.
+pub const MAX_KNOWN_SPRINGS: usize = 256;
 /// Plafond de cellules mémorisées (~1 000 km² vécus). Au-delà, on ne note
 /// plus : la borne mémoire prime sur l'exhaustivité du souvenir.
 pub const MAX_KNOWN_CELLS: usize = 4096;
@@ -55,6 +60,13 @@ pub fn cell_of(tile: (i64, i64)) -> (i64, i64) {
 pub struct Memory {
     /// Sources d'eau connues (tuiles), vues soi-même ou apprises d'autrui.
     pub springs: Vec<(i64, i64)>,
+    /// Quand chaque source a été vue pour la dernière fois — par soi, ou par
+    /// celui qui en a parlé (on transmet aussi l'âge de ce qu'on sait). C'est
+    /// sur lui que se fait l'oubli (MAR-6d, décision de l'utilisateur du
+    /// 2026-10-24) : une source s'oublie faute d'avoir été revue, pas parce
+    /// qu'on s'en est éloigné — sinon le pays quitté s'efface à mesure qu'on
+    /// avance, et la bande ne peut jamais y revenir.
+    pub spring_seen: BTreeMap<(i64, i64), u64>,
     /// Cellules où l'agent a mis les pieds. Jamais transmises.
     pub known: BTreeSet<(i64, i64)>,
     /// Le dernier troupeau aperçu : tuile et tick. Un seul souvenir, le plus
@@ -219,23 +231,71 @@ impl Memory {
 
     /// Mémorise une source. Au-delà du plafond, la plus lointaine de `from`
     /// est oubliée : on retient l'eau *utile*.
-    pub fn remember_spring(&mut self, spring: (i64, i64), from: (f64, f64)) {
-        if self.springs.contains(&spring) {
+    pub fn remember_spring(&mut self, spring: (i64, i64), seen: u64) {
+        // L'âge se tient pour chaque source connue : le chercher là d'abord
+        // évite de parcourir la liste (256 entrées) pour chacune des sources
+        // qu'on se redit chaque jour — presque toutes déjà connues.
+        let known = self.spring_seen.contains_key(&spring) || self.springs.contains(&spring);
+        let last = self.spring_seen.entry(spring).or_insert(seen);
+        *last = (*last).max(seen);
+        if known {
             return;
         }
         self.springs.push(spring);
         if self.springs.len() > MAX_KNOWN_SPRINGS {
-            let d2 = |s: &(i64, i64)| {
-                (s.0 as f64 + 0.5 - from.0).powi(2) + (s.1 as f64 + 0.5 - from.1).powi(2)
-            };
-            let (farthest, _) = self
+            // La moins récemment vue ; à égalité, la plus anciennement apprise.
+            let seen_at = |s: &(i64, i64)| self.spring_seen.get(s).copied().unwrap_or(0);
+            let (oldest, _) = self
                 .springs
                 .iter()
                 .enumerate()
-                .max_by(|(_, a), (_, b)| d2(a).total_cmp(&d2(b)))
+                .min_by_key(|(_, s)| seen_at(s))
                 .expect("liste non vide");
-            self.springs.swap_remove(farthest);
+            let forgotten = self.springs.remove(oldest);
+            self.spring_seen.remove(&forgotten);
         }
+    }
+
+    /// Ce qu'on a entendu dire en une passe de parole (MAR-6d, étape 4) : les
+    /// sources de tous ses interlocuteurs réunies, chacune avec l'âge le plus
+    /// récent qu'on en a entendu — **triées par source, sans doublon**. On les
+    /// ajoute à ce qu'on sait, puis on oublie les moins récemment vues
+    /// au-delà de la capacité : ce qu'on retient ne dépend plus de l'ordre dans
+    /// lequel on a parlé à chacun.
+    pub fn learn(&mut self, heard: &[((i64, i64), u64)]) {
+        for &(spring, seen) in heard {
+            match self.spring_seen.get_mut(&spring) {
+                Some(last) => *last = (*last).max(seen),
+                None => {
+                    if !self.springs.contains(&spring) {
+                        self.springs.push(spring);
+                    }
+                    self.spring_seen.insert(spring, seen);
+                }
+            }
+        }
+        let excess = self.springs.len().saturating_sub(MAX_KNOWN_SPRINGS);
+        if excess > 0 {
+            // Les moins récemment vues ; à égalité, les plus anciennement apprises.
+            let mut order: Vec<(u64, usize)> =
+                self.springs.iter().enumerate().map(|(i, s)| (self.spring_seen_at(*s), i)).collect();
+            order.sort_unstable();
+            let mut drop = vec![false; self.springs.len()];
+            for &(_, i) in &order[..excess] {
+                drop[i] = true;
+                self.spring_seen.remove(&self.springs[i]);
+            }
+            let mut i = 0;
+            self.springs.retain(|_| {
+                i += 1;
+                !drop[i - 1]
+            });
+        }
+    }
+
+    /// Quand cette source a été vue pour la dernière fois (0 : inconnue).
+    pub fn spring_seen_at(&self, spring: (i64, i64)) -> u64 {
+        self.spring_seen.get(&spring).copied().unwrap_or(0)
     }
 
     /// La source connue la plus proche de `from`. Départage déterministe :
@@ -351,7 +411,7 @@ pub(crate) fn exchange_knowledge(sim: &mut Sim) {
         entity: hecs::Entity,
         id: AgentId,
         pos: (f64, f64),
-        springs: Vec<(i64, i64)>,
+        springs: Vec<((i64, i64), u64)>,
         shown: Shown,
     }
     let mut views: Vec<View> = sim
@@ -362,16 +422,20 @@ pub(crate) fn exchange_knowledge(sim: &mut Sim) {
             entity,
             id: *id,
             pos: (pos.x, pos.y),
-            springs: mem.springs.clone(),
+            springs: {
+                let mut v: Vec<_> = mem.springs.iter().map(|&s| (s, mem.spring_seen_at(s))).collect();
+                v.sort_unstable();
+                v
+            },
             shown: yields.shown(),
         })
         .collect();
     views.sort_unstable_by_key(|v| v.id.0);
 
-    // Ce que chacun apprend (l'union des sources de ses interlocuteurs), et ce
-    // qu'il voit faire (MAR-6a : la somme de leur expérience récente, et leur
+    // À qui chacun a parlé (il apprend l'union de leurs sources), et ce qu'il
+    // voit faire (MAR-6a : la somme de leur expérience récente, et leur
     // nombre).
-    let mut heard: Vec<Vec<(i64, i64)>> = vec![Vec::new(); views.len()];
+    let mut partners: Vec<Vec<usize>> = vec![Vec::new(); views.len()];
     let mut seen: Vec<(Shown, u32)> = vec![(([0.0; PURSUITS], [0.0; PURSUITS]), 0); views.len()];
     let add = |acc: &mut (Shown, u32), other: &Shown| {
         for p in 0..PURSUITS {
@@ -387,8 +451,8 @@ pub(crate) fn exchange_knowledge(sim: &mut Sim) {
             if d2 > TALK_RADIUS_TILES * TALK_RADIUS_TILES {
                 continue;
             }
-            heard[i].extend(&b.springs);
-            heard[j].extend(&a.springs);
+            partners[i].push(j);
+            partners[j].push(i);
             add(&mut seen[i], &b.shown);
             add(&mut seen[j], &a.shown);
         }
@@ -402,14 +466,23 @@ pub(crate) fn exchange_knowledge(sim: &mut Sim) {
             yields.observe(sum_h.map(|x| x / k), sum_net.map(|x| x / k));
         }
     }
-    for (view, learned) in views.iter().zip(heard) {
-        if learned.is_empty() {
+    let mut heard: Vec<((i64, i64), u64)> = Vec::new();
+    for (view, others) in views.iter().zip(&partners) {
+        if others.is_empty() {
             continue;
         }
+        heard.clear();
+        for &k in others {
+            heard.extend_from_slice(&views[k].springs);
+        }
+        // Par source, l'âge le plus récent : triées par (source, âge), on garde
+        // la dernière de chaque source.
+        heard.sort_unstable();
+        heard.reverse();
+        heard.dedup_by_key(|e| e.0);
+        heard.reverse();
         if let Ok(mem) = sim.agents.query_one_mut::<&mut Memory>(view.entity) {
-            for spring in learned {
-                mem.remember_spring(spring, view.pos);
-            }
+            mem.learn(&heard);
         }
     }
 }
@@ -443,32 +516,53 @@ mod tests {
     }
 
     #[test]
-    fn les_sources_lointaines_s_oublient() {
+    fn la_source_la_moins_recemment_vue_s_oublie() {
         let mut mem = Memory::default();
-        let home = (0.0, 0.0);
-        // Une source très lointaine, puis un plein d'autres proches.
-        mem.remember_spring((100_000, 0), home);
+        // Une source vue il y a longtemps, puis un plein d'autres vues depuis.
+        mem.remember_spring((0, 5), 0);
         for i in 0..MAX_KNOWN_SPRINGS as i64 {
-            mem.remember_spring((i * 10, 5), home);
+            mem.remember_spring((100 + i * 10, 5), 10 + i as u64);
         }
         assert_eq!(mem.springs.len(), MAX_KNOWN_SPRINGS);
-        assert!(
-            !mem.springs.contains(&(100_000, 0)),
-            "la source à 200 km doit être la première oubliée"
-        );
-        // Dédoublonnage.
+        assert!(!mem.springs.contains(&(0, 5)), "la source vue il y a le plus longtemps s'oublie");
+        assert_eq!(mem.spring_seen.len(), MAX_KNOWN_SPRINGS, "son âge s'oublie avec elle");
+        // Dédoublonnage, et la revoir la rajeunit.
         let len = mem.springs.len();
-        mem.remember_spring((0, 5), home);
+        mem.remember_spring((100, 5), 1_000);
         assert_eq!(mem.springs.len(), len);
+        assert_eq!(mem.spring_seen_at((100, 5)), 1_000);
+        // L'entendre dire d'une vieille nouvelle ne la vieillit pas.
+        mem.remember_spring((100, 5), 3);
+        assert_eq!(mem.spring_seen_at((100, 5)), 1_000);
+    }
+
+    /// MAR-6d : la source de l'ancien camp, loin d'ici mais vue récemment,
+    /// reste en mémoire ; s'oublie une source proche qu'on n'a pas revue
+    /// depuis longtemps. Avec l'oubli par la distance, le pays quitté
+    /// s'effaçait à mesure qu'on avançait.
+    #[test]
+    fn le_pays_quitte_ne_s_oublie_pas_parce_qu_on_s_en_eloigne() {
+        let mut mem = Memory::default();
+        let old_camp = (20_000, 0); // 40 km
+        // Des sources d'ici, apprises il y a longtemps.
+        for i in 0..(MAX_KNOWN_SPRINGS as i64 - 1) {
+            mem.remember_spring((i * 10, 5), 100 + i as u64);
+        }
+        // L'ancien camp, où l'on buvait encore la semaine dernière.
+        mem.remember_spring(old_camp, 5_000);
+        // Une source d'ici, découverte aujourd'hui : la mémoire déborde.
+        mem.remember_spring((-500, 5), 5_100);
+        assert!(mem.springs.contains(&old_camp), "l'ancien camp, vu récemment, reste connu");
+        assert!(!mem.springs.contains(&(0, 5)), "s'oublie la source la moins récemment vue");
     }
 
     #[test]
     fn la_source_connue_la_plus_proche() {
         let mut mem = Memory::default();
         assert_eq!(mem.nearest_known_spring((0.0, 0.0)), None);
-        mem.remember_spring((100, 0), (0.0, 0.0));
-        mem.remember_spring((10, 0), (0.0, 0.0));
-        mem.remember_spring((-500, 0), (0.0, 0.0));
+        mem.remember_spring((100, 0), 0);
+        mem.remember_spring((10, 0), 0);
+        mem.remember_spring((-500, 0), 0);
         assert_eq!(mem.nearest_known_spring((0.0, 0.0)), Some((10, 0)));
         assert_eq!(mem.nearest_known_spring((-400.0, 0.0)), Some((-500, 0)));
     }
@@ -547,5 +641,25 @@ mod tests {
         let (va, vb) = (pa.expected_in_season(winter).unwrap(), pb.expected_in_season(winter).unwrap());
         assert!(vb > 3.0 * va, "l'hiver, B rend bien plus que A : {vb:.0} contre {va:.0}");
         assert!(pa.expected_in_season(day(360 + 90 + 10)).is_none(), "au printemps, on n'y a jamais travaillé");
+    }
+
+    /// MAR-6d, étape 4 : ce qu'on entend en une passe se réunit avant d'oublier
+    /// — deux sources récentes entendues font oublier les deux plus anciennes,
+    /// et une source ancienne entendue ne chasse pas une récente.
+    #[test]
+    fn ce_qu_on_entend_se_reunit_puis_on_oublie_les_plus_anciennes() {
+        let mut mem = Memory::default();
+        for i in 0..MAX_KNOWN_SPRINGS as i64 {
+            mem.remember_spring((i * 10, 0), 100 + i as u64);
+        }
+        let mut heard = vec![((-10, 0), 50), ((-20, 0), 9_000), ((-30, 0), 9_001), ((10, 0), 8_000)];
+        heard.sort_unstable();
+        mem.learn(&heard);
+        assert_eq!(mem.springs.len(), MAX_KNOWN_SPRINGS);
+        assert_eq!(mem.spring_seen.len(), MAX_KNOWN_SPRINGS);
+        assert!(mem.springs.contains(&(-20, 0)) && mem.springs.contains(&(-30, 0)), "les récentes entrent");
+        assert!(!mem.springs.contains(&(-10, 0)), "l'ancienne entendue ne chasse personne");
+        assert!(!mem.springs.contains(&(0, 0)) && !mem.springs.contains(&(20, 0)), "les deux plus anciennes s'oublient");
+        assert_eq!(mem.spring_seen_at((10, 0)), 8_000, "une source connue rajeunit");
     }
 }

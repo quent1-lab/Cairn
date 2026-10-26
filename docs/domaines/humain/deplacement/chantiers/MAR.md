@@ -1627,3 +1627,569 @@ fréquence (21-48 levées/an), population au niveau de `main` ou au-dessus, le f
 Ce qui ne tient pas encore : (a) **pas de domaine vital** — le foyer marche presque au hasard, 25 à
 670 km en 10 ans ; (b) **la disette d'hiver en froid** quand la bande arrive sans réserve loin du
 gibier ; (c) des runs froides sous `main` (f42, f1337).
+
+## MAR-6d — le domaine vital (ouvert le 2026-10-24)
+
+**Lecture** (code de `main` 8347586, `camp.rs`, `memory.rs`). Écart à la réalité : les
+chasseurs-cueilleurs tournent sur un pays connu (Hadza, Ju/'hoansi : des points d'eau
+nommés, revisités d'année en année) ; ici le foyer fait une marche presque aléatoire
+(25-670 km en 10 ans, ~300-500 levées de ~5,5 km, retours vers un ancien camp 23-55 %).
+
+Ce que fait le code : le camp ne peut se poser que sur une **source connue d'un membre**
+(`choose_destination` parcourt `band.springs`) ; or chaque agent ne retient que
+**`MAX_KNOWN_SPRINGS` = 16 sources, et oublie la plus éloignée de l'endroit où il se trouve**
+quand il en apprend une nouvelle (`Memory::remember_spring`). Les candidats sont donc
+toujours les sources autour de la position courante : le pays qu'on a quitté sort de la
+mémoire à mesure qu'on avance, et rien ne peut ramener la bande vers son ancien pays. La
+carte vécue (`places`, 5 000 lieux de 2 km) garde, elle, le souvenir des lieux — mais sans
+source retenue, un lieu n'est plus candidat.
+
+Classement : **modèle** (l'oubli par la distance n'est pas l'oubli réel, qui est par
+désusage), en amont du choix de destination.
+
+Deuxième écart, en aval : un lieu seulement vu une heure vaut autant qu'un lieu travaillé
+des centaines d'heures (aucune incertitude) — la lisière, vue au meilleur moment, peut
+l'emporter sur le cœur connu.
+
+**Question à l'utilisateur** (avant toute prédiction) : quel mécanisme du réel doit
+porter le domaine vital ?
+**Décision de l'utilisateur (2026-10-24)** : l'oubli par désusage. Une source s'oublie faute
+d'avoir été revue, pas parce qu'on s'en est éloigné.
+
+**Le changement (un seul)** : `Memory::spring_seen` garde quand chaque source a été vue pour la
+dernière fois ; la parole transmet cet âge (on garde le plus récent) ; au-delà de 16 sources,
+on oublie **la moins récemment vue** au lieu de la plus éloignée. La capacité (16, choix non
+sourcé) **ne change pas** : si elle borne le domaine, ce sera le changement suivant, mesuré seul.
+Test rouge : `le_pays_quitte_ne_s_oublie_pas_parce_qu_on_s_en_eloigne` échoue sur l'ancien
+code (l'ancien camp, à 40 km, est oublié).
+
+**Témoin** : `out/camp/longue_r` (`longue` 10 ans, binaire `camp-memoire-50c84ba`, même code de
+simulation que `main`), 4 seeds × 2 scènes, départ jour 135 :
+
+| run | levées | retours % | foyer à 5 ans (km) | foyer à 10 ans | max |
+|---|---|---|---|---|---|
+| f1337 | 212 | 52 | 19 | 25 | 35 |
+| f2024 | 507 | 26 | 151 | 269 | 275 |
+| f42 | 305 | 43 | 93 | 129 | 136 |
+| f7 | 292 | 34 | 127 | 192 | 198 |
+| t1337 | 444 | 41 | 147 | 156 | 163 |
+| t2024 | 481 | 24 | 473 | 663 | 670 |
+| t42 | 447 | 31 | 254 | 354 | 356 |
+| t7 | 359 | 26 | 214 | 384 | 385 |
+
+Signature de la dérive : distance finale ≈ maximum (on ne revient jamais).
+
+**Prédictions (écrites avant), même banc, même régime :**
+- P1 retours vers un ancien camp : en hausse sur ≥ 6/8 runs, médiane +10 points au moins
+  (témoin médiane 32 %). Réfutée si < 5/8 en hausse.
+- P2 distance du foyer au départ à 10 ans : en baisse sur ≥ 6/8, médiane −30 % au moins
+  (témoin médiane 230 km). Réfutée si < 5/8 en baisse.
+- P3 (ce que je crois) : **pas encore de domaine borné** — la capacité de 16 sources, mise en
+  commun chaque jour par la bande, couvre le pays de quelques camps ; distance finale / max
+  reste ≥ 0,8 sur la plupart des runs. Si le foyer finit au contraire sous 0,6 × son max sur
+  ≥ 5/8, le désusage suffit.
+- P4 voisins : morts de soif non accrues de plus de 20 % au total (les sources proches restent
+  revues à chaque délibération) ; population moyenne des ans 5-10 dans ±15 % du témoin sur ≥ 6/8.
+- Seuil de décision : P1 et P2 tenues → garder ; puis, si P3 tenue (pas borné), proposer la
+  capacité comme changement suivant. P2 réfutée → le désusage ne porte pas le domaine, relire.
+
+### Débat (2026-10-24, pré-mortem)
+1. Pour une bande qui dérive, « la moins récemment vue » et « la plus éloignée » sont presque
+   la même source : le changement peut ne rien faire. → **Retenu** : instrument d'abord
+   (`longue` : sources connues de la bande la plus nombreuse, leur portée, **anciens camps
+   encore candidats** — une source connue dans le lieu de 2 km d'un camp quitté), run d'un an
+   sur t42 et f42, témoin contre variante, **avant** la run longue. Si les anciens camps
+   candidats ne montent pas, la run de 10 ans n'est pas lancée.
+2. Le témoin vient d'un autre binaire. → **Écarté** : le code de simulation de 50c84ba et de
+   `main` est le même (seul `scenario.rs` a changé, sortie de `marche` identique) ; de plus le
+   binaire témoin + instrument sera reconstruit, et sa première année comparée à `longue_r`.
+3. Un va-et-vient A→B→A compte comme retour. → **Retenu** : journal des levées
+   (`<out>.camps.csv`), d'où l'on compte les retours vers un camp quitté depuis plus de 30 jours.
+4. Distance finale et rapport final/max = un tirage d'une marche aléatoire. → **Retenu** : la
+   statistique suit la forme (règle 8) — **déplacement quadratique moyen selon le délai**
+   (croît linéairement si diffusion, plafonne si domaine) et **rayon de giration des camps par
+   an**, depuis le journal des levées. Prédiction ajoutée : P5 ci-dessous.
+5. On se souvient du pays dans l'état où on l'a quitté (épuisé) ; le trajet pèse peu (×0,7 à
+   40 km). → **Retenu comme voisin**, non traité ici (un changement, une chose) ; le journal des
+   levées garde `attendu` et `trajet` du lieu choisi.
+6. Un lieu travaillé seulement dans une autre saison n'est pas candidat. → **Retenu comme
+   voisin** ; l'instrument « anciens camps candidats » compte la source, pas la saison : à lire
+   avec cette réserve.
+7. P4 sous le bruit. → **Retenu** : P4 ne juge que le **sens commun** — dégradation seulement si
+   population et morts de soif empirent sur ≥ 7/8.
+8. Densité des sources selon le climat. → **Retenu** : `sources_bande` par scène.
+
+**P5 (ajoutée avant la mesure)** : rayon de giration des camps de l'année, ans 6-10 : témoin à
+relever dans la même passe ; variante en baisse sur ≥ 6/8. Déplacement quadratique moyen entre
+deux camps séparés de 1, 2, 4 ans : si le désusage suffit, il cesse de croître entre 2 et 4 ans
+sur ≥ 5/8 (sinon P3 tenue).
+
+### Mesure de contrôle, 2 ans × 8 (binaires `mar6d-temoin` = `main` + instrument, `mar6d-desusage`)
+Instrument vérifié : première année du témoin identique à `longue_r` (0 cellule, t42 et f42).
+
+| run | pop T → D | levées T → D | retours % T → D | retours > 30 j % | sources bande (méd.) | portée km | anciens camps candidats méd/max | foyer à 2 ans km | giration an 2 km |
+|---|---|---|---|---|---|---|---|---|---|
+| t42 | 55 → 56 | 90 → 141 | 23 → 16 | 3 → 2 | 33 → 52 | 6,6 → 11,3 | 1/6 → 1/12 | 93 → 57 | 23 → 31 |
+| t7 | 55 → 37 | 85 → 137 | 18 → 43 | 1 → 18 | 23 → 22 | 6,2 → 7,6 | 1/10 → 3/12 | 112 → 31 | 15 → 7 |
+| t1337 | 59 → 58 | 113 → 143 | 20 → 21 | 4 → 1 | 46 → 47 | 8,0 → 10,5 | 1/7 → 1/7 | 65 → 113 | 19 → 29 |
+| t2024 | 57 → 52 | 142 → 164 | 20 → 18 | 1 → 1 | 31 → 56 | 7,8 → 11,5 | 1/6 → 1/7 | 205 → 214 | 38 → 29 |
+| f42 | 38 → 51 | 85 → 138 | 32 → 22 | 5 → 3 | 25 → 35 | 6,6 → 9,7 | 1/9 → 2/12 | 69 → 102 | 4 → 15 |
+| f7 | 52 → 80 | 98 → 175 | 24 → 23 | 4 → 5 | 25 → 32 | 6,9 → 8,9 | 1/9 → 2/12 | 66 → 165 | 9 → 38 |
+| f1337 | 63 → 72 | 72 → 109 | 31 → 37 | 18 → 15 | 28 → 33 | 5,1 → 7,3 | 1/13 → 3/21 | 30 → 20 | 6 → 5 |
+| f2024 | 76 → 82 | 139 → 127 | 22 → 17 | 9 → 2 | 29 → 40 | 7,7 → 10,3 | 2/10 → 2/9 | 99 → 151 | 11 → 38 |
+
+Lecture (seuil du pré-mortem : la run de 10 ans n'est lancée que si les anciens camps restent
+candidats) :
+- **Le changement agit sur la mémoire** : la portée des sources connues monte sur 8/8 (+25 à
+  +70 %), leur nombre sur 7/8.
+- **Mais pas sur le retour** : anciens camps candidats en médiane 1-3, comme le témoin ;
+  retours en hausse sur 3/8 seulement, retours de plus de 30 jours sur 2/8. P1 réfutée en
+  avant-première.
+- **Il fait bouger davantage** : levées en hausse sur 7/8 (+15 à +79 %), foyer plus loin sur
+  5/8, giration plus grande sur 5/8. P2 réfutée en avant-première. Plus de lieux connus, c'est
+  plus de lieux où partir — vers la lisière, pas vers l'ancien pays.
+- La population, elle, monte en froid (4/4 : 38 → 51, 52 → 80…) et baisse en tempéré sur 2/4
+  (t7 55 → 37) : à ne pas lire sur 2 ans.
+- **La run de 10 ans n'est pas lancée.** Le témoin le disait : « sources retenues 16/16/16 »
+  (acceptation 5 ans) — chacun est toujours au plafond ; un camp sur cinq jours apporte assez
+  de sources neuves pour pousser les anciennes dehors, quel que soit l'ordre d'oubli.
+
+### Sensibilité à la capacité (exploration, binaire `mar6d-cap256` : désusage + 256 sources, non committé)
+Même banc, 2 ans × 8.
+
+| run | levées T / D / 256 | retours % | retours > 30 j % | anciens camps candidats méd/max | foyer à 2 ans km | pop |
+|---|---|---|---|---|---|---|
+| t42 | 90 / 141 / **208** | 23 / 16 / **35** | 3 / 2 / 9 | 1 / 1 / **16**/36 | 93 / 57 / **34** | 55 / 56 / 53 |
+| t7 | 85 / 137 / **262** | 18 / 43 / **52** | 1 / 18 / 11 | 1 / 3 / **25**/51 | 112 / 31 / **9** | 55 / 37 / 46 |
+| t1337 | 113 / 143 / **190** | 20 / 21 / **28** | 4 / 1 / 4 | 1 / 1 / **6**/23 | 65 / 113 / 115 | 59 / 58 / 56 |
+| t2024 | 142 / 164 / **296** | 20 / 18 / **34** | 1 / 1 / 4 | 1 / 1 / **10**/27 | 205 / 214 / **32** | 57 / 52 / 52 |
+| f42 | 85 / 138 / **234** | 32 / 22 / **44** | 5 / 3 / 12 | 1 / 2 / **20**/46 | 69 / 102 / — | 38 / 51 / **4** |
+| f7 | 98 / 175 / **459** | 24 / 23 / **41** | 4 / 5 / 7 | 1 / 2 / **19**/37 | 66 / 165 / 109 | 52 / 80 / 69 |
+| f1337 | 72 / 109 / **181** | 31 / 37 / **58** | 18 / 15 / 23 | 1 / 3 / **21**/35 | 30 / 20 / 18 | 63 / 72 / 64 |
+| f2024 | 139 / 127 / **263** | 22 / 17 / **30** | 9 / 2 / 5 | 2 / 2 / **14**/38 | 99 / 151 / 78 | 76 / 82 / 63 |
+
+Lecture :
+- **Avec une mémoire assez grande, le domaine commence à se voir** : les anciens camps restent
+  candidats (médiane 6-25 contre 1-3), les retours montent sur 8/8 (28-58 %), le foyer finit
+  plus près du départ sur 5/7 (t7 112 → 9 km, t2024 205 → 32).
+- **Mais la bande lève le camp sans cesse** : 90-230 levées par an (réel : Batek ~44, Hadza ~12),
+  et f42 s'effondre (60 → 4 : 31 morts de faim, 15 de froid, la hutte toujours laissée
+  derrière). Avec beaucoup de lieux connus, il s'en trouve presque toujours un qui « promet
+  mieux » : la règle de départ (MAR-6b c) ne compte ni la journée de déménagement ni
+  l'installation (rebâtir l'abri), seulement un facteur de trajet.
+- Débit : 25 ticks/s contre 41 en t42 (la parole échange 256 sources).
+- Conclusion : le désusage est nécessaire mais pas suffisant ; la capacité borne le domaine ;
+  et dès qu'elle ne le borne plus, c'est le **coût du départ** qui manque. **Question à
+  l'utilisateur.**
+
+**Décision de l'utilisateur (2026-10-24, soir)** : d'abord la capacité d'après le réel, puis le
+coût du départ, chacun mesuré seul. Capacité retenue : **256** (sources : > 50 points d'eau
+utilisés par un homme, > 1 200 connus d'un groupe, retrouvés après 50-60 ans — cognition,
+SOURCES). Le binaire `mar6d-cap256` est exactement ce code : la mesure de 2 ans × 8 ci-dessus
+vaut pour lui. L'oubli au fil du temps n'est pas ajouté : à 50-60 ans de souvenir, il serait
+sans effet sur l'horizon des bancs.
+
+## MAR-6d, étape 2 — le coût du départ (2026-10-25)
+
+**Lecture** (`camp.rs`, `choose_destination` et `daily`) : on part si `attendu là-bas ×
+1/(1 + d / 96 km) > rendu ici`. Ce facteur est celui de la valeur marginale (Charnov) avec un
+séjour d'**un jour** : il ne compte ni l'installation, ni la durée pendant laquelle le
+nouveau lieu rendra mieux. L'abri, lui, se bâtit en un tick sur la réserve (6 unités).
+
+**Sources** (sous-agent `sourceur`, 2026-10-25, tout de seconde main) : installer un camp
+hadza, « moins de deux heures » (les femmes) ; tente évenk 10-15 min ; igloo 1-6 h. Levées par
+an : Hadza 7, Ju/'hoansi 5,5, moyenne de la base de Marlowe 7,4, Aché 75-100 (Marlowe, via
+résumé) ; Hadza : un camp toutes les 2 à 5 semaines (Marlowe 2010). Rien sur la journée de
+déménagement elle-même.
+
+**Le changement (un seul)** : la valeur marginale avec le séjour attendu et le coût du départ.
+Pour chaque lieu connu : gain = (attendu là-bas − rendu ici) × heures de subsistance par jour
+× séjour attendu ; coût = rendu ici × (heures de trajet + **2 h** d'installation). On part vers
+le lieu au meilleur gain net, s'il est positif. Le **séjour attendu** est la moyenne des
+séjours de la bande elle-même (jours depuis sa fondation / camps) ; les **heures de subsistance
+par jour** sont celles de ses adultes (`Yields`, le mois). Le facteur de trajet disparaît (le
+coût du trajet le remplace). Choix non sourcé : 2 h (borne haute hadza).
+
+**Prédictions (écrites avant)**, 2 ans × 8, témoin `mar6d-cap256` (ca81a78) :
+- P6 levées en baisse sur ≥ 6/8, de −20 à −50 % (témoin 181-459 en 2 ans). Réfutée si < 5/8.
+- P7 les anciens camps restent candidats (médiane ≥ 5 sur ≥ 6/8) et les retours ne baissent
+  pas de plus de 10 points sur ≥ 6/8.
+- P8 (ce que je crois) : les levées restent bien au-dessus du réel (> 40 par an) : la
+  rétroaction va dans le mauvais sens — plus les séjours s'allongent, plus le gain attendu
+  d'un départ grandit. Si les levées tombent sous 40 par an sur ≥ 5/8, je me trompe.
+- Seuil : P6 tenue → garder ; P6 réfutée → le coût du départ n'est pas ce qui manque, relire
+  (candidat : la malédiction du gagnant — avec 256 lieux estimés, le meilleur l'emporte
+  presque toujours sur ici par le seul bruit des estimations).
+
+**Mesure** (2 ans × 8, `mar6d-cout` contre `mar6d-cap256`) :
+
+| run | levées 256 → coût | retours % | anciens camps cand. méd | foyer à 2 ans km | pop | morts faim ; froid (256 → coût) |
+|---|---|---|---|---|---|---|
+| t42 | 208 → 152 | 35 → 45 | 16 → 28 | 34 → 47 | 53 → 57 | 0 ; 0 → 0 ; 0 |
+| t7 | 262 → 334 | 52 → 46 | 25 → 13 | 9 → 88 | 46 → 54 | — |
+| t1337 | 190 → 194 | 28 → 34 | 6 → 13 | 115 → 53 | 56 → 54 | — |
+| t2024 | 296 → 344 | 34 → 29 | 10 → 14 | 32 → 77 | 52 → 61 | — |
+| f42 | 234 → 306 | 44 → 33 | 20 → 20 | — → 61 | 4 → 30 | 31 ; 15 → 18 ; 0 |
+| f7 | 459 → 312 | 41 → 41 | 19 → 27 | 109 → 40 | 69 → 65 | 2 ; 0 → 2 ; 0 |
+| f1337 | 181 → 147 | 58 → 38 | 21 → 22 | 18 → 34 | 64 → 45 | 5 ; 0 → 8 ; 0 |
+| f2024 | 263 → 219 | 30 → 17 | 14 → 15 | 78 → 88 | 63 → 85 | 3 ; 1 → 0 ; 0 |
+
+- **P6 réfutée** : levées en baisse sur 4/8 seulement (73-172 par an, réel 5-100).
+- P7 tenue : anciens camps candidats ≥ 13 en médiane sur 7/8 ; retours en baisse de plus de
+  10 points sur 2/8 seulement.
+- P8 tenue : bien au-dessus de 40 levées par an partout.
+- Le froid ne tue plus en f42 (15 → 0), mais sur une seule seed et 2 ans.
+- **Verdict** : le coût du départ, à ce qu'il coûte réellement (trajet et 2 h), n'est pas ce qui
+  fait partir la bande. Changement **annulé** (commit puis retour, pour l'histoire) selon le
+  seuil écrit avant. Deux réfutations de suite (étape 1 : P1, P2 ; étape 2 : P6) → contre-lecture.
+
+### Débat (2026-10-25, contre-lecture après deux réfutations)
+1. La porte de départ est saturée : on part dès que la preuve le permet. → **Retenu, vérifié**
+   sur les journaux existants : 67 % des levées à 1-2 jours de la précédente (cap256 ; témoin
+   42 %). La question est pourquoi le meilleur lieu gagne dès la 2ᵉ nuit.
+2. « Ici » et « là-bas » ne sont pas jugés sur la même grandeur (ici : rendement récent d'une
+   maille qu'on épuise ; là-bas : repoussé vers la saison ; ici : la seule maille du foyer).
+   → **Retenu** : à mesurer (contrefactuels ci-dessous).
+3. La queue de la chasse : une prise sur un lieu peu travaillé donne un attendu énorme. →
+   **Retenu, vérifié** : attendu du lieu retenu, médiane ~1 300 kcal/h, p90 5 700-8 200, max
+   178 771.
+4. La malédiction du gagnant (ma candidate) : signature à vérifier (rendu réalisé < attendu,
+   écart qui décroît avec les heures vécues). → **Retenu** dans la même mesure.
+5. Lieux seulement vus : **vérifié**, 4-5 % des levées seulement — écarté comme cause.
+6. L'étape 2 ne pouvait pas tester le coût réel (le départ ne coûte presque rien dans le
+   modèle : l'abri en un tick). → **Retenu** : noté ; rendre le départ physiquement coûteux
+   reste un axe (question à l'utilisateur plus tard).
+7. « < 40 levées par an » frôle le réglage vers un critère. → **Retenu** : on juge la cause par
+   les contrefactuels, pas par un nombre de levées visé.
+8. Changement de quart d'année : à vérifier dans la même mesure.
+
+### Contrefactuels (instrument d'observation, `Sim::camp_nights`, `<out>.nuits.csv`)
+Chaque nuit où la bande peut juger : le camp jugé comme aujourd'hui, sur sa saison, sur le
+rayon de résidence ; le meilleur et le deuxième score ; pour le meilleur lieu, ses heures
+vécues et la part de la chasse ; et si l'on partirait encore sous chaque règle : ici sur sa
+saison (`alt_saison`), ici sur le rayon (`alt_rayon`), hors chasse des deux côtés
+(`alt_hors_chasse`), lieux travaillés seuls (`alt_travailles`), attendu moins ~attendu/√h
+(`alt_marge`).
+
+**Prédictions (avant de lire)**, 2 ans × 8, comparées aux nuits où l'on part aujourd'hui :
+- C1 lieux travaillés seuls : quasi pas de baisse (< 10 %) — 5 % des levées vont vers un lieu vu.
+- C2 hors chasse : la plus forte baisse, −40 à −70 % des départs, dans le même sens sur 8/8.
+- C3 ici sur sa saison : baisse de −20 à −50 %.
+- C4 ici sur le rayon : baisse plus faible que C3.
+- C5 marge d'incertitude : baisse de −10 à −40 % ; et le rendu réalisé au camp suivant
+  (le « ici » de la première nuit jugée après une levée) inférieur à l'attendu de plus de 30 %
+  en médiane.
+- La cause est celle dont la règle fait le plus tomber les départs, dans le même sens sur
+  4 seeds × 2 scènes ; ensuite, un seul changement, à proposer à l'utilisateur.
+
+**Mesure** (2 ans × 8, binaire `mar6d-nuits` = ca81a78 + instrument ; sorties identiques à
+`mar6d-cap256` sur 8/8, hors débit et mémoire). Variation des départs sous chaque règle :
+
+| run | nuits | départs | travaillés seuls | hors chasse | ici sur sa saison | ici sur le rayon | marge 1/√h | réalisé / attendu (méd.) |
+|---|---|---|---|---|---|---|---|---|
+| t42 | 537 | 208 | −1 % | +22 % | +1 % | +156 % | **−48 %** | 0,87 |
+| t7 | 894 | 262 | −1 % | +82 % | −31 % | +197 % | **−39 %** | 0,85 |
+| t1337 | 565 | 190 | −1 % | +44 % | −6 % | +172 % | **−52 %** | 0,87 |
+| t2024 | 644 | 296 | −4 % | +46 % | −17 % | +98 % | **−45 %** | 0,72 |
+| f42 | 491 | 234 | −2 % | +28 % | +1 % | +94 % | **−38 %** | 0,81 |
+| f7 | 1290 | 459 | −5 % | +71 % | −15 % | +136 % | **−42 %** | 0,81 |
+| f1337 | 781 | 181 | −2 % | +112 % | +11 % | +269 % | **−33 %** | 0,89 |
+| f2024 | 512 | 263 | −0 % | +32 % | −13 % | +81 % | **−35 %** | 0,70 |
+
+Rendu réalisé au camp suivant / attendu, selon les heures vécues du lieu retenu (8 runs) :
+< 20 h 0,76 (788 levées) ; 20-100 h 0,73 (481) ; 100-500 h 0,89 (645) ; > 500 h 0,95 (173).
+
+- C1 tenue (−0 à −5 %).
+- **C2 réfutée, à l'envers** : sans la chasse, on partirait **plus** (+22 à +112 %) — la chasse
+  gonfle « ici » plus que « là-bas ». La queue de la chasse (point 3) n'est pas la cause.
+- C3 réfutée (−31 à +11 %, sens variable).
+- C4 réfutée à l'envers : la maille du foyer rend **mieux** que le rayon (+81 à +269 % de départs
+  si l'on jugeait ici sur le rayon) — pas de biais d'« ici » trop bas.
+- **C5 tenue en sens, 8/8** : la marge d'incertitude fait tomber les départs de 33 à 52 %, la
+  plus forte baisse partout. Le rendu réalisé est sous l'attendu (0,70-0,89, prédiction
+  « > 30 % » tenue sur 2/8 seulement), et **l'écart disparaît quand le lieu est bien connu**
+  (0,76 sous 20 h vécues, 0,95 au-delà de 500 h) : c'est la signature de la malédiction du
+  gagnant — le meilleur de ~250 estimations est d'abord celui qu'on surestime.
+- **Cause retenue : un lieu peu vécu est jugé comme s'il était connu.** Le changement à faire
+  est l'incertitude dans la valeur d'un lieu — l'option « désusage + incertitude » proposée
+  le 2026-10-24. **Question à l'utilisateur** (la forme).
+
+## MAR-6d, étape 3 — juger un lieu selon ce qu'on en sait (2026-10-25)
+
+**Décision de l'utilisateur (2026-10-25)** : option 1, l'estimation tirée vers la moyenne ;
+« si ce n'est pas suffisant, on refait une analyse et on met l'option 2 (la prudence) en face
+d'une autre possibilité ».
+
+**Le changement (un seul)** : la valeur d'un lieu travaillé (et celle du camp, même règle) est
+`(kcal vécues + moyenne de la bande × 100 h) / (heures vécues + 100 h)`. La moyenne : ce que
+rendent les lieux travaillés de la bande, à ce moment de l'année. Les lieux seulement vus ne
+changent pas (5 % des levées). Choix non sourcé : 100 h, lu sur la courbe d'avant (biais fort
+sous 100 h, presque nul au-delà de 500 h), pas réglé sur un nombre de levées.
+
+**Prédictions (avant)**, 2 ans × 8, contre `mar6d-nuits` (= cap256) :
+- P9 levées en baisse sur ≥ 6/8, de −25 à −50 %. Réfutée si < 5/8 en baisse.
+- P10 rendu réalisé / attendu plus proche de 1 : ≥ 0,85 en médiane sur ≥ 6/8 (avant 0,70-0,89).
+- P11 anciens camps candidats et retours : pas de baisse de plus de 10 points sur ≥ 6/8.
+- P12 voisins : dégradation seulement si population et morts de faim empirent ensemble sur ≥ 7/8.
+- Seuil : P9 tenue → garder et passer à 10 ans ; P9 réfutée → nouvelle analyse.
+
+**Mesure** (2 ans × 8, `mar6d-moyenne` contre `mar6d-nuits` = cap256) :
+
+| run | levées | retours % | retours > 30 j % | anc. camps cand. | foyer 2 ans km | giration an 2 km | réalisé/attendu | pop | faim ; froid |
+|---|---|---|---|---|---|---|---|---|---|
+| t42 | 208 → 176 | 35 → 68 | 9 → 29 | 16 → 24 | 34 → 11 | 9,4 → 6,5 | 0,82 → 0,90 | 53 → 53 | 0 ; 0 → 0 ; 0 |
+| t7 | 262 → 176 | 52 → 57 | 11 → 17 | 25 → 18 | 9 → 24 | 12,1 → 9,5 | 0,79 → 0,81 | 46 → 49 | 0 ; 0 → 1 ; 0 |
+| t1337 | 190 → 100 | 28 → 53 | 4 → 12 | 6 → 8 | 115 → 37 | 25,9 → 10,3 | 0,82 → 0,94 | 56 → 56 | 0 ; 0 → 0 ; 0 |
+| t2024 | 296 → 256 | 34 → 36 | 4 → 11 | 10 → 14 | 32 → 45 | 26,3 → 5,0 | 0,68 → 0,88 | 52 → 59 | 0 ; 0 → 0 ; 0 |
+| f42 | 234 → 154 | 44 → 52 | 12 → 8 | 20 → 16 | — → 70 | 10,4 → 5,7 | 0,76 → 0,83 | 4 → 28 | 31 ; 15 → 31 ; 0 |
+| f7 | 459 → 235 | 41 → 57 | 7 → 17 | 19 → 29 | 109 → 37 | 23,5 → 8,4 | 0,76 → 0,79 | 69 → 50 | 2 ; 0 → 5 ; 0 |
+| f1337 | 181 → 91 | 58 → 52 | 23 → 12 | 21 → 5 | 18 → 38 | 6,1 → 5,0 | 0,85 → 0,95 | 64 → 51 | 5 ; 0 → 12 ; 1 |
+| f2024 | 263 → 108 | 30 → 44 | 5 → 19 | 14 → 20 | 78 → 12 | 20,4 → 6,5 | 0,65 → 0,92 | 63 → 71 | 3 ; 1 → 0 ; 0 |
+
+(réalisé/attendu : le « ici » de la première nuit jugée au nouveau camp sur l'attendu du
+journal des levées, les deux estimés par la même règle.)
+- **P9 tenue** : levées en baisse sur 8/8 (−14 à −59 %), soit 45-128 par an (Aché 75-100).
+- P10 à moitié : réalisé/attendu en hausse sur 8/8, ≥ 0,85 sur 5/8 (prédit 6/8).
+- P11 tenue : retours en hausse sur 7/8 ; anciens camps candidats en baisse de plus de 10 sur
+  f1337 seulement.
+- P12 : pas de dégradation commune (population en baisse sur 3/8, en hausse sur 4/8 ; faim en
+  hausse sur f7 et f1337 ; le froid ne tue plus en f42).
+- **Le domaine se dessine** : giration de l'an 2 en baisse sur 7/8 (26 → 5 km en t2024,
+  24 → 8 en f7), retours de plus de 30 jours en hausse sur 6/8.
+- Seuil : P9 tenue → gardé ; mesure à 10 ans × 8 contre le témoin `main` (`longue_r`).
+
+**Prédictions à 10 ans × 8 (écrites avant)**, `mar6d-moyenne` contre `longue_r` (`main`) :
+- P13 distance finale du foyer au départ en baisse sur ≥ 6/8, médiane ≤ 100 km (témoin 230).
+- P14 un domaine borné : distance finale / distance max ≤ 0,6 sur ≥ 5/8 (témoin 0,7-1,0, presque
+  toujours ≥ 0,95) — la bande revient.
+- P15 voisins : population moyenne des ans 5-10 et morts de faim ne se dégradent pas ensemble
+  sur ≥ 7/8.
+
+**Mesure à 10 ans × 8** (`mar6d-moyenne`, 44f92b1, contre `longue_r` = `main`, départ jour 135) :
+
+| run | foyer fin / max km, témoin | variante | pop moy. ans 5-10 | morts de faim | levées (10 ans) | giration ans 6-10 km |
+|---|---|---|---|---|---|---|
+| t42 | 354 / 356 | **32 / 39** | 65 → 58 | 0 → 0 | 447 → 990 | 5,1 |
+| t7 | 384 / 385 | **42 / 65** | 59 → 47 | 0 → 1 | 359 → 782 | 12,6 |
+| t1337 | 156 / 163 | 126 / 132 | 62 → 69 | 0 → 0 | 444 → 602 | 10,0 |
+| t2024 | 663 / 670 | **20 / 55** | 65 → 56 | 10 → 0 | 481 → 590 | 4,9 |
+| f42 | 129 / 136 | 88 / 108 | 29 → 26 | 40 → 34 | 305 → 700 | 9,6 |
+| f7 | 192 / 198 | 122 / 127 | 56 → 36 | 4 → 10 | 292 → 746 | 7,4 |
+| f1337 | 25 / 35 | 32 / 41 | 49 → 46 | 9 → 15 | 212 → 517 | 4,2 |
+| f2024 | 269 / 275 | **34 / 36** | 76 → 72 | 16 → 0 | 507 → 401 | 6,9 |
+
+- **P13 tenue** : distance finale en baisse sur 7/8, médiane 38 km (témoin 230).
+- **P14 réfutée telle qu'écrite** : fin/max ≤ 0,6 sur 2/8 seulement. Mais le maximum lui-même
+  est borné (36-132 km contre 35-670) : la bande ne revient pas forcément à son point de départ,
+  elle **cesse de s'en éloigner**. Le rapport fin/max était une mauvaise statistique pour un
+  domaine qui se pose ailleurs que le départ ; la giration des camps (ans 6-10 : **4 à 13 km**,
+  soit ~50-500 km² — Baka 205 ± 109) dit le domaine.
+- **P15 tenue au sens écrit** (population en baisse **et** faim en hausse ensemble sur 3/8), **mais
+  la population des ans 5-10 baisse sur 6/8** (−5 à −36 %, f7 56 → 36) : à expliquer avant tout
+  report.
+- **Les levées ont doublé par rapport à `main`** (40-99 par an contre 21-51) : la bande bouge
+  plus, mais dans un pays à elle. Le réel : Hadza 7, Ju/'hoansi 5,5, Aché 75-100.
+- D'où vient la baisse de population (10 ans, témoin → variante) : **moins de naissances** sur
+  6/8 (57 → 47, 51 → 40, 74 → 60…) et **plus de morts violentes** sur 3/8 (t7 0 → 7, t2024 2 → 11,
+  f2024 0 → 8) ; la soif et la faim varient dans les deux sens. Une bande qui reste dans son pays
+  y croise plus souvent ses voisins (D13) ; la natalité plus basse n'est pas lue (deux fois plus
+  de levées : effort, nourrissons portés ?). Voisins à lire avant le report.
+
+### Débat (2026-10-25, contre-lecture du jalon)
+1. La mesure à 10 ans mêle trois changements (désusage, 256, moyenne) ; le doublement des levées
+   vient sans doute du 256, et la baisse de population n'est attribuée à aucun. → **Retenu** :
+   10 ans × 8 sur `mar6d-cap256`.
+2. Pas de giration ni de déplacement quadratique du témoin ; un maximum de 108-132 km peut être
+   une diffusion plus lente ; « 50-500 km² » mélange dispersion des camps et aire parcourue.
+   → **Retenu** : 10 ans × 8 du témoin avec instrument (`mar6d-temoin`), déplacement quadratique
+   à 1, 2, 4, 8 ans sur les journaux des levées des trois bras ; la comparaison aux Baka est
+   retirée tant qu'elle n'est pas faite sur la même grandeur.
+3. P14 réinterprétée après lecture. → **Retenu** : « la bande cesse de s'éloigner » devient une
+   prédiction (P16 ci-dessous), jugée sur le déplacement quadratique.
+4. Moins de naissances et plus de violence : un décompte, pas une cause ; autre explication :
+   l'estimation tire toutes les bandes vers les mêmes lieux réputés. → **Retenu** : instrument
+   (naissances par femme fertile et par an, rencontres entre bandes) avant le report.
+5. `PRIOR_HOURS` ajusté sur son propre symptôme ; moyenne pondérée par les heures (dominée par
+   les lieux épuisés) ; la queue de la chasse reste (1 h vécue à 178 771 → ~3 000). → **Retenu** :
+   sensibilité à 50 et 200 h (2 ans × 8) ; l'estimation séparée cueillette / chasse et le poids
+   déduit des variances sont des axes, à proposer à l'utilisateur.
+6. Tests rouges : la surchasse mesure une zone fixe que des chasseurs plus mobiles quittent ; les
+   curieux se noient dans le partage des sources en 14 jours. → **Retenu** : à lire (positions du
+   camp, écart curieux − ternes sur 4 seeds, deux bras), jamais en baissant les seuils.
+7. P10 circulaire (l'attendu est rétréci). → **Retenu** : P10 retirée ; à remplacer par le
+   rendement brut au nouveau camp contre les derniers jours de l'ancien.
+8. Régime : jour 135, 10 ans, f42 trop petit pour renseigner. → Noté.
+**Le report sur `main` attend les points 1, 2, 4 et 6.**
+
+**P16 (écrite avant la mesure du témoin)** : déplacement quadratique moyen des camps entre deux
+dates séparées de 1, 2, 4, 8 ans. Témoin : croît à peu près linéairement (diffusion). Variante
+`moyenne` : plateau — le rapport MSD(8 ans) / MSD(4 ans) ≤ 1,3 sur ≥ 5/8 (≈ 2 pour une diffusion).
+
+**Témoin avec instrument, 10 ans × 8** (`mar6d-temoin`) — déplacement quadratique des camps
+(√MSD, km, à 1 / 2 / 4 / 8 ans ; rapport MSD 8 ans / 4 ans) :
+
+| run | témoin | variante `moyenne` |
+|---|---|---|
+| t42 | 55 / 100 / 196 / 321 ; 2,69 | 8 / 9 / 7 / — (clan recomposé) |
+| t7 | 43 / 80 / 152 / 303 ; 4,00 | 23 / 21 / 28 / 27 ; **0,97** |
+| t1337 | 48 / 81 / 132 / 159 ; 1,44 | 24 / 32 / 38 / 75 ; 3,89 |
+| t2024 | 77 / 147 / 284 / 537 ; 3,59 | 16 / 20 / 28 / 29 ; **1,05** |
+| f42 | 19 / 28 / 34 / 71 ; 4,45 | 19 / 21 / 24 / 35 ; 2,11 |
+| f7 | 26 / 43 / 86 / 148 ; 2,94 | 19 / 33 / 60 / 91 ; 2,25 |
+| f1337 | 16 / 19 / 19 / 14 ; 0,57 | 10 / 11 / 11 / 16 ; 1,96 |
+| f2024 | 31 / 55 / 108 / 199 ; 3,42 | 14 / 14 / 14 / 14 ; **1,03** |
+
+- Le témoin diffuse (et plus vite qu'une marche aléatoire : rapports 2,7-4,5, sauf f1337).
+- **P16 réfutée** : plateau sur 3/7 seulement (t7, t2024, f2024). Mais l'échelle tombe de 3 à
+  20 fois à 4 ans sur 7/8 (t2024 : 284 → 28 km) : **la bande diffuse beaucoup plus lentement, et
+  se pose dans un pays sur 3 runs** ; elle ne se pose pas encore partout.
+
+**Acceptation 5 ans × 8 de la branche** (35010e8, `out/mar6d/acc/`) contre `main` (832a803) :
+- Population finale plus basse sur 6/8 (61 → 48, 61 → 51, 56 → 36…), **naissances en baisse sur
+  7/8** (31 → 28, 30 → 26, 37 → 31…).
+- **Débit plancher sous 20 ticks/s sur 4/8** (17,4-19,7 ; `main` 24-73) : la parole échange 256
+  sources par paire et par jour (`exchange_knowledge`, `remember_spring` en O(n)).
+- Curiosité ↔ territoire connu : r positif sur 8/8 (0,13-0,76 ; `main` NaN-0,47) — le critère
+  CUR se lit mieux à l'échelle du banc, alors que le test court tombe sur 1337.
+- Marche 21-28 km/j, inchangée ; feu en froid 2/4 (`main` 3/4).
+- **Report bloqué** par la natalité (non expliquée) et le débit.
+
+**Coût de la parole à 256 sources** : `remember_spring` cherchait chaque source entendue dans la
+liste (O(n)) ; elle regarde d'abord l'index des âges. Sorties de `longue` 2 ans identiques
+(t42, f42, hors débit et mémoire) ; débit sur 30 j, minimum 15,5 → 18,2 et 14,5 → 18,6,
+médiane 19,9 → 24,8 et 48,3 → 65,1 (un autre banc tournait en parallèle dans les deux cas).
+Le minimum reste sous 20 : le reste du coût n'est pas lu (à profiler, PERF).
+
+**Profil par phase** (feature `profile`, `longue` 1 an t42 ; `main` contre la branche e3bf7e8) :
+`3t echanges` 2,3 s → **80 s**, `5 ecologie` 50 → 128 s, `2 execution` 69 → 44 s,
+`1 deliberation` 44 → 36 s. La parole coûte ~37 ms par passe (toutes les 4 h) : chaque paire à
+portée se redit ses 256 sources, ~600 000 rappels par passe. L'écologie ne lit pas la mémoire :
+son doublement vient de la trajectoire (à lire dans PERF).
+**Essai annulé** : sauter les paires qui savent exactement la même chose. Ni gain (75 s), ni
+résultat identique (t42 diffère au jour 253) : une source apprise d'un premier interlocuteur peut
+en évincer une autre, qu'un second réapprend — l'ordre des paroles compte. Le seul remède serait
+de changer la règle de l'échange (union des savoirs entendus, âge le plus récent, puis oubli des
+plus anciennes) : un changement de comportement, à mesurer comme tel.
+
+**Décision de l'utilisateur (2026-10-25, soir)** : tout consigner ; tester la nouvelle règle
+d'échange des sources ; si elle ne suffit pas, le débit va au chantier PERF, suivi comme problème
+vu. D'accord pour le reste (natalité à instrumenter, report bloqué jusque-là).
+
+## MAR-6d, étape 4 — l'échange des sources : on réunit ce qu'on entend (2026-10-25)
+
+**Le changement (un seul)** : à chaque passe de parole, chacun réunit les sources de tous ses
+interlocuteurs (en gardant pour chacune l'âge le plus récent), les ajoute à ce qu'il sait, puis
+oublie les moins récemment vues au-delà de 256. Avant : il les apprenait une à une, dans l'ordre
+des paires, chaque nouvelle pouvant en évincer une autre — ~600 000 rappels par passe.
+**Prédictions (avant)**, 2 ans × 8 contre `mar6d-moyenne` (= e3bf7e8, sorties identiques) :
+- P17 la phase `3t echanges` baisse de 60 à 85 % (profil, t42, 1 an).
+- P18 débit plancher sur 30 j ≥ 20 ticks/s sur ≥ 6/8 (avant : 14,5-15,5 sur t42/f42).
+- P19 comportement : pas de décalage de même sens sur ≥ 6/8 pour les levées, les retours, la
+  population et les sources connues de la bande (la règle ne change que l'ordre des oublis).
+
+**Mesure** (2 ans × 8, `mar6d-echange` contre `mar6d-moyenne` ; **régime : trois runs sur deux
+cœurs**, les débits ne sont pas comparables) :
+- P19 tenue : levées, retours, population et sources de la bande **identiques sur 7/8** ; f2024
+  s'écarte (levées 108 → 132, population 71 → 82) — la règle ne change que l'ordre des oublis.
+- P17 : `3t echanges` 80 → 48 s par an (profil t42, 1 an) sous une charge plus forte ; rapportée
+  à `2 execution` (même charge), la parole coûte −55 %. À refaire seul sur la machine (P18 aussi).
+- Gardé (comportement inchangé, règle plus simple : ce qu'on retient ne dépend plus de l'ordre
+  des paroles). Le débit reste un **problème ouvert** si la mesure seule ne passe pas 20.
+
+### La natalité, porte par porte (instrument, 2026-10-26)
+`longue` relève chaque jour, pour les femmes en âge de concevoir (15-45 ans), la première porte
+de `demography::daily` qui les retient : enceinte, allaite un nourrisson, santé ≤ 0,6, faim ≥ 0,85,
+soif ≥ 0,9, aucun homme fécond à 400 m ; sinon éligible (lecture seule). Mesure : 5 ans × 8,
+`main` (832a803 + instruments) contre la branche (étape 4), lancée quand les runs de 10 ans
+libèrent la machine (`out/mar6d/natal/`).
+**Prédiction (avant)** : la porte qui se ferme plus souvent sur la branche est « aucun homme à
+400 m » (une bande qui lève le camp deux fois plus souvent se disperse davantage à minuit) ;
+écart de jours-femmes éligibles ≥ 10 % sur ≥ 6/8. Autre candidate : la santé (plus de malades).
+
+**Les trois bras à 10 ans × 8** (témoin `main` · 256 seule `mar6d-cap256` · étape 3 `mar6d-moyenne`) :
+
+| run | foyer fin/max km | pop moy. ans 5-10 | naissances | levées | morts violentes |
+|---|---|---|---|---|---|
+| t42 | 354/356 · 253/282 · **32/39** | 65 · 68 · 58 | 57 · 59 · 47 | 447 · 984 · 990 | 0 · 0 · 0 |
+| t7 | 384/385 · 117/124 · **42/65** | 59 · 45 · 47 | 45 · 38 · 40 | 359 · 1053 · 782 | 0 · 5 · 7 |
+| t1337 | 156/163 · 234/260 · 126/132 | 62 · 63 · 69 | 54 · 54 · 58 | 444 · 882 · 602 | 0 · 0 · 0 |
+| t2024 | 663/670 · 373/391 · **20/55** | 65 · 60 · 56 | 60 · 60 · 63 | 481 · 1104 · 590 | 2 · 5 · 11 |
+| f42 | 129/136 · éteinte à 4,6 ans · 88/108 | 29 · 0 · 26 | 32 · 13 · 27 | 305 · 234 · 700 | 0 · 0 · 0 |
+| f7 | 192/198 · 280/284 · 122/127 | 56 · 65 · 36 | 51 · 56 · 40 | 292 · 1818 · 746 | 11 · 6 · 7 |
+| f1337 | 25/35 · 22/44 · 32/41 | 49 · 42 · 46 | 52 · 46 · 52 | 212 · 880 · 517 | 0 · 10 · 0 |
+| f2024 | 269/275 · 115/157 · **34/36** | 76 · 52 · 72 | 74 · 64 · 60 | 507 · 1046 · 401 | 0 · 1 · 8 |
+
+Attribution (point 1 de la contre-lecture) :
+- **Le doublement des levées vient de la capacité 256** (882-1818 levées en 10 ans, 2 à 6 fois
+  le témoin) ; l'étape 3 les ramène à 401-990 (en baisse sur 7/8 contre 256 seule).
+- **La capacité seule ne fait pas de domaine** (foyer à 115-373 km) ; c'est l'étape 3 qui pose la
+  bande.
+- **La baisse de population n'a pas de sens commun entre les étapes** : 256 seule la baisse sur
+  5/8 (et éteint f42), l'étape 3 la remonte sur 5/8 par rapport à 256 seule. Contre le témoin,
+  la variante finale reste plus basse sur 6/8 ; naissances plus basses sur 5/8.
+- Morts violentes : en hausse avec 256 seule sur 4/8, avec l'étape 3 sur 3/8 — pas d'effet propre
+  de l'étape 3 lisible ici.
+
+**Mesure** (5 ans × 8, `natal-main` = 832a803 + instruments contre `natal-branche` = 7167e75) — part
+des jours-femmes (15-45 ans) retenus par chaque porte, 8 runs réunis :
+
+| | enceinte | allaite | santé | faim | soif | pas d'homme à 400 m | éligible | naissances |
+|---|---|---|---|---|---|---|---|---|
+| `main` | 29,6 % | 59,4 % | 0,0 % | 0,3 % | 0,1 % | 2,4 % | **8,2 %** | 267 |
+| branche | 29,8 % | 57,3 % | 0,0 % | 0,4 % | 0,1 % | 3,0 % | **9,4 %** | 245 |
+
+- **Prédiction réfutée** : « pas d'homme à 400 m » monte sur 6/8 mais de 0,6 point seulement, et
+  les jours éligibles sont **plus nombreux** sur la branche (6/8).
+- Deux compteurs : conceptions attendues (jours éligibles × 1,2 %, jusqu'à 270 j avant la fin)
+  contre naissances. `main` 245 attendues → 267 nées (×1,09) ; branche 261 → 245 (×0,94). L'écart
+  (~15 % sur ~250, ~1,7 écart type de Poisson) est **dans le bruit du tirage** ; par run, le
+  rapport va de 0,78 à 1,44 des deux côtés.
+- Jours-femmes en âge : −3 % sur la branche.
+- **Conclusion** : la natalité plus basse n'est pas un effet des portes ; elle tient au tirage et
+  à un peu moins de femmes en âge. Ce qui reste de la baisse de population est à chercher dans
+  les **morts** (acceptation : 18 contre 9 en t7, 29 contre 14 en t2024, 55 contre 41 en f7 ; morts
+  violentes en hausse sur 3/8 à 10 ans). Le blocage « natalité » est levé ; reste le débit.
+
+**Débit, mesure seule** (profil `longue` 1 an t42, un seul autre run sur la machine, avant et
+après l'étape 4) : `3t echanges` 81 → **35 s** (−56 % ; P17 prédisait −60 à −85 % : réfutée de peu),
+débit plancher sur 30 j 17,6 → **19,3**, médian 28,5 → 33,8 ticks/s. **P18 réfutée** : sous 20.
+Le premier poste est désormais `5 ecologie` (127 s contre 50 sur `main`) : la repousse balaie les
+tuiles touchées des chunks proches des humains (`ecology::daily_regrowth`, `Chunk::touched`) ; une
+bande qui reste dans son pays retouche les mêmes chunks, dont la liste de tuiles à suivre grossit.
+Selon la décision de l'utilisateur : **le débit passe au chantier PERF, suivi comme problème
+ouvert** (`docs/domaines/performance/CHANTIERS.md`, PERF-MAR6d).
+
+### Acceptation 5 ans × 8 de la branche (7167e75, `out/mar6d/acc2/`) contre `main` (832a803)
+- **Débit plancher 22,8-53,3 ticks/s, ≥ 20 sur 8/8** (`main` 23,8-73,2) : le critère du BRIEF tient
+  dans ce banc (le plancher de 19,3 de `longue` reste suivi en PERF-MAR6d).
+- Population finale plus basse sur 6/8 (61 → 48, 61 → 51, 56 → 33, 82 → 73…) ; naissances 267 → 245
+  (dans le bruit, voir la natalité ci-dessus).
+- **La baisse vient des morts** (8 runs réunis, `main` → branche) : adultes 15-39 ans 108 → 139
+  (75 → 104 ‰/an) — maladie 54 → 75, faim 39 → 50 ; **morts violentes d'enfants de moins de 5 ans
+  0 → 12** (4 nourrissons, 8 de 1 à 4 ans) ; soif des 1-4 ans 13 → 15 ; mourir avant 15 ans
+  54 → 57 %.
+- Curiosité ↔ territoire : r positif sur 7/8 (f7 −0,17). Feu en froid 2/4 (`main` 3/4).
+- Voisins à lire : la violence qui tue des enfants (D13 : rencontres de bandes qui restent dans
+  leur pays), la maladie et la faim des adultes (une bande qui reste sur place boit et mange au
+  même endroit : contagion par l'eau souillée, MOR-5c5 ? épuisement local ?).
+
+### Lecture des morts en plus (2026-10-26, décision de l'utilisateur : lire avant de reporter)
+1. **La violence contre les enfants est un défaut de D13, révélé par MAR-6d.** Un assaillant
+   vise **le rival le plus proche, quel que soit son âge** (`brain.rs` « Razzier un clan rival » :
+   la cible est le plus proche membre d'un clan en tension ; `sim.rs` exécution du `Raid` : idem
+   à 1,5 km). Au camp, le plus proche est souvent un petit, qui ne riposte ni n'encaisse
+   (force faible) : 12 morts de moins de 5 ans. Le défaut existe sur `main` ; il s'y voyait peu
+   parce que les bandes dérivaient loin l'une de l'autre. Ce n'est pas un comportement modélisé
+   (un raid vise ceux qui défendent, pas le premier venu) — à traiter dans D13.
+2. **La maladie tue plus parce qu'elle tombe sur des affamés, pas parce qu'il y a plus
+   d'épisodes** : épisodes adultes par personne-an en **baisse** (digestif 6,77 → 6,24,
+   respiratoire 3,79 → 3,32), létalité en **hausse** (0,32 → 0,53 % ; 0,37 → 0,68 %) ; 55 % des
+   morts de maladie avaient faim > 0,5 l'heure d'avant (54 % sur `main`). Les diarrhées d'eau par
+   camp ne montent pas (la souillure n'est pas la cause).
+3. **La faim des adultes monte sur quelques runs, et c'est la chasse qui manque** : faim moyenne
+   des adultes en hausse sur 3/8 seulement (f7 0,23 → 0,30, f2024 0,25 → 0,37, t7), mais **les kcal
+   de chasse baissent sur 6/8** (t2024 79 000 → 15 000 par jour pour la bande, f2024 53 000 → 29 000,
+   f7 54 000 → 36 000) ; la cueillette compense en partie. Hypothèse (non mesurée) : une bande qui
+   reste dans son pays y épuise ou y fait fuir le gibier (le test de surchasse le voit aussi), et
+   rien ne lui fait suivre le gibier ailleurs. Morts adultes 15-39 ans concentrées sur f42, f7,
+   f1337, t7.

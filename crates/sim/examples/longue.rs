@@ -92,11 +92,15 @@ fn main() {
     // quadratique, rayon de giration, retours à un camp ancien).
     let mut camps_log = std::fs::File::create(format!("{out}.camps.csv")).expect("journal des camps");
     writeln!(camps_log, "tick,clan,de_x_km,de_y_km,vers_x_km,vers_y_km,lieu_travaille,attendu,trajet").unwrap();
+    // MAR-6d (contre-lecture) : chaque nuit jugée, et les règles concurrentes.
+    let mut nights_log = std::fs::File::create(format!("{out}.nuits.csv")).expect("journal des nuits");
+    writeln!(nights_log, "tick,clan,parti,ici,ici_saison,ici_rayon,connus,meilleur,second,meilleur_h,meilleur_chasse,meilleur_travaille,alt_saison,alt_rayon,alt_hors_chasse,alt_travailles,alt_marge").unwrap();
+    let mut seen_nights = 0usize;
     let mut camp_prev: BTreeMap<u64, (f64, f64)> = BTreeMap::new();
     let causes_head: Vec<String> = CAUSES.iter().map(|c| format!("morts_{c:?}")).collect();
     writeln!(
         csv,
-        "jour,an,pop,naissances,morts,{},clans,en_clan,taille_med,taille_max,clans_formes,clans_dissous,clans_absorbes,liens_med,tension_max,paires_tendues,faim_moy,faim_p90,expo_feu,expo_cuivre,techs_vivantes,decouvertes,oublis,troupeaux,tetes,meutes,predateurs,mailles_faune,chunks,tps_jour,tps_30j,rss_mo,morts_nourrissons,morts_enfants,age_med_deces_10a,age_med_vivants,disp_med_km,disp_max_km,tailles_clans,chasse_tetes,marche_h_adulte,noir_dormi,troupeaux_10km,foyers_km_jour,foyer_depart_km,inter_clans_km,huttes_chef,pop_A,pop_B,pop_mixte,morts_A,morts_B,morts_violence_A,morts_violence_B,morts_maladie_A,morts_maladie_B,dist_AB_km,contacts_AB_100m,liens_AB,clans_mixtes,naissances_mixtes,contagions_AB,levees,levees_memoire,levees_retour,foyer_max_km,kcal_cueillette_j,kcal_chasse_j,stock_clans,faim_moy_adultes,sources_bande,sources_bande_max_km,anciens_camps_candidats",
+        "jour,an,pop,naissances,morts,{},clans,en_clan,taille_med,taille_max,clans_formes,clans_dissous,clans_absorbes,liens_med,tension_max,paires_tendues,faim_moy,faim_p90,expo_feu,expo_cuivre,techs_vivantes,decouvertes,oublis,troupeaux,tetes,meutes,predateurs,mailles_faune,chunks,tps_jour,tps_30j,rss_mo,morts_nourrissons,morts_enfants,age_med_deces_10a,age_med_vivants,disp_med_km,disp_max_km,tailles_clans,chasse_tetes,marche_h_adulte,noir_dormi,troupeaux_10km,foyers_km_jour,foyer_depart_km,inter_clans_km,huttes_chef,pop_A,pop_B,pop_mixte,morts_A,morts_B,morts_violence_A,morts_violence_B,morts_maladie_A,morts_maladie_B,dist_AB_km,contacts_AB_100m,liens_AB,clans_mixtes,naissances_mixtes,contagions_AB,levees,levees_memoire,levees_retour,foyer_max_km,kcal_cueillette_j,kcal_chasse_j,stock_clans,faim_moy_adultes,sources_bande,sources_bande_max_km,anciens_camps_candidats,f_age,f_enceintes,f_allaitantes,f_sante,f_faim,f_soif,f_sans_homme,f_eligibles",
         causes_head.join(",")
     )
     .unwrap();
@@ -514,6 +518,17 @@ fn main() {
             .unwrap();
         }
         seen_moves = sim.camp_moves.len();
+        for n in &sim.camp_nights[seen_nights..] {
+            writeln!(
+                nights_log,
+                "{},{},{},{:.1},{:.1},{:.1},{},{:.1},{:.1},{:.1},{:.3},{},{},{},{},{},{}",
+                n.tick, n.clan, u8::from(n.moved), n.here, n.here_long, n.here_radius, n.known, n.best, n.second,
+                n.best_h, n.best_hunt, u8::from(n.best_worked), u8::from(n.alt_long), u8::from(n.alt_radius),
+                u8::from(n.alt_nohunt), u8::from(n.alt_worked), u8::from(n.alt_margin)
+            )
+            .unwrap();
+        }
+        seen_nights = sim.camp_nights.len();
         // MAR-6d : ce que sait la bande la plus nombreuse de ses sources — combien,
         // jusqu'où, et combien de ses anciens camps restent candidats (une source
         // connue dans le lieu de 2 km d'un camp quitté).
@@ -544,12 +559,45 @@ fn main() {
             }
             None => (0, 0.0, 0),
         };
+        // MAR-6d : la natalité, porte par porte (les gardes de
+        // `demography::daily`, relues sans rien écrire) — pour chaque femme en
+        // âge de concevoir, la première porte qui la retient ce jour.
+        let natal = {
+            use cairn_sim::demography::{FEMALE_FERTILE_YEARS, Kinship, MALE_FERTILE_YEARS, MATE_RADIUS_TILES};
+            let tick = sim.time.tick;
+            let mut nursing: BTreeSet<u64> = BTreeSet::new();
+            let mut males: Vec<(f64, f64)> = Vec::new();
+            for (_, (demo, kin, pos, phys)) in sim.agents.query::<(&Demographics, &Kinship, &Position, &Physiology)>().iter() {
+                if demo.is_infant(tick) && let Some(m) = kin.mother {
+                    nursing.insert(m.0);
+                }
+                if demo.sex == cairn_sim::Sex::Male && MALE_FERTILE_YEARS.contains(&demo.age_years(tick)) && phys.health > 0.3 {
+                    males.push((pos.x, pos.y));
+                }
+            }
+            let mut n = [0u32; 8];
+            for (_, (id, demo, pos, phys)) in sim.agents.query::<(&AgentId, &Demographics, &Position, &Physiology)>().iter() {
+                if demo.sex != cairn_sim::Sex::Female || !FEMALE_FERTILE_YEARS.contains(&demo.age_years(tick)) {
+                    continue;
+                }
+                n[0] += 1;
+                let gate = if demo.pregnancy.is_some() { 1 }
+                    else if nursing.contains(&id.0) { 2 }
+                    else if phys.health <= 0.6 { 3 }
+                    else if phys.hunger >= 0.85 { 4 }
+                    else if phys.thirst >= 0.9 { 5 }
+                    else if !males.iter().any(|m| (pos.x - m.0).powi(2) + (pos.y - m.1).powi(2) <= MATE_RADIUS_TILES * MATE_RADIUS_TILES) { 6 }
+                    else { 7 };
+                n[gate] += 1;
+            }
+            n
+        };
         for c in &sim.clans {
             max_from_start = max_from_start.max(tiles_to_km((c.home.0 - home.0 as f64).hypot(c.home.1 - home.1 as f64)));
         }
         writeln!(
             csv,
-            "{day},{:.3},{pop},{},{},{},{},{in_clan},{},{},{formed},{dissolved},{merged},{},{tension_max:.3},{tense},{hunger_mean:.3},{hunger_p90:.3},{fire},{copper},{},{disc},{forgot},{herds},{heads:.0},{packs},{predators:.0},{},{},{tps_day:.1},{tps_win:.1},{},{dead_infants},{dead_children},{:.1},{:.1},{:.2},{:.2},{},{hunted_day:.2},{walk_per_adult:.2},{dark_slept:.3},{near_herds},{camp_step_km:.3},{:.2},{inter:.2},{chief_huts},{},{},{},{},{},{},{},{},{},{dist_ab:.2},{contacts_ab},{links_ab},{mixed_clans},{mixed_births},{cross_contagions},{},{},{moves_back},{max_from_start:.2},{gather_day:.0},{hunt_day:.0},{stock_total:.1},{hunger_adults:.3},{band_springs},{band_springs_max_km:.2},{old_candidates}",
+            "{day},{:.3},{pop},{},{},{},{},{in_clan},{},{},{formed},{dissolved},{merged},{},{tension_max:.3},{tense},{hunger_mean:.3},{hunger_p90:.3},{fire},{copper},{},{disc},{forgot},{herds},{heads:.0},{packs},{predators:.0},{},{},{tps_day:.1},{tps_win:.1},{},{dead_infants},{dead_children},{:.1},{:.1},{:.2},{:.2},{},{hunted_day:.2},{walk_per_adult:.2},{dark_slept:.3},{near_herds},{camp_step_km:.3},{:.2},{inter:.2},{chief_huts},{},{},{},{},{},{},{},{},{},{dist_ab:.2},{contacts_ab},{links_ab},{mixed_clans},{mixed_births},{cross_contagions},{},{},{moves_back},{max_from_start:.2},{gather_day:.0},{hunt_day:.0},{stock_total:.1},{hunger_adults:.3},{band_springs},{band_springs_max_km:.2},{old_candidates},{},{},{},{},{},{},{},{}",
             day as f64 / 360.0,
             sim.births.len(),
             sim.deaths.len(),
@@ -579,6 +627,7 @@ fn main() {
             deaths_by_origin[1][2],
             sim.camp_moves.len(),
             sim.camp_moves.iter().filter(|m| m.chosen_known).count(),
+            natal[0], natal[1], natal[2], natal[3], natal[4], natal[5], natal[6], natal[7],
         )
         .unwrap();
         csv.flush().unwrap();
@@ -622,6 +671,9 @@ fn main() {
         day as f64 / 360.0,
         started.elapsed().as_secs_f64() / 3600.0
     );
+    // Où passe le temps, par phase (sous la feature `profile`).
+    #[cfg(feature = "profile")]
+    print!("{}", sim.prof.report());
     let mut log = std::fs::File::create(format!("{out}.morts.csv")).expect("journal des morts lentes");
     writeln!(log, "jour,age,km_source_connue,km_source_reelle,km_camp,jours_depuis_levee,en_marche,cause,activite,tache,soif,faim,froid,sante,h_depuis_gorgee,porteur,stock_clan,km_troupeau,fourrage_tuile").unwrap();
     for (r, extra) in &thirst_log {
