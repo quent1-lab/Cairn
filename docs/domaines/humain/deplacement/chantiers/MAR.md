@@ -2095,3 +2095,13 @@ cœurs**, les débits ne sont pas comparables) :
   à `2 execution` (même charge), la parole coûte −55 %. À refaire seul sur la machine (P18 aussi).
 - Gardé (comportement inchangé, règle plus simple : ce qu'on retient ne dépend plus de l'ordre
   des paroles). Le débit reste un **problème ouvert** si la mesure seule ne passe pas 20.
+
+### La natalité, porte par porte (instrument, 2026-10-26)
+`longue` relève chaque jour, pour les femmes en âge de concevoir (15-45 ans), la première porte
+de `demography::daily` qui les retient : enceinte, allaite un nourrisson, santé ≤ 0,6, faim ≥ 0,85,
+soif ≥ 0,9, aucun homme fécond à 400 m ; sinon éligible (lecture seule). Mesure : 5 ans × 8,
+`main` (832a803 + instruments) contre la branche (étape 4), lancée quand les runs de 10 ans
+libèrent la machine (`out/mar6d/natal/`).
+**Prédiction (avant)** : la porte qui se ferme plus souvent sur la branche est « aucun homme à
+400 m » (une bande qui lève le camp deux fois plus souvent se disperse davantage à minuit) ;
+écart de jours-femmes éligibles ≥ 10 % sur ≥ 6/8. Autre candidate : la santé (plus de malades).
