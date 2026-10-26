@@ -2172,3 +2172,24 @@ ouvert** (`docs/domaines/performance/CHANTIERS.md`, PERF-MAR6d).
 - Voisins à lire : la violence qui tue des enfants (D13 : rencontres de bandes qui restent dans
   leur pays), la maladie et la faim des adultes (une bande qui reste sur place boit et mange au
   même endroit : contagion par l'eau souillée, MOR-5c5 ? épuisement local ?).
+
+### Lecture des morts en plus (2026-10-26, décision de l'utilisateur : lire avant de reporter)
+1. **La violence contre les enfants est un défaut de D13, révélé par MAR-6d.** Un assaillant
+   vise **le rival le plus proche, quel que soit son âge** (`brain.rs` « Razzier un clan rival » :
+   la cible est le plus proche membre d'un clan en tension ; `sim.rs` exécution du `Raid` : idem
+   à 1,5 km). Au camp, le plus proche est souvent un petit, qui ne riposte ni n'encaisse
+   (force faible) : 12 morts de moins de 5 ans. Le défaut existe sur `main` ; il s'y voyait peu
+   parce que les bandes dérivaient loin l'une de l'autre. Ce n'est pas un comportement modélisé
+   (un raid vise ceux qui défendent, pas le premier venu) — à traiter dans D13.
+2. **La maladie tue plus parce qu'elle tombe sur des affamés, pas parce qu'il y a plus
+   d'épisodes** : épisodes adultes par personne-an en **baisse** (digestif 6,77 → 6,24,
+   respiratoire 3,79 → 3,32), létalité en **hausse** (0,32 → 0,53 % ; 0,37 → 0,68 %) ; 55 % des
+   morts de maladie avaient faim > 0,5 l'heure d'avant (54 % sur `main`). Les diarrhées d'eau par
+   camp ne montent pas (la souillure n'est pas la cause).
+3. **La faim des adultes monte sur quelques runs, et c'est la chasse qui manque** : faim moyenne
+   des adultes en hausse sur 3/8 seulement (f7 0,23 → 0,30, f2024 0,25 → 0,37, t7), mais **les kcal
+   de chasse baissent sur 6/8** (t2024 79 000 → 15 000 par jour pour la bande, f2024 53 000 → 29 000,
+   f7 54 000 → 36 000) ; la cueillette compense en partie. Hypothèse (non mesurée) : une bande qui
+   reste dans son pays y épuise ou y fait fuir le gibier (le test de surchasse le voit aussi), et
+   rien ne lui fait suivre le gibier ailleurs. Morts adultes 15-39 ans concentrées sur f42, f7,
+   f1337, t7.
