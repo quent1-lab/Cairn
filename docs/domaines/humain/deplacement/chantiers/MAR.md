@@ -2149,3 +2149,12 @@ des jours-femmes (15-45 ans) retenus par chaque porte, 8 runs réunis :
   à un peu moins de femmes en âge. Ce qui reste de la baisse de population est à chercher dans
   les **morts** (acceptation : 18 contre 9 en t7, 29 contre 14 en t2024, 55 contre 41 en f7 ; morts
   violentes en hausse sur 3/8 à 10 ans). Le blocage « natalité » est levé ; reste le débit.
+
+**Débit, mesure seule** (profil `longue` 1 an t42, un seul autre run sur la machine, avant et
+après l'étape 4) : `3t echanges` 81 → **35 s** (−56 % ; P17 prédisait −60 à −85 % : réfutée de peu),
+débit plancher sur 30 j 17,6 → **19,3**, médian 28,5 → 33,8 ticks/s. **P18 réfutée** : sous 20.
+Le premier poste est désormais `5 ecologie` (127 s contre 50 sur `main`) : la repousse balaie les
+tuiles touchées des chunks proches des humains (`ecology::daily_regrowth`, `Chunk::touched`) ; une
+bande qui reste dans son pays retouche les mêmes chunks, dont la liste de tuiles à suivre grossit.
+Selon la décision de l'utilisateur : **le débit passe au chantier PERF, suivi comme problème
+ouvert** (`docs/domaines/performance/CHANTIERS.md`, PERF-MAR6d).
