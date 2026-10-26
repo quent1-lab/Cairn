@@ -2105,3 +2105,27 @@ libèrent la machine (`out/mar6d/natal/`).
 **Prédiction (avant)** : la porte qui se ferme plus souvent sur la branche est « aucun homme à
 400 m » (une bande qui lève le camp deux fois plus souvent se disperse davantage à minuit) ;
 écart de jours-femmes éligibles ≥ 10 % sur ≥ 6/8. Autre candidate : la santé (plus de malades).
+
+**Les trois bras à 10 ans × 8** (témoin `main` · 256 seule `mar6d-cap256` · étape 3 `mar6d-moyenne`) :
+
+| run | foyer fin/max km | pop moy. ans 5-10 | naissances | levées | morts violentes |
+|---|---|---|---|---|---|
+| t42 | 354/356 · 253/282 · **32/39** | 65 · 68 · 58 | 57 · 59 · 47 | 447 · 984 · 990 | 0 · 0 · 0 |
+| t7 | 384/385 · 117/124 · **42/65** | 59 · 45 · 47 | 45 · 38 · 40 | 359 · 1053 · 782 | 0 · 5 · 7 |
+| t1337 | 156/163 · 234/260 · 126/132 | 62 · 63 · 69 | 54 · 54 · 58 | 444 · 882 · 602 | 0 · 0 · 0 |
+| t2024 | 663/670 · 373/391 · **20/55** | 65 · 60 · 56 | 60 · 60 · 63 | 481 · 1104 · 590 | 2 · 5 · 11 |
+| f42 | 129/136 · éteinte à 4,6 ans · 88/108 | 29 · 0 · 26 | 32 · 13 · 27 | 305 · 234 · 700 | 0 · 0 · 0 |
+| f7 | 192/198 · 280/284 · 122/127 | 56 · 65 · 36 | 51 · 56 · 40 | 292 · 1818 · 746 | 11 · 6 · 7 |
+| f1337 | 25/35 · 22/44 · 32/41 | 49 · 42 · 46 | 52 · 46 · 52 | 212 · 880 · 517 | 0 · 10 · 0 |
+| f2024 | 269/275 · 115/157 · **34/36** | 76 · 52 · 72 | 74 · 64 · 60 | 507 · 1046 · 401 | 0 · 1 · 8 |
+
+Attribution (point 1 de la contre-lecture) :
+- **Le doublement des levées vient de la capacité 256** (882-1818 levées en 10 ans, 2 à 6 fois
+  le témoin) ; l'étape 3 les ramène à 401-990 (en baisse sur 7/8 contre 256 seule).
+- **La capacité seule ne fait pas de domaine** (foyer à 115-373 km) ; c'est l'étape 3 qui pose la
+  bande.
+- **La baisse de population n'a pas de sens commun entre les étapes** : 256 seule la baisse sur
+  5/8 (et éteint f42), l'étape 3 la remonte sur 5/8 par rapport à 256 seule. Contre le témoin,
+  la variante finale reste plus basse sur 6/8 ; naissances plus basses sur 5/8.
+- Morts violentes : en hausse avec 256 seule sur 4/8, avec l'étape 3 sur 3/8 — pas d'effet propre
+  de l'étape 3 lisible ici.
