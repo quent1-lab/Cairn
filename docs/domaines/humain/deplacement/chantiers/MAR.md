@@ -2129,3 +2129,23 @@ Attribution (point 1 de la contre-lecture) :
   la variante finale reste plus basse sur 6/8 ; naissances plus basses sur 5/8.
 - Morts violentes : en hausse avec 256 seule sur 4/8, avec l'étape 3 sur 3/8 — pas d'effet propre
   de l'étape 3 lisible ici.
+
+**Mesure** (5 ans × 8, `natal-main` = 832a803 + instruments contre `natal-branche` = 7167e75) — part
+des jours-femmes (15-45 ans) retenus par chaque porte, 8 runs réunis :
+
+| | enceinte | allaite | santé | faim | soif | pas d'homme à 400 m | éligible | naissances |
+|---|---|---|---|---|---|---|---|---|
+| `main` | 29,6 % | 59,4 % | 0,0 % | 0,3 % | 0,1 % | 2,4 % | **8,2 %** | 267 |
+| branche | 29,8 % | 57,3 % | 0,0 % | 0,4 % | 0,1 % | 3,0 % | **9,4 %** | 245 |
+
+- **Prédiction réfutée** : « pas d'homme à 400 m » monte sur 6/8 mais de 0,6 point seulement, et
+  les jours éligibles sont **plus nombreux** sur la branche (6/8).
+- Deux compteurs : conceptions attendues (jours éligibles × 1,2 %, jusqu'à 270 j avant la fin)
+  contre naissances. `main` 245 attendues → 267 nées (×1,09) ; branche 261 → 245 (×0,94). L'écart
+  (~15 % sur ~250, ~1,7 écart type de Poisson) est **dans le bruit du tirage** ; par run, le
+  rapport va de 0,78 à 1,44 des deux côtés.
+- Jours-femmes en âge : −3 % sur la branche.
+- **Conclusion** : la natalité plus basse n'est pas un effet des portes ; elle tient au tirage et
+  à un peu moins de femmes en âge. Ce qui reste de la baisse de population est à chercher dans
+  les **morts** (acceptation : 18 contre 9 en t7, 29 contre 14 en t2024, 55 contre 41 en f7 ; morts
+  violentes en hausse sur 3/8 à 10 ans). Le blocage « natalité » est levé ; reste le débit.
