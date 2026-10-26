@@ -2158,3 +2158,17 @@ tuiles touchées des chunks proches des humains (`ecology::daily_regrowth`, `Chu
 bande qui reste dans son pays retouche les mêmes chunks, dont la liste de tuiles à suivre grossit.
 Selon la décision de l'utilisateur : **le débit passe au chantier PERF, suivi comme problème
 ouvert** (`docs/domaines/performance/CHANTIERS.md`, PERF-MAR6d).
+
+### Acceptation 5 ans × 8 de la branche (7167e75, `out/mar6d/acc2/`) contre `main` (832a803)
+- **Débit plancher 22,8-53,3 ticks/s, ≥ 20 sur 8/8** (`main` 23,8-73,2) : le critère du BRIEF tient
+  dans ce banc (le plancher de 19,3 de `longue` reste suivi en PERF-MAR6d).
+- Population finale plus basse sur 6/8 (61 → 48, 61 → 51, 56 → 33, 82 → 73…) ; naissances 267 → 245
+  (dans le bruit, voir la natalité ci-dessus).
+- **La baisse vient des morts** (8 runs réunis, `main` → branche) : adultes 15-39 ans 108 → 139
+  (75 → 104 ‰/an) — maladie 54 → 75, faim 39 → 50 ; **morts violentes d'enfants de moins de 5 ans
+  0 → 12** (4 nourrissons, 8 de 1 à 4 ans) ; soif des 1-4 ans 13 → 15 ; mourir avant 15 ans
+  54 → 57 %.
+- Curiosité ↔ territoire : r positif sur 7/8 (f7 −0,17). Feu en froid 2/4 (`main` 3/4).
+- Voisins à lire : la violence qui tue des enfants (D13 : rencontres de bandes qui restent dans
+  leur pays), la maladie et la faim des adultes (une bande qui reste sur place boit et mange au
+  même endroit : contagion par l'eau souillée, MOR-5c5 ? épuisement local ?).
