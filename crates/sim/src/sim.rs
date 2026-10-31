@@ -1132,6 +1132,7 @@ impl Sim {
                 ledger,
                 time.tick,
                 sight,
+                &self.clan_relations,
             );
             // Ce que l'heure a coûté de plus que le repos au camp : la marche,
             // la cueillette ou l'approche, selon ce qu'on a fait.
@@ -1691,6 +1692,7 @@ fn execute(
     ledger: &mut crate::yields::Yields,
     tick: u64,
     sight: f32,
+    relations: &social::ClanRelations,
 ) -> Option<Kill> {
     // Manger ce qu'on porte quand la faim revient : la viande d'une prise est
     // sur le dos, pas au foyer — ni trajet ni tâche pour y mordre.
@@ -1836,9 +1838,9 @@ fn execute(
     // rival) — on ré-évalue le plus proche à chaque tick. Au contact, on
     // enregistre une passe d'armes, dénouée **en groupe** après l'exécution
     // (`combat::resolve_clashes`) : la cible encaisse la somme des assauts et
-    // riposte. On ne re-teste pas la tension ici (le cerveau a décidé de
-    // razzier un hostile ; les territoires étant distincts, le rival le plus
-    // proche est bien le voisin en tension).
+    // riposte. La tension se re-teste ici : le plus proche humain d'un autre
+    // clan n'est pas forcément du clan en tension (un troisième clan peut être
+    // plus près, D13).
     if task.kind == TaskKind::Raid {
         let Some(my_clan) = clan else {
             behavior.task = None;
@@ -1848,7 +1850,11 @@ fn execute(
         let mut target: Option<(AgentId, (f64, f64))> = None;
         let mut best = sight2;
         for h in humans {
-            if h.id == id || h.clan == Some(my_clan) || h.clan.is_none() {
+            let Some(their_clan) = h.clan else { continue };
+            if h.id == id
+                || their_clan == my_clan
+                || relations.tension_between(my_clan, their_clan) < brain::RAID_TENSION_THRESHOLD
+            {
                 continue;
             }
             let d2 = (pos.x - h.pos.0).powi(2) + (pos.y - h.pos.1).powi(2);
@@ -2475,6 +2481,7 @@ mod tests {
                     &mut Skills::default(), clan, &mut BTreeMap::new(), &mut carrying,
                     &mut Prestige::default(), &mut Vec::new(), &mut Vec::new(), &mut Vec::new(),
                     &mut Vec::new(), &mut crate::yields::Yields::default(), tick + h, 1.0,
+                    &social::ClanRelations::default(),
                 );
             }
             carrying.0
@@ -4126,6 +4133,7 @@ mod tests {
             &mut crate::yields::Yields::default(),
             tick,
             1.0,
+            &social::ClanRelations::default(),
         );
 
         assert!(kill.is_some(), "le troupeau est à portée : la chasse doit réussir");
@@ -4187,6 +4195,7 @@ mod tests {
                 &traits, &mut Skills::default(), None, &mut BTreeMap::new(),
                 &mut Carrying::default(), &mut Prestige::default(), &mut Vec::new(),
                 &mut Vec::new(), &mut Vec::new(), &mut shares, &mut crate::yields::Yields::default(), tick, 1.0,
+                &social::ClanRelations::default(),
             );
             resolve_shares(&mut sim, &shares);
             sim.agents
@@ -4385,6 +4394,7 @@ mod tests {
                 &mut Skills::default(), None, &mut BTreeMap::new(), carrying,
                 &mut Prestige::default(), &mut Vec::new(), &mut Vec::new(), &mut Vec::new(),
                 &mut Vec::new(), &mut crate::yields::Yields::default(), tick, 1.0,
+                &social::ClanRelations::default(),
             );
         };
         run(Some(Task { kind: TaskKind::Hunt, target: home }), &mut phys, &mut carrying, &mut pos);
@@ -4874,6 +4884,7 @@ mod tests {
             &mut crate::yields::Yields::default(),
             0,
             1.0,
+            &social::ClanRelations::default(),
         );
 
         assert_eq!(carrying.0, 0.0, "le surplus rapporté doit être entièrement déposé, plus rien porté");
@@ -4969,6 +4980,7 @@ mod tests {
             &mut crate::yields::Yields::default(),
             0,
             1.0,
+            &social::ClanRelations::default(),
         );
 
         let stock_apres = clan_stock[&clan_id];
@@ -5034,6 +5046,7 @@ mod tests {
             &mut crate::yields::Yields::default(),
             0,
             1.0,
+            &social::ClanRelations::default(),
         );
 
         assert_eq!(structures.len(), 1, "une structure doit avoir été bâtie");
@@ -5076,6 +5089,7 @@ mod tests {
             &mut crate::yields::Yields::default(),
             0,
             1.0,
+            &social::ClanRelations::default(),
         );
         assert_eq!(structures.len(), 1, "une hutte existe déjà : pas de doublon");
         assert_eq!(clan_stock[&clan_id], stock_intermediaire, "no-op : le stock ne bouge pas");
@@ -5115,6 +5129,7 @@ mod tests {
             &mut behavior, &[], &[], &[], 1.0, &traits, &mut skills, None, &mut clan_stock,
             &mut carrying, &mut prestige, &mut structures, &mut Vec::new(), &mut Vec::new(),
             &mut Vec::new(), &mut crate::yields::Yields::default(), 0, 1.0,
+            &social::ClanRelations::default(),
         );
 
         let tile = sim.world.tile(field.0, field.1);
@@ -5262,6 +5277,7 @@ mod tests {
             &mut behavior, &[cheptel], &[], &[], 1.0, &traits, &mut skills, Some(clan_id),
             &mut clan_stock, &mut carrying, &mut prestige, &mut structures, &mut Vec::new(),
             &mut Vec::new(), &mut Vec::new(), &mut crate::yields::Yields::default(), 0, 1.0,
+            &social::ClanRelations::default(),
         );
 
         assert!(
@@ -5391,6 +5407,64 @@ mod tests {
         // Sans tension : plus de raid.
         sim.clan_relations.tension.clear();
         assert!(raid_score(&mut sim).is_none(), "sans tension, pas de raid");
+    }
+
+    /// D13, C0 : un raider ne frappe qu'un membre d'un clan **en tension** avec
+    /// le sien. Un passant d'un troisième clan, plus proche que le rival, n'est
+    /// pas une cible — l'exécution re-choisissait le plus proche de *n'importe
+    /// quel* autre clan.
+    #[test]
+    fn un_raider_ne_frappe_pas_un_clan_sans_tension() {
+        let mut sim = Sim::new(WorldSeed(7), 512);
+        let home = find_land(&sim);
+        let homef = (home.0 as f64 + 0.5, home.1 as f64 + 0.5);
+        let raider = sim.spawn_agent(homef.0, homef.1);
+        let passant = sim.spawn_agent(homef.0 + 10.0, homef.1); // clan 3, sans tension
+        let rival = sim.spawn_agent(homef.0 + 50.0, homef.1); // clan 2, en tension
+        // Un tick où le raider ne délibère pas : seule l'exécution choisit la cible.
+        let mut tick = 10 * TICKS_PER_DAY + 12;
+        while tick.wrapping_add(raider.0) % brain::DELIBERATION_PERIOD == 0 {
+            tick += 1;
+        }
+        sim.time.tick = tick;
+        for (_, (id, membership, traits, phys, behavior)) in sim.agents.query_mut::<(
+            &AgentId,
+            &mut ClanMembership,
+            &mut Traits,
+            &mut Physiology,
+            &mut Behavior,
+        )>() {
+            phys.hunger = 0.2;
+            phys.thirst = 0.2;
+            phys.cold = 0.0;
+            traits.strength = 0.7;
+            traits.aggression = if *id == raider { 0.9 } else { 0.0 };
+            let c = if *id == raider { 1 } else if *id == rival { 2 } else { 3 };
+            membership.0 = Some(social::ClanId(c));
+            if *id == raider {
+                behavior.task = Some(Task { kind: TaskKind::Raid, target: (home.0 + 50, home.1) });
+            }
+        }
+        for (c, m) in [(1, raider), (2, rival), (3, passant)] {
+            sim.clans.push(Clan {
+                id: social::ClanId(c),
+                founded_tick: 0,
+                members: [m].into_iter().collect(),
+                home: homef,
+                stock: 0.0,
+                chief: m,
+                desired: None,
+                rivalry: 0.0,
+                camp: Default::default(),
+            });
+        }
+        sim.clan_relations.tension.insert((1, 2), 0.8);
+        sim.step();
+        let plaie = |sim: &Sim, who: AgentId| {
+            sim.agents.query::<(&AgentId, &Wound)>().iter().find(|(_, (id, _))| **id == who).unwrap().1.1.0
+        };
+        assert_eq!(plaie(&sim, passant), 0.0, "le passant d'un clan sans tension a été frappé");
+        assert!(plaie(&sim, rival) > 0.0, "le rival en tension, à portée, devait être frappé");
     }
 
     /// Le bug réellement signalé par l'utilisateur : le client permet de
