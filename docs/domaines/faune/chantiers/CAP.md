@@ -27,7 +27,7 @@ biomasse > 40, quel que soit le biome (~11 têtes /km², renne compris) ; même 
 harde de rennes : des centaines) ; immigration de 25 têtes autour d'un humain tiré au hasard
 (D9) ; effacement à 16 km ; meutes réensemencées autour d'un troupeau.
 
-## Étape 1 — lire le cycle de vie de la faune (en cours de préparation)
+## Étape 1 — lire le cycle de vie de la faune (faite le 2026-11-01, lecture de `88bd914`)
 
 Lire dans le code (`fauna.rs`, `scenario.rs`, `sim.rs` passes 4 à 4 bis, `pastoral.rs`) chaque
 règle qui fait naître, vivre ou sortir une bête, et la confronter au réel. Pour chacune : ce que
@@ -48,6 +48,111 @@ Le résultat est un tableau dans ce fichier, classé de l'amont à l'aval, avec 
 manquants listés pour le `sourceur` (part du fourrage réellement broutée par biome, taille des
 groupes par espèce, mortalité hivernale densité-dépendante des cervidés, capacité de charge
 d'hiver, prises annuelles par loup).
+
+### Lecture
+
+Calendrier : 360 jours par an, 24 ticks par jour. Classes : **N** nature (la règle prétend
+modéliser le réel), **C** garde de coût ou de bord (elle remplace ce qu'on ne simule pas),
+**S** condition de scène, **B** bug probable. « Réel » : sans lien, c'est un ordre de grandeur
+de ma part, à sourcer (liste en bas) ; avec renvoi, c'est `../SOURCES.md`.
+
+**Ce que dit la lecture, avant le détail.** Trois règles décident de la densité, et aucune
+n'est la nature d'un pays réel :
+
+1. **Les taux vitaux des herbivores sont environ dix fois trop rapides.** Natalité 0,020 /j au
+   plus, mortalité de fond 0,010 /j (`fauna.rs:50-55`) : r max = 3,6 /an (×36 en un an,
+   doublement en 69 jours), survie annuelle sans faim e^−3,6 ≈ 3 %, espérance de vie 100 jours,
+   7,2 petits par tête et par an. Réel (`../SOURCES.md`, section CAP) : bison r = 0,145-0,16 /an
+   à faible densité (×22 à ×25) ; cerf de Rùm, mortalité adulte ~3 %/an et 28 % des faons la
+   première année (le modèle : 97 %/an pour tous) ; seul indice d'un cerf rapide, λ = 1,63 en
+   enclos (non vérifié), reste ×2 sous le modèle en r. Conséquence par construction : à l'équilibre (satiété 0,5), le troupeau renouvelle toutes ses
+   têtes en ~100 jours, si bien que **la prédation et la chasse ne peuvent rien réguler** — des
+   loups au plafond réel (0,05 /km² × 18 prises /an ≈ 0,9 tête /km² /an) prélèvent ~1 % de ce
+   qu'un troupeau à 30 /km² peut produire. Białowieża : les loups prennent 9-13 % de la densité
+   de cerfs par an, et cela compte parce que le cerf ne se refait que de ~30 %. La densité du
+   modèle n'est donc bornée que par le fourrage, et l'atteint en quelques mois.
+2. **La capacité est la production annuelle moyenne, sans saison.** La maille de 2 km lit une
+   production constante toute l'année (`fauna.rs:184-198`) ; la tuile ne repousse pas l'hiver
+   mais ne dépérit pas non plus (`ecology.rs:255-260`, le commentaire le dit : « il donnerait à
+   la faune le régulateur par le haut qui lui manque »). Réel : la capacité des ongulés du nord
+   se fixe à la saison maigre (hiver, neige, saison sèche), et la mortalité qui borne est celle
+   des jeunes en hiver, densité-dépendante. Dans le modèle, la faim ne tue pas : elle n'abaisse
+   que la natalité ; la mortalité est fixe (`fauna.rs:691`).
+3. **Une espèce prend tout le fourrage « accessible ».** À l'équilibre, la demande égale 100 %
+   de la production accessible (`zone_satiation`, `fauna.rs:203`), elle-même posée « comme point
+   de départ, pas comme mesure » (5 % de la PPN en forêt, 30 % en herbacé, `fauna.rs:175`). Une
+   seule espèce par biome (aurochs en prairie, gazelle en savane) mange la part de tout le
+   cortège réel. Capacités qui en découlent (ration réelle) : cerf en forêt tempérée 55 /km²,
+   renne en toundra 26, aurochs en prairie 41 (bison réel 0,3-0,5 : ×100), gazelle en savane 740.
+
+Le reste fixe la **répartition** et la **taille des groupes**, pas le niveau — sauf l'abandon
+et l'immigration, déjà mesurés dans CHA-5.
+
+#### Naissance (amont)
+
+| Règle | Code | Classe | Réel | Écart | Fixe |
+|---|---|---|---|---|---|
+| Placement initial : un troupeau de 25 têtes tous les 1,5 km, sur toute tuile de biomasse > 40 | `scenario.rs:101-110` | S | densité par espèce et biome (`../SOURCES.md`) | 11 têtes /km² partout, renne compris ; **la toundra (biomasse de base 25, `tile.rs:119`) et les déserts n'en reçoivent jamais** | niveau et répartition de départ |
+| Espèce selon le biome du point de naissance (tirage) | `fauna.rs:474` | N | — | une espèce par biome ; aurochs seul en prairie (l'aurochs réel est plutôt de forêt claire et de plaine alluviale ; la prairie ouverte est au bison et au cheval) ; aurochs par défaut dans les déserts | espèce |
+| Prédateur selon le biome : loup partout, lion des cavernes 40 % en milieu ouvert | `fauna.rs:490` | N | — | non sourcé | espèce |
+| Taille de départ 25 (troupeau), 5 (meute), toutes espèces | `fauna.rs:43, 66` | N déguisée en C | biches 5-40, bison ~20 l'hiver et ~200 l'été, caribou des bois ≤ 15 (SOURCES, CAP) | une taille pour toutes | taille des groupes |
+| **Meutes de la scène de référence posées deux fois** : `populate` en pose 4 à 4 km, `reference_packs` 4 autres aux mêmes points | `scenario.rs:112-121` et `236-249`, appelés ensemble `scenario.rs:257-258` (aussi `longue`, `contact`) | **B** | — | 40 prédateurs au départ pour un territoire qui en porte ~10 : la famine en retire ~30 dans les premiers mois. Hérité de l'ancien banc d'acceptation, reproduit à l'identique par 74e21b7 | transitoire de départ des prédateurs, donc du gibier |
+| Fission : au-dessus de 90 têtes, la moitié part à 1 km | `fauna.rs:1169` | C (coût par entité) et N (taille de groupe) mêlés | taille de groupe par espèce et saison | un seuil pour toutes ; sans effet sur le nombre de têtes | taille des groupes, nombre d'entités |
+| Fission de meute au-dessus de 8 | `fauna.rs:607, 1752` | N | meute de loups 5-10 | cohérent | couverture spatiale |
+| Immigration de gibier : chaque jour, 15 % de chance, 25 têtes à 1-4 km d'un humain au hasard, si aucun troupeau à 3 km et biomasse ≥ 40 | `fauna.rs:1902-1987`, `sim.rs:1675` | C (le code le dit : garde de performance) | remplace le flux entrant d'une population extérieure | plancher par jour, pas par surface (CHA-5, D9) ; jamais en toundra (biomasse 25 < 40) | plancher de densité près des humains |
+| Immigration de meutes : 6 %/j, 5 loups à 0,5-2 km d'un troupeau au hasard, si aucune meute à 3 km | `fauna.rs:1989-2035`, `sim.rs:1692` | C | — | la garde de 3 km est plus courte que le territoire (8 km) : une meute immigrée peut arriver dans un territoire plein et y mourir de faim (part K/P) ; ancrée sur n'importe quel troupeau, même hors du périmètre | niveau des prédateurs (apport ~1,8 loup/jour au plus) |
+
+#### Vie
+
+| Règle | Code | Classe | Réel | Écart | Fixe |
+|---|---|---|---|---|---|
+| **Natalité 0,020 /j × satiété, mortalité de fond 0,010 /j, continues toute l'année** | `fauna.rs:50-55, 691` | N | bison r 0,145-0,16 /an ; cerf : mortalité adulte ~3 %/an, faons 28 % ; renne : 80-90 % des naissances en 10 jours (SOURCES, CAP) | r max ×22 (bison) ; mortalité 97 %/an contre 3 % ; pas de saison des naissances ; la faim ne tue pas (réel : jusqu'à 25-78 % de pertes un hiver sévère, faons d'abord) | **vitesse de retour au fourrage ; insensibilité à la prédation et à la chasse** |
+| Satiété de maille : 0,5 × production / demande, production = moyenne annuelle du biome | `fauna.rs:184-203, 1153` | N | capacité fixée par la saison maigre | pas de goulot d'hiver ou de saison sèche | **niveau** |
+| Fourrage accessible par biome (9 à 270 g/m²/an) | `fauna.rs:175` | N, non mesuré | part réellement broutée par biome (à sourcer) | posé comme point de départ ; une espèce prend la part de tout le cortège | **niveau** |
+| Ration : 3 kg MS/j (cerf, renne), 12 (aurochs), 1 (gazelle) | `fauna.rs:383` | N | ~2-3 % de la masse | cohérent | conversion fourrage → têtes |
+| Satiété de tuile : biomasse trouvée / capacité × habitat ; broutage 1 unité/tête/tick | `fauna.rs:682, 1264` | N | — | mesuré non contraignant (M1-faune) ; la tuile reste pleine l'hiver | quasi rien |
+| Facteur d'habitat 1 / 0,6 / 0,35 | `fauna.rs:355` | N, non sourcé | — | hors habitat, l'équilibre demande une tuile à ≥ 83 % : la niche tient | répartition |
+| Hiver : seul le renne migre, vers le plus chaud, 3,6 km/j | `fauna.rs:412, 827, 1085` | N | caribou 19-55 km/j en migration ; cerf migrateur partiel | lent ; les résidents ne paient rien de l'hiver | répartition saisonnière |
+| Domaine vital : retour au centre au-delà de r (cerf 3 km², aurochs et renne 30, gazelle 10) | `fauna.rs:421` | N, partiellement sourcé | — | gazelle et renne à sourcer | répartition, densité locale |
+| Fuite devant humains et meutes (0,4-1 km), souffle 3 h, paysage de la peur | `fauna.rs:999` | N | — | — | répartition |
+| Prises des meutes : 0,05 /loup/j au contact (≈ 18 /an), un tick par rencontre sauf proie à bout de souffle | `fauna.rs:71, 712` | N | 15-25 ongulés /loup /an | cohérent ; pas de réponse fonctionnelle autre que la présence à 500 m | prélèvement |
+| Croissance des meutes : 0,42 × prises − 0,020 /j ; territoire K ≈ 10 par disque de 8 km | `fauna.rs:82-129, 702, 1748` | N | r loup ~0,3-0,4 /an ; densité max 0,05 /km² | la mortalité de fond tient lieu de famine : 7,2 /an, renouvellement complet en 50 jours ; une meute sans proie meurt au lieu de se disperser | niveau des prédateurs |
+| Choix de la proie : la proie gardée à moins de 6 km, sinon le troupeau le plus proche, **où qu'il soit** | `fauna.rs:1698` | N | — | sans borne de territoire | répartition des meutes |
+| Chasse humaine : 1 tête par prise ; récolte du cheptel 0,3 tête/j | `sim.rs:168, 235` | N | — | hors CAP (CHA-5 : la chasse n'est tirée que par la faim) | prélèvement |
+| **Apprivoisement automatique** : tout troupeau d'aurochs ou de rennes à moins de 2 km d'un foyer, avec moins de 8 prédateurs à 3 km, s'apprivoise de 0,02 /j et s'ancre, sans geste humain | `pastoral.rs:49` | N | domestication : siècles de sélection et de garde | seuil de cheptel en 25 jours sans éleveur ; l'ancré échappe au bord, à l'abandon, à la fusion et à la migration | sortie (voisin, domaine pastoral) |
+
+#### Sortie (aval)
+
+| Règle | Code | Classe | Réel | Écart | Fixe |
+|---|---|---|---|---|---|
+| Mort démographique (taux de fond), seule mort hors prises | `fauna.rs:691` | N | mortalité d'hiver densité-dépendante, jeunes surtout | constante, indépendante de la nourriture et de la saison | voir Vie |
+| Dissolution sous 4 têtes : les têtes disparaissent (`dissolved`) | `fauna.rs:46, 1167` | C | 3 cerfs vivent et rejoignent un groupe | puits de têtes, faible | — |
+| Fusion de deux troupeaux de même espèce qui se voient, si total ≤ 90 | `fauna.rs:1228`, `sim.rs:1587` | C (coût par entité, le code le dit) | — | sans effet sur les têtes | taille des groupes |
+| Bord à flux nul à 8 km de tout humain | `fauna.rs:1875, 1131` | C | — | CHA-5 : coincé en bas sur 5/8 runs | densité perçue |
+| Abandon au-delà de 16 km de tout humain (troupeaux seulement ; les meutes ne sont jamais abandonnées) | `fauna.rs:1881`, `sim.rs:1628` | C | — | CHA-5 : fixe le gibier perçu ; les meutes restent simulées loin de tout humain | densité perçue |
+| Meute sous 1 prédateur : disparue | `fauna.rs:67` | N | — | — | — |
+
+**Dette de documentation relevée** (sans effet) : le champ `fauna_lod_period` (`sim.rs:392-405`)
+décrit un LOD des troupeaux qui n'existe plus (il ne sert qu'à l'écologie) ; `update_herds`
+parle encore de « `steps` fois » (`fauna.rs:1163`).
+
+#### Ce que l'étape 1 change à l'étape 2
+
+Le banc « nature sans humains » mesurera une nature dont les taux vitaux et la saison sont
+eux-mêmes en écart : il dira la capacité du fourrage, pas celle d'un pays. Il garde son
+utilité (témoin), mais l'ordre amont → aval place **avant** tout banc la question de vision :
+les taux vitaux (règle Vie 1) et le goulot saisonnier (Vie 2) sont-ils à corriger ici, et le
+bug des meutes posées deux fois (S) à corriger d'abord, en mode léger, puisqu'il change le
+témoin ?
+
+#### Chiffres réels manquants (pour le `sourceur`)
+
+Rendu le 2026-11-01 (`../SOURCES.md`, section CAP) : r max du bison, survie du cerf, saison des
+naissances du renne, pertes d'hiver (renne, wapiti), tailles de groupe. Restent : r max du cerf
+lu de première main (Forsyth et al.), du renne et de la gazelle ; survie du renne ; fécondité ; part de la PPN
+réellement broutée par biome ; capacité d'hiver (neige) ; domaine vital de la gazelle et du
+renne hors migration ; dispersion d'une meute sans proie contre famine ; biomasse totale
+d'ongulés par biome (tout le cortège).
 
 ## Étape 2 — ce que la nature du modèle produit sans humains
 
