@@ -148,6 +148,8 @@ struct Report {
     bmr: [f64; 4],
     hours: [u64; 4],
     walk_h: [u64; 4],
+    // D13 : les passes d'armes entre humains, relevées par la simulation.
+    violence: cairn_sim::combat::ViolenceStats,
 }
 
 fn energy_class(demo: &cairn_sim::Demographics, tick: u64) -> usize {
@@ -653,6 +655,7 @@ fn run(seed: u64, cold: bool, years: u64, start_day: u64) -> Report {
         }
     }
     r.clans_end = sim.clans.len();
+    r.violence = sim.violence.clone();
     for (_, (demo, mem)) in sim.agents.query::<(&cairn_sim::Demographics, &cairn_sim::Memory)>().iter() {
         if !demo.is_adult(sim.time.tick) || mem.places.is_empty() {
             continue;
@@ -725,6 +728,59 @@ fn print_mortality(rs: &[Report]) {
         );
     }
     println!("mourir avant 15 ans (impliqué par les taux) : {:.0} %", 100.0 * (1.0 - (-q15_hazard).exp()));
+}
+
+/// D13 : qui la violence frappe, et si le camp attaqué se défend. Par run, puis
+/// réunis ; la part des < 5 ans parmi les morts violentes se lit contre leur
+/// part des années-personnes (Nataruk : ~22 % d'enfants parmi les tués).
+fn print_violence(rs: &[Report]) {
+    let viol = CAUSES.iter().position(|c| *c == "viol").unwrap();
+    let pd = |ks: &[usize]| -> u64 { rs.iter().map(|r| ks.iter().map(|&k| r.person_days[k]).sum::<u64>()).sum() };
+    let dv = |ks: &[usize]| -> usize { rs.iter().map(|r| ks.iter().map(|&k| r.deaths_by_age[k][viol]).sum::<usize>()).sum() };
+    let all: Vec<usize> = (0..AGE_CLASSES.len()).collect();
+    let (d5, dall) = (dv(&[0, 1]), dv(&all));
+    let (p5, pall) = (pd(&[0, 1]), pd(&all));
+    println!("\nViolence (D13), régime : scènes du banc");
+    println!(
+        "< 5 ans : {} des morts violentes ({d5}/{dall}) pour {} des années-personnes ; rapport {}",
+        pct(d5 as u64, dall as u64),
+        pct(p5, pall),
+        if dall == 0 || p5 == 0 { "—".into() } else { format!("{:.2}", (d5 as f64 / dall as f64) / (p5 as f64 / pall as f64)) }
+    );
+    println!("{:<14}{:>8}{:>18}{:>9}{:>8}{:>9}{:>10}{:>8}{:>18}", "run", "coups", "<5 ; 5-14 ; ad.", "épisodes", "défendus", "défense", "dont cible", "autre", "délai 0;1;2;3;4+ h");
+    let line = |name: &str, v: &cairn_sim::combat::ViolenceStats| {
+        println!(
+            "{name:<14}{:>8}{:>18}{:>9}{:>8}{:>9}{:>10}{:>8}{:>18}   loin du foyer {}",
+            v.raid_passes,
+            format!("{} ; {} ; {}", v.raid_passes_by_age[0], v.raid_passes_by_age[1], v.raid_passes_by_age[2]),
+            v.episodes,
+            v.episodes_defended,
+            v.defense_passes,
+            v.defense_by_target,
+            v.defense_other_clan,
+            v.delay_hist.map(|n| n.to_string()).join(";"),
+            v.defense_far,
+        );
+    };
+    let mut sum = cairn_sim::combat::ViolenceStats::default();
+    for r in rs {
+        line(&r.label, &r.violence);
+        let v = &r.violence;
+        sum.raid_passes += v.raid_passes;
+        for k in 0..3 {
+            sum.raid_passes_by_age[k] += v.raid_passes_by_age[k];
+        }
+        sum.episodes += v.episodes;
+        sum.episodes_defended += v.episodes_defended;
+        sum.defense_passes += v.defense_passes;
+        sum.defense_by_target += v.defense_by_target;
+        sum.defense_other_clan += v.defense_other_clan;
+        sum.defense_far += v.defense_far;
+        for k in 0..5 {
+            sum.delay_hist[k] += v.delay_hist[k];
+        }
+    }
+    line("réunis", &sum);
 }
 
 /// MOR-5a : épisodes de maladie par personne-année, létalité observée par
@@ -971,6 +1027,7 @@ fn print_table(rs: &[Report], years: u64) {
         rs.len()
     );
     print_mortality(rs);
+    print_violence(rs);
     print_episodes(rs);
     // Pic mémoire du processus entier (tous les fils ensemble).
     if let Ok(status) = std::fs::read_to_string("/proc/self/status")

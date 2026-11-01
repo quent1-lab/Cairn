@@ -110,7 +110,7 @@ const PREDATOR_DEFENSE_DRIVE: f32 = 0.8;
 const HERD_DRIVE: f32 = 0.35;
 /// Tension (mesurée en [0, 1], Phase 4) au-delà de laquelle un clan voisin est
 /// un ennemi qu'on peut razzier.
-const RAID_TENSION_THRESHOLD: f32 = 0.4;
+pub(crate) const RAID_TENSION_THRESHOLD: f32 = 0.4;
 /// Portée à laquelle un rival hostile devient une cible de raid (~1 km).
 const RAID_RADIUS_TILES: f64 = km_to_tiles(1.0);
 /// Poussée du drive de raid : forte, mais modulée par l'agressivité et la
