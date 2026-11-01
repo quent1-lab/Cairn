@@ -324,6 +324,8 @@ pub struct Sim {
     /// reconstruite en entier chaque jour, juste après `clans` : voir
     /// `social::update_relations`.
     pub clan_relations: ClanRelations,
+    /// Compteurs de la violence entre humains (D13), observation seule.
+    pub violence: combat::ViolenceStats,
     /// La pression ressentie par chaque clan (Phase 5, incrément 2) —
     /// famine, froid, menace, surpopulation. Reconstruite en entier chaque
     /// jour par `pressure::measure`, juste après les clans et leurs relations.
@@ -539,6 +541,7 @@ impl Sim {
             clans: Vec::new(),
             clan_events: Vec::new(),
             clan_relations: ClanRelations::default(),
+            violence: combat::ViolenceStats::default(),
             clan_pressure: BTreeMap::new(),
             structures: Vec::new(),
             clan_diagnostics: social::ClanDiagnostics::default(),
@@ -1182,6 +1185,7 @@ impl Sim {
         // des coups, leur riposte se partage en plaies (mortelles à 1).
         combat::resolve(self, &engagements);
         // Puis les raids inter-clans : coups mutuels, butin, morts par violence.
+        combat::observe_clashes(self, &clashes);
         combat::resolve_clashes(self, &clashes);
         // Puis les parts de viande offertes autour des prises.
         resolve_shares(self, &shares);
@@ -1877,7 +1881,7 @@ fn execute(
             return None;
         }
         behavior.activity = Activity::Fighting;
-        clashes.push(Clash { attacker: id, target: tid });
+        clashes.push(Clash { attacker: id, target: tid, defense: false });
         behavior.task = None; // une passe d'armes, puis on redélibère
         return None;
     }

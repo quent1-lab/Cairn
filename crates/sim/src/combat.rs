@@ -155,6 +155,99 @@ pub struct Clash {
     pub attacker: AgentId,
     /// Le rival visé (il est frappé, et riposte en défense).
     pub target: AgentId,
+    /// Passe d'armes d'un **défenseur** contre l'assaillant de son camp (D13).
+    pub defense: bool,
+}
+
+/// Compteurs de la violence entre humains (D13), **observation seule** : rien
+/// dans la simulation ne les lit. Un épisode de raid est la suite des coups d'un
+/// même raider sans pause de plus de 24 h.
+#[derive(Debug, Clone, Default)]
+pub struct ViolenceStats {
+    pub raid_passes: u64,
+    /// Coups de raid selon l'âge de la cible : < 5 ans, 5-14 ans, adulte.
+    pub raid_passes_by_age: [u64; 3],
+    pub defense_passes: u64,
+    /// Le défenseur était la cible du dernier coup de ce raider.
+    pub defense_by_target: u64,
+    /// Le raider ne frappait pas le clan du défenseur.
+    pub defense_other_clan: u64,
+    /// Le défenseur frappe à plus de 1 km du foyer de son clan.
+    pub defense_far: u64,
+    pub episodes: u64,
+    pub episodes_defended: u64,
+    /// Heures entre le premier coup d'un épisode et la première défense : 0, 1, 2, 3, ≥ 4.
+    pub delay_hist: [u64; 5],
+    open: BTreeMap<u64, Episode>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Episode {
+    start: u64,
+    last: u64,
+    target: u64,
+    target_clan: Option<ClanId>,
+    defended: bool,
+}
+
+/// Relève les passes d'armes du tick dans `sim.violence`, avant leur dénouement.
+pub(crate) fn observe_clashes(sim: &mut Sim, clashes: &[Clash]) {
+    if clashes.is_empty() {
+        return;
+    }
+    let tick = sim.time.tick;
+    let involved: BTreeSet<u64> =
+        clashes.iter().flat_map(|c| [c.attacker.0, c.target.0]).collect();
+    // (âge, clan, position) de chaque combattant.
+    let mut who: BTreeMap<u64, (f64, Option<ClanId>, (f64, f64))> = BTreeMap::new();
+    for (_, (id, demo, membership, pos)) in sim
+        .agents
+        .query::<(&AgentId, &crate::demography::Demographics, &ClanMembership, &crate::agent::Position)>()
+        .iter()
+    {
+        if involved.contains(&id.0) {
+            who.insert(id.0, (demo.age_years(tick), membership.0, (pos.x, pos.y)));
+        }
+    }
+    let homes: BTreeMap<u64, (f64, f64)> = sim.clans.iter().map(|c| (c.id.0, c.home)).collect();
+    let v = &mut sim.violence;
+    for c in clashes.iter().filter(|c| !c.defense) {
+        let Some(&(age, clan, _)) = who.get(&c.target.0) else { continue };
+        v.raid_passes += 1;
+        v.raid_passes_by_age[if age < 5.0 { 0 } else if age < 15.0 { 1 } else { 2 }] += 1;
+        match v.open.get_mut(&c.attacker.0) {
+            Some(e) if tick <= e.last + 24 => {
+                e.last = tick;
+                e.target = c.target.0;
+                e.target_clan = clan;
+            }
+            _ => {
+                v.episodes += 1;
+                v.open.insert(
+                    c.attacker.0,
+                    Episode { start: tick, last: tick, target: c.target.0, target_clan: clan, defended: false },
+                );
+            }
+        }
+    }
+    for c in clashes.iter().filter(|c| c.defense) {
+        let Some(&(_, clan, pos)) = who.get(&c.attacker.0) else { continue };
+        v.defense_passes += 1;
+        if let Some(home) = clan.and_then(|k| homes.get(&k.0))
+            && ((pos.0 - home.0).powi(2) + (pos.1 - home.1).powi(2)).sqrt() > cairn_core::km_to_tiles(1.0)
+        {
+            v.defense_far += 1;
+        }
+        if let Some(e) = v.open.get_mut(&c.target.0) {
+            v.defense_by_target += u64::from(e.target == c.attacker.0);
+            v.defense_other_clan += u64::from(e.target_clan != clan);
+            if !e.defended {
+                e.defended = true;
+                v.episodes_defended += 1;
+                v.delay_hist[((tick - e.start) as usize).min(4)] += 1;
+            }
+        }
+    }
 }
 
 /// Dénoue les raids du tick (BRIEF §5, la tension inter-clans qui trouve sa
@@ -417,7 +510,7 @@ mod tests {
         sim.clans.push(clan(1, raider, 0.0));
         sim.clans.push(clan(2, victim, 5.0));
 
-        resolve_clashes(&mut sim, &[Clash { attacker: raider, target: victim }]);
+        resolve_clashes(&mut sim, &[Clash { attacker: raider, target: victim, defense: false }]);
 
         let wound_of = |sim: &Sim, who: AgentId| {
             let mut w = 0.0;
