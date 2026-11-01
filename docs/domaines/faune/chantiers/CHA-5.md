@@ -221,3 +221,7 @@ Classement : **modèle, en amont du champ** (le champ en hérite). Les fractions
 accessible sont écrites comme « point de départ, pas mesure » ; l'hiver ne borne que par la
 pâture de la tuile ; les meutes, au plafond d'un loup réel, prélèvent 0,01 tête /km²/jour.
 Question à l'utilisateur : l'ordre.
+
+**Décision de l'utilisateur (2026-11-01, soir)** : la capacité d'abord (chantier **CAP**,
+`CAP.md`), le champ par maille ensuite. CHA-5 en pause : instrument et diagnostics faits,
+conception du champ à écrire après CAP.
