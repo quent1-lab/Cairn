@@ -157,3 +157,39 @@ trajectoire que `main` — vérifié en comparant aux deux premières années de
 - Seuil : S1 tenue → l'effacement du gibier hors périmètre est le défaut principal, et la
   question à l'utilisateur porte sur ce que devient le gibier hors de vue. S1 réfutée → c'est
   l'immigration (point 2) qu'on lit d'abord.
+
+## Diagnostics — mesurés (`longue` 2 ans × 8, `longue-trace` = bca63c3 et `longue-sansabandon`)
+
+Identité : `longue-trace` reproduit à l'octet près les deux premières années des runs `t5`
+(t42, f7, t2024 comparées).
+
+**S1 tenue sur les runs basses** — têtes à 10 km du camp, moyenne de l'an 2 :
+
+| run | avec abandon | sans abandon | rapport | têtes simulées en fin (avec / sans) | troupeaux | tps 30 j |
+|---|---|---|---|---|---|---|
+| f2024 | 51 | 1 748 | ×34 | 388 / 17 516 | 10 / 282 | 25,6 / 14,1 |
+| f7 | 116 | 1 175 | ×10 | 74 / 44 914 | 3 / 742 | 40,7 / 21,4 |
+| t7 | 84 | 3 591 | ×43 | 519 / 43 594 | 12 / 716 | 44,1 / 16,9 |
+| t1337 | 54 | 2 357 | ×44 | 154 / 20 399 | 5 / 329 | 55,7 / 24,1 |
+| f42 | 367 | 3 869 | ×10,5 | 443 / 17 930 | 8 / 299 | 82,7 / 27,0 |
+| f1337 | 223 | 981 | ×4,4 | 528 / 5 027 | 10 / 84 | 36,6 / 31,9 |
+| t2024 | 379 | 613 | ×1,6 | 1 449 / 24 810 | 27 / 420 | 36,2 / 29,8 |
+| t42 | 1 549 | 452 | ×0,3 | 1 174 / 21 526 | 19 / 353 | 41,5 / 24,8 |
+
+×3 au moins sur les 4 runs basses (×10 à ×44) : **l'effacement du gibier hors périmètre fixe le
+niveau du gibier perçu**. La partie « ±50 % sur les runs hautes » est réfutée (f1337 ×4,4,
+t2024 ×1,6, t42 ×0,3 : sans abandon, les meutes montent aussi, 10 → 48 sur t42). Sans abandon, la
+faune croît sans borne le long du chemin de la bande (5 000 à 45 000 têtes en 2 ans) et le débit
+tombe de moitié : l'abandon est une garde de coût, et c'est elle qui décide de ce qu'on voit.
+
+**T1 tenue en partie** : immigrés 55 % (f2024), 60 % (f7), 43 % (t7) des têtes abandonnées ; âge
+médian à l'abandon 42, 45, 63 jours. Les fissions font l'essentiel du reste (23-84 %) : le gibier
+qui naît près de la bande est effacé à son tour.
+**T2 tenue** : l'humain le plus proche est membre d'un clan dans 94-100 % des abandons sur 7/8
+(f7 63 %) ; le foyer le plus proche est à moins de 20 km dans 50-93 % — c'est la bande qui
+s'éloigne de son gibier, pas des isolés.
+
+**Conclusion du jalon** : le gibier ne s'épuise pas, il est effacé quand la bande s'éloigne de
+plus de 16 km, puis remplacé au compte-gouttes par une immigration plafonnée par jour. Deux
+écarts à la règle 10, le premier dominant. Question de vision à l'utilisateur : ce que devient
+le gibier hors de vue.
