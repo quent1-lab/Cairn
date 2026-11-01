@@ -1814,6 +1814,22 @@ pub struct FaunaFlows {
     pub predators_immigrated: f64,
 }
 
+/// Un troupeau retiré parce que les humains l'ont laissé au-delà de
+/// `FAUNA_ABANDON_TILES` (CHA-5, observation seule) : son âge, son origine
+/// (0 placé, 1 immigré, 2 fission), et qui le tenait encore (distances en
+/// tuiles à l'humain le plus proche, membre d'un clan ou non, et au foyer
+/// de clan le plus proche).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Abandon {
+    pub tick: u64,
+    pub born: u64,
+    pub origin: u8,
+    pub population: f32,
+    pub nearest_human: f64,
+    pub nearest_in_clan: bool,
+    pub nearest_home: f64,
+}
+
 // — Immigration —
 //
 // Un troupeau qui tombe sous `HERD_MIN` disparaît, et rien d'autre ne le

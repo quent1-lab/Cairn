@@ -99,6 +99,8 @@ fn main() {
     // des humains (fourrage produit et demandé dans le périmètre de la faune).
     let mut fauna_log = std::fs::File::create(format!("{out}.faune.csv")).expect("bilan de la faune");
     writeln!(fauna_log, "jour,tetes,troupeaux,predateurs,meutes,croit,predation,chasse,ote,dissous,abandonnes,immigres,predateurs_immigres,mailles_perimetre,production_kg,demande_kg,satiete,tetes_4km5,tetes_10km").unwrap();
+    let mut abandon_log = std::fs::File::create(format!("{out}.abandons.csv")).expect("journal des abandons");
+    writeln!(abandon_log, "tick,ne,origine,tetes,humain_km,humain_en_clan,foyer_km").unwrap();
     let mut seen_nights = 0usize;
     let mut camp_prev: BTreeMap<u64, (f64, f64)> = BTreeMap::new();
     let causes_head: Vec<String> = CAUSES.iter().map(|c| format!("morts_{c:?}")).collect();
@@ -381,6 +383,20 @@ fn main() {
 
         {
             let flows = std::mem::take(&mut sim.fauna_flows);
+            for a in std::mem::take(&mut sim.abandons) {
+                writeln!(
+                    abandon_log,
+                    "{},{},{},{:.1},{:.2},{},{:.2}",
+                    a.tick,
+                    a.born,
+                    a.origin,
+                    a.population,
+                    tiles_to_km(a.nearest_human),
+                    u8::from(a.nearest_in_clan),
+                    tiles_to_km(a.nearest_home)
+                )
+                .unwrap();
+            }
             let humans: Vec<(f64, f64)> = sim.agents.query::<&Position>().iter().map(|(_, p)| (p.x, p.y)).collect();
             let r = cairn_sim::fauna::FAUNA_PERIMETER_TILES;
             let side = cairn_sim::fauna::RANGE_ZONE_TILES;

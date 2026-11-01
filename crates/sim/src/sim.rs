@@ -428,6 +428,11 @@ pub struct Sim {
     /// Le bilan des têtes de gibier depuis la dernière lecture (CHA-5,
     /// observation seule : le banc le lit et le remet à zéro).
     pub fauna_flows: crate::fauna::FaunaFlows,
+    /// CHA-5, observation seule : la naissance de chaque troupeau (tick,
+    /// origine : 0 placé, 1 immigré, 2 fission) et chaque abandon, que le banc
+    /// lit et vide.
+    pub herd_births: BTreeMap<u64, (u64, u8)>,
+    pub abandons: Vec<crate::fauna::Abandon>,
     pub(crate) next_agent_id: u64,
     next_fauna_id: u64,
     pub(crate) next_clan_id: u64,
@@ -569,6 +574,8 @@ impl Sim {
             rangeland: Default::default(),
             allow_fauna_immigration: true,
             fauna_flows: Default::default(),
+            herd_births: BTreeMap::new(),
+            abandons: Vec::new(),
             next_agent_id: 0,
             next_fauna_id: 0,
             next_clan_id: 0,
@@ -696,6 +703,7 @@ impl Sim {
         let id = FaunaId(self.next_fauna_id);
         self.next_fauna_id += 1;
         self.fauna.spawn((id, Position { x, y }, Herd::new(population, species)));
+        self.herd_births.insert(id.0, (self.time.tick, 0));
         id
     }
 
@@ -1557,7 +1565,8 @@ impl Sim {
             let _ = self.fauna.despawn(entity);
         }
         for (x, y, population, species) in fissions {
-            self.spawn_herd_species(x, y, population, species);
+            let id = self.spawn_herd_species(x, y, population, species);
+            self.herd_births.insert(id.0, (time.tick, 2));
         }
         // Les troupeaux laissent leur piste (CHA-2).
         fauna::lay_trails(&self.fauna, &mut self.herd_trails, time.tick);
@@ -1617,19 +1626,42 @@ impl Sim {
             // domestiqué appartient à un clan et reste, où qu'il soit.
             if !human_positions.is_empty() {
                 let r2 = fauna::FAUNA_ABANDON_TILES * fauna::FAUNA_ABANDON_TILES;
-                let gone: Vec<hecs::Entity> = self
+                let gone: Vec<(hecs::Entity, u64, f32, (f64, f64))> = self
                     .fauna
-                    .query::<(&Herd, &Position)>()
+                    .query::<(&FaunaId, &Herd, &Position)>()
                     .iter()
-                    .filter(|(_, (h, p))| {
+                    .filter(|(_, (_, h, p))| {
                         h.anchor.is_none() && fauna::nearest_human_d2((p.x, p.y), &human_positions) > r2
                     })
-                    .map(|(e, _)| e)
+                    .map(|(e, (id, h, p))| (e, id.0, h.population, (p.x, p.y)))
                     .collect();
-                for e in gone {
-                    if let Ok(h) = self.fauna.get::<&Herd>(e) {
-                        self.fauna_flows.abandoned += f64::from(h.population);
-                    }
+                for (e, id, population, pos) in gone {
+                    self.fauna_flows.abandoned += f64::from(population);
+                    // Qui le tenait dans la simulation : l'humain le plus proche,
+                    // et le foyer de clan le plus proche.
+                    let nearest = humans
+                        .iter()
+                        .min_by(|a, b| {
+                            let da = (a.pos.0 - pos.0).hypot(a.pos.1 - pos.1);
+                            let db = (b.pos.0 - pos.0).hypot(b.pos.1 - pos.1);
+                            da.total_cmp(&db)
+                        })
+                        .map(|h| (h.pos, h.clan.is_some()));
+                    let home = self
+                        .clans
+                        .iter()
+                        .map(|c| (c.home.0 - pos.0).hypot(c.home.1 - pos.1))
+                        .fold(f64::INFINITY, f64::min);
+                    let (born, origin) = self.herd_births.remove(&id).unwrap_or((0, 0));
+                    self.abandons.push(fauna::Abandon {
+                        tick: time.tick,
+                        born,
+                        origin,
+                        population,
+                        nearest_human: nearest.map_or(f64::INFINITY, |(p, _)| (p.0 - pos.0).hypot(p.1 - pos.1)),
+                        nearest_in_clan: nearest.is_some_and(|(_, c)| c),
+                        nearest_home: home,
+                    });
                     let _ = self.fauna.despawn(e);
                 }
             }
@@ -1642,7 +1674,8 @@ impl Sim {
             if let Some((x, y)) =
                 fauna::daily_immigration(&human_positions, &herd_positions, &mut self.world, seed, time)
             {
-                self.spawn_herd(x, y, fauna::HERD_START);
+                let id = self.spawn_herd(x, y, fauna::HERD_START);
+                self.herd_births.insert(id.0, (time.tick, 1));
                 self.fauna_flows.immigrated += f64::from(fauna::HERD_START);
             }
             // Symétrique : sans réensemencement des meutes, une extinction de
