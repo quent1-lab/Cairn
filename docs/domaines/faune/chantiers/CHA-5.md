@@ -193,3 +193,31 @@ s'éloigne de son gibier, pas des isolés.
 plus de 16 km, puis remplacé au compte-gouttes par une immigration plafonnée par jour. Deux
 écarts à la règle 10, le premier dominant. Question de vision à l'utilisateur : ce que devient
 le gibier hors de vue.
+
+**Décision de l'utilisateur (2026-11-01, soir)** : le champ par maille. Hors du périmètre, chaque
+maille de 2 km garde un compte de têtes qui évolue chaque jour selon les mêmes lois (fourrage,
+prédation) et garde l'histoire (chasse, abandon) ; les troupeaux en redeviennent quand des humains
+approchent, et y retournent quand ils s'éloignent.
+
+## Avant le champ : à quelle densité mène la nature du modèle ? (2026-11-01)
+
+Le champ fera évoluer les têtes hors de vue selon les lois du modèle ; sa densité sera donc celle
+que ces lois atteignent sans le périmètre. Deux lectures :
+
+1. **Mesuré** (`longue-sansabandon`, fin de l'an 2, têtes ÷ aire du périmètre — minorant, les
+   troupeaux laissés derrière sont hors de l'aire) : f42 56 /km², f7 55, f2024 32, t7 94,
+   t1337 67, t2024 80 ; satiété 0,58-0,70, **encore au-dessus de l'équilibre (0,5) : la
+   croissance continue**. Les meutes (plafond 0,05 /km², celui d'un loup réel) ne freinent pas.
+2. **Calculé** (capacité de fourrage = fourrage accessible du biome ÷ ration, `fauna.rs`) :
+   forêt tempérée 55 cerfs /km² ; taïga 37 ; toundra 26 rennes ; steppe 23 aurochs ou 274
+   gazelles ; prairie 41 aurochs ; savane 740 gazelles ; forêt tropicale 100.
+
+Réel (SOURCES.md, seconde main) : cerf 10-35 /km² sans prédateurs, 12,7 avec loups ; wapiti
+2-9 ; renne sauvage 0,8-3 ; bison 0,3-0,5 ; saïga 0,5-0,8. La capacité du modèle est de ×2-5
+(cerf en forêt) à ×10-30 (renne) et ×50-1 000 (milieux ouverts) au-dessus. Le périmètre la
+cachait : il effaçait le gibier avant qu'il n'y monte.
+
+Classement : **modèle, en amont du champ** (le champ en hérite). Les fractions de fourrage
+accessible sont écrites comme « point de départ, pas mesure » ; l'hiver ne borne que par la
+pâture de la tuile ; les meutes, au plafond d'un loup réel, prélèvent 0,01 tête /km²/jour.
+Question à l'utilisateur : l'ordre.
