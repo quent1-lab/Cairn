@@ -21,3 +21,6 @@ décisions de l'utilisateur. Lu dans le code, tenu à jour à chaque jalon.
   épargnaient rarement femmes et enfants, `SOURCES.md`). La cible reste quelconque ; ce qui
   manque, c'est **la défense** (les adultes du clan attaqué à portée viennent frapper
   l'assaillant) et **la fuite** (ceux qui ne se battent pas s'éloignent). Jamais de filtre d'âge.
+- **2026-11-01, D13 C1** : seuil non atteint en acceptation (totaux dominés par les contacts) ;
+  l'utilisateur choisit un **banc de contact contrôlé** pour juger la défense. **La rancune**
+  (la mémoire des morts nourrit la tension) : oui, mais **plus tard**, chantier à part.
