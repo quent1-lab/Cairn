@@ -162,6 +162,39 @@ règles classées « nature » (boîte fixe, sans périmètre mobile ni immigrat
 On relève la densité (minimum et médiane : c'est un réservoir), le rapport proies / prédateurs
 et la satiété par saison. Prédictions écrites avant.
 
+### Banc et prédictions (écrites le 2026-11-01, avant la série)
+
+Banc `cap_nature` (`crates/sim/examples/cap_nature.rs`, observation seule) : `Sim::step` sans
+agent, `allow_fauna_immigration = false` (ni immigration, ni bord, ni abandon) ; carré de 12 km
+(6 × 6 mailles) où le biome visé couvre ≥ 75 % des centres de maille, le plus près du point de
+référence ; un troupeau de 25 têtes tous les 1,5 km sur toute tuile praticable portant de l'herbe
+(toundra comprise) ; 4 meutes à 4 km du centre, posées **une seule fois** (le bug de la scène n'y
+entre pas). Monde ouvert : les troupeaux peuvent sortir du carré. Relevé tous les 5 jours :
+densité du carré, **charge** de ses mailles (demande ÷ production, 1 = équilibre du fourrage),
+satiété, densité sur les mailles occupées, prédateurs, flux (croissance, prédation). Départ au
+jour 135. Régime : seeds 42, 7, 1337, 2024 × forêt tempérée, taïga, toundra, prairie, steppe,
+savane ; 4 ans.
+
+Vu avant d'écrire : un essai d'un an, seed 42, forêt (chronométrage, 67 s) — 9,5 → 42 têtes /km²,
+charge 0,18 → 0,80, prédation 3,5 têtes par 5 jours pour une croissance de ~110. Les prédictions
+valent pour les 23 autres cases et pour les années 2 à 4 de celle-ci.
+
+- **P1, le fourrage seul borne** : charge médiane de l'an 4 entre 0,85 et 1,15 dans chaque biome
+  sans migration (forêt, prairie, steppe, savane), sur 4 seeds ; densité du carré à ±25 % de la
+  capacité calculée (forêt 55 /km², prairie 41, steppe 23 à 274 selon le mélange aurochs /
+  gazelle, savane 740). Réfutée si la charge médiane reste < 0,7 sur au moins 3 seeds d'un biome.
+- **P2, les prédateurs ne pèsent pas** : prédation annuelle < 5 % des têtes moyennes du carré
+  (réel, Białowieża : 9-13 %). Réfutée au-dessus de 10 % sur un biome et 3 seeds.
+- **P3, pas de goulot d'hiver** : en forêt, prairie, steppe, savane, le minimum de l'an 4 reste
+  ≥ 85 % de la médiane. Toundra et taïga (renne) : le carré se vide l'hiver (migration) — ce n'est
+  pas une mort, le minimum y ment ; on lira la densité sur les mailles occupées. Réfutée si le
+  minimum tombe sous 85 % de la médiane dans un biome sans migration, sur 3 seeds.
+- **P4, la croissance ne dépend pas de la seed** : les 4 seeds vont dans le même sens pour P1-P3.
+
+**Seuil de décision** : si P1 et P2 tiennent, la lecture de l'étape 1 est confirmée (taux vitaux
+et saison d'abord, en amont de tout le reste) ; si P2 tombe, la prédation borne déjà quelque
+part, et l'ordre des corrections se rediscute avec l'utilisateur avant d'y toucher.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de
