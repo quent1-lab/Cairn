@@ -116,8 +116,16 @@ const RAID_RADIUS_TILES: f64 = km_to_tiles(1.0);
 /// Poussée du drive de raid : forte, mais modulée par l'agressivité et la
 /// tension — qui décident qui razzie qui, et quand.
 const RAID_DRIVE: f32 = 0.9;
-/// Plaie à partir de laquelle on ne razzie plus du tout.
+/// Plaie à partir de laquelle on ne razzie plus du tout (ni ne court défendre).
 const RAID_WOUND_LIMIT: f32 = 0.5;
+/// Portée à laquelle on voit et entend qu'un des siens est attaqué : la voix et
+/// le regard, ~500 m (comme l'appel autour d'un dépeçage).
+pub(crate) const DEFENSE_RADIUS_TILES: f64 = km_to_tiles(0.5);
+/// Poussée du drive de défense des siens : un des siens attaqué sous ses yeux
+/// passe avant les besoins qui ne sont pas vitaux (la pleine urgence d'un
+/// besoin vaut ~1). Choix non sourcé. L'agressivité n'y entre pas : on ne
+/// choisit pas d'être attaqué ; la force décide seulement qui y court le plus.
+const DEFEND_DRIVE: f32 = 1.0;
 /// Poussée du drive de pèlerinage : modeste, et de toute façon multipliée par
 /// la ferveur — un tiède ne bouge pas, un fervent traverse la contrée.
 const PILGRIMAGE_DRIVE: f32 = 0.5;
@@ -491,6 +499,27 @@ fn build_candidates(
             let score = RAID_DRIVE * traits.aggression * tension * healthy;
             let target = (hpos.0.floor() as i64, hpos.1.floor() as i64);
             candidates.push((TaskKind::Raid, target, score));
+        }
+
+        // — Défendre les siens (D13) : un humain qui vient de frapper un
+        //   membre du clan, à portée de voix et de regard, c'est le camp
+        //   attaqué. On va frapper l'assaillant le plus proche ; seules la force
+        //   et la plaie décident qui y court.
+        let mut assailant: Option<(f64, (f64, f64))> = None;
+        for h in humans {
+            if h.raiding != Some(my_clan) {
+                continue;
+            }
+            let d2 = (pos.x - h.pos.0).powi(2) + (pos.y - h.pos.1).powi(2);
+            if d2 <= DEFENSE_RADIUS_TILES.powi(2) && assailant.is_none_or(|(bd, _)| d2 < bd) {
+                assailant = Some((d2, h.pos));
+            }
+        }
+        if let Some((_, apos)) = assailant {
+            let healthy = (1.0 - agent.wound / RAID_WOUND_LIMIT).clamp(0.0, 1.0);
+            let score = DEFEND_DRIVE * (0.7 + 0.3 * traits.strength) * healthy;
+            let target = (apos.0.floor() as i64, apos.1.floor() as i64);
+            candidates.push((TaskKind::Defend, target, score));
         }
     }
 

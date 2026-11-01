@@ -326,6 +326,10 @@ pub struct Sim {
     pub clan_relations: ClanRelations,
     /// Compteurs de la violence entre humains (D13), observation seule.
     pub violence: combat::ViolenceStats,
+    /// Ceux qui ont porté un coup de raid au tick précédent, et le clan de leur
+    /// cible (D13) : c'est ce que le camp attaqué voit. Lu par `human_views`
+    /// (`HumanView::raiding`).
+    recent_raiders: BTreeMap<u64, ClanId>,
     /// La pression ressentie par chaque clan (Phase 5, incrément 2) —
     /// famine, froid, menace, surpopulation. Reconstruite en entier chaque
     /// jour par `pressure::measure`, juste après les clans et leurs relations.
@@ -542,6 +546,7 @@ impl Sim {
             clan_events: Vec::new(),
             clan_relations: ClanRelations::default(),
             violence: combat::ViolenceStats::default(),
+            recent_raiders: BTreeMap::new(),
             clan_pressure: BTreeMap::new(),
             structures: Vec::new(),
             clan_diagnostics: social::ClanDiagnostics::default(),
@@ -741,6 +746,7 @@ impl Sim {
                 sex: demo.sex,
                 adult: demo.is_adult(self.time.tick),
                 clan: membership.0,
+                raiding: self.recent_raiders.get(&id.0).copied(),
             })
             .collect();
         views.sort_unstable_by_key(|h| h.id.0);
@@ -973,6 +979,10 @@ impl Sim {
         // mutablement, et un sanctuaire est un point — le clone est négligeable.
         let shrines = self.shrines.clone();
 
+        // Ceux qui viennent de frapper un clan (D13) : presque toujours aucun.
+        let assailants: Vec<((f64, f64), ClanId)> =
+            humans.iter().filter_map(|h| Some((h.pos, h.raiding?))).collect();
+
         self.end("0 instantanes", _ph);
         // 1. Délibération — bucketée : l'agent i ne repense sa tâche qu'aux
         let _ph = phase(); // 1 deliberation
@@ -1007,7 +1017,17 @@ impl Sim {
             {
                 mem.block(stuck, time.tick + crate::memory::BLOCKED_SPRING_TICKS);
             }
+            // Un cri interrompt ce qu'on fait : qui voit un des siens attaqué
+            // à portée de voix redélibère sur-le-champ (défense, D13).
+            let alarm = membership.0.is_some_and(|c| {
+                assailants.iter().any(|&(p, k)| {
+                    k == c
+                        && (p.0 - pos.x).powi(2) + (p.1 - pos.y).powi(2)
+                            <= brain::DEFENSE_RADIUS_TILES.powi(2)
+                })
+            });
             let due = behavior.task.is_none()
+                || alarm
                 || (time.tick.wrapping_add(id.0)) % DELIBERATION_PERIOD == 0;
             if due {
                 // Un envoyé en expédition file vers son étape (aller/retour),
@@ -1187,6 +1207,11 @@ impl Sim {
         // Puis les raids inter-clans : coups mutuels, butin, morts par violence.
         combat::observe_clashes(self, &clashes);
         combat::resolve_clashes(self, &clashes);
+        self.recent_raiders = clashes
+            .iter()
+            .filter(|c| !c.defense)
+            .filter_map(|c| Some((c.attacker.0, demography::find_human(&humans, c.target)?.clan?)))
+            .collect();
         // Puis les parts de viande offertes autour des prises.
         resolve_shares(self, &shares);
         self.hunted_head += kills.iter().map(|k| k.head).sum::<f32>();
@@ -1845,18 +1870,22 @@ fn execute(
     // riposte. La tension se re-teste ici : le plus proche humain d'un autre
     // clan n'est pas forcément du clan en tension (un troisième clan peut être
     // plus près, D13).
-    if task.kind == TaskKind::Raid {
+    if matches!(task.kind, TaskKind::Raid | TaskKind::Defend) {
+        let defense = task.kind == TaskKind::Defend;
         let Some(my_clan) = clan else {
             behavior.task = None;
             return None;
         };
-        let sight2 = cairn_core::km_to_tiles(1.5).powi(2);
+        // Le défenseur ne poursuit pas au-delà de ce qu'il voit du camp attaqué.
+        let reach = if defense { brain::DEFENSE_RADIUS_TILES } else { cairn_core::km_to_tiles(1.5) };
         let mut target: Option<(AgentId, (f64, f64))> = None;
-        let mut best = sight2;
+        let mut best = reach * reach;
         for h in humans {
             let Some(their_clan) = h.clan else { continue };
+            // Le défenseur ne vise que celui qui vient de frapper les siens.
             if h.id == id
                 || their_clan == my_clan
+                || (defense && h.raiding != Some(my_clan))
                 || relations.tension_between(my_clan, their_clan) < brain::RAID_TENSION_THRESHOLD
             {
                 continue;
@@ -1881,7 +1910,7 @@ fn execute(
             return None;
         }
         behavior.activity = Activity::Fighting;
-        clashes.push(Clash { attacker: id, target: tid, defense: false });
+        clashes.push(Clash { attacker: id, target: tid, defense });
         behavior.task = None; // une passe d'armes, puis on redélibère
         return None;
     }
@@ -2065,7 +2094,9 @@ fn execute(
             unreachable!("l'affrontement d'une meute est traité avant, sa cible bouge")
         }
         TaskKind::Herd => unreachable!("la garde du cheptel est traitée avant, sa cible bouge"),
-        TaskKind::Raid => unreachable!("le raid est traité avant, sa cible (un rival) bouge"),
+        TaskKind::Raid | TaskKind::Defend => {
+            unreachable!("le raid et la défense sont traités avant, leur cible (un humain) bouge")
+        }
     }
     None
 }
@@ -5469,6 +5500,115 @@ mod tests {
         };
         assert_eq!(plaie(&sim, passant), 0.0, "le passant d'un clan sans tension a été frappé");
         assert!(plaie(&sim, rival) > 0.0, "le rival en tension, à portée, devait être frappé");
+    }
+
+    /// D13, C1 : un cri interrompt ce qu'on fait. Un adulte occupé à cueillir,
+    /// hors de son tour de délibération, qui voit à portée de voix un raider
+    /// venir de frapper un des siens, le frappe dès l'heure suivante.
+    #[test]
+    fn l_alarme_interrompt_la_tache_en_cours() {
+        let mut sim = Sim::new(WorldSeed(7), 512);
+        let home = find_land(&sim);
+        let homef = (home.0 as f64 + 0.5, home.1 as f64 + 0.5);
+        let raider = sim.spawn_agent(homef.0, homef.1);
+        let cueilleur = sim.spawn_agent(homef.0 + 60.0, homef.1);
+        let mut tick = 10 * TICKS_PER_DAY + 12;
+        while tick.wrapping_add(cueilleur.0) % brain::DELIBERATION_PERIOD == 0 {
+            tick += 1;
+        }
+        sim.time.tick = tick;
+        for (_, (id, membership, traits, phys, behavior)) in sim.agents.query_mut::<(
+            &AgentId,
+            &mut ClanMembership,
+            &mut Traits,
+            &mut Physiology,
+            &mut Behavior,
+        )>() {
+            phys.hunger = 0.2;
+            phys.thirst = 0.2;
+            traits.aggression = 0.0;
+            membership.0 = Some(social::ClanId(if *id == raider { 1 } else { 2 }));
+            if *id == cueilleur {
+                behavior.task = Some(Task { kind: TaskKind::Forage, target: (home.0 + 60, home.1) });
+            }
+        }
+        sim.clan_relations.tension.insert((1, 2), 0.8);
+        // Le raider vient de frapper un membre du clan 2.
+        sim.recent_raiders.insert(raider.0, social::ClanId(2));
+        sim.step();
+        let plaie = sim.agents.query::<(&AgentId, &Wound)>().iter().find(|(_, (id, _))| **id == raider).unwrap().1.1.0;
+        assert!(plaie > 0.0, "le cueilleur n'a pas levé la tête : le raider est indemne");
+    }
+
+    /// D13, C1 : un adulte dont un membre du clan est **attaqué** vient frapper
+    /// l'assaillant, même placide — défendre les siens n'est pas razzier. Un
+    /// raider frappe une victime qui cueille au camp ; un adulte placide du même
+    /// clan cueille à 120 m. Sur six heures, le défenseur doit s'être battu et le raider avoir
+    /// encaissé nettement plus qu'en son absence.
+    #[test]
+    fn un_adulte_defend_un_membre_de_son_clan_attaque() {
+        let plaie_du_raider = |avec_defenseur: bool| {
+            let mut sim = Sim::new(WorldSeed(7), 512);
+            let home = find_land(&sim);
+            let homef = (home.0 as f64 + 0.5, home.1 as f64 + 0.5);
+            let raider = sim.spawn_agent(homef.0, homef.1);
+            let victime = sim.spawn_agent(homef.0 + 5.0, homef.1);
+            let defenseur = avec_defenseur.then(|| sim.spawn_agent(homef.0 + 60.0, homef.1));
+            sim.time.tick = 10 * TICKS_PER_DAY + 12;
+            for (_, (id, membership, traits, phys, behavior)) in sim.agents.query_mut::<(
+                &AgentId,
+                &mut ClanMembership,
+                &mut Traits,
+                &mut Physiology,
+                &mut Behavior,
+            )>() {
+                phys.hunger = 0.2;
+                phys.thirst = 0.2;
+                phys.cold = 0.0;
+                traits.strength = 0.7;
+                traits.aggression = if *id == raider { 0.9 } else { 0.0 };
+                membership.0 = Some(social::ClanId(if *id == raider { 1 } else { 2 }));
+                if *id == raider {
+                    behavior.task = Some(Task { kind: TaskKind::Raid, target: (home.0 + 5, home.1) });
+                } else {
+                    // Occupés sur place : seule l'alarme leur fera lever la tête.
+                    let x = if *id == victime { 5 } else { 60 };
+                    behavior.task = Some(Task { kind: TaskKind::Forage, target: (home.0 + x, home.1) });
+                }
+            }
+            let membres: BTreeSet<AgentId> = [Some(victime), defenseur].into_iter().flatten().collect();
+            for (c, m, chief) in [(1, [raider].into_iter().collect(), raider), (2, membres, victime)] {
+                sim.clans.push(Clan {
+                    id: social::ClanId(c),
+                    founded_tick: 0,
+                    members: m,
+                    home: homef,
+                    stock: 0.0,
+                    chief,
+                    desired: None,
+                    rivalry: 0.0,
+                    camp: Default::default(),
+                });
+            }
+            sim.clan_relations.tension.insert((1, 2), 0.8);
+            for _ in 0..6 {
+                sim.step();
+            }
+            let plaie = |who: AgentId| {
+                sim.agents.query::<(&AgentId, &Wound)>().iter().find(|(_, (id, _))| **id == who).unwrap().1.1.0
+            };
+            (plaie(raider), defenseur.map(plaie))
+        };
+        let (seul, _) = plaie_du_raider(false);
+        let (defendu, defenseur) = plaie_du_raider(true);
+        assert!(
+            defenseur.is_some_and(|p| p > 0.0),
+            "le défenseur ne s'est pas battu (plaie {defenseur:?})"
+        );
+        assert!(
+            defendu > seul + 0.1,
+            "le défenseur n'a pas frappé le raider ({defendu:.3} contre {seul:.3} sans lui)"
+        );
     }
 
     /// Le bug réellement signalé par l'utilisateur : le client permet de

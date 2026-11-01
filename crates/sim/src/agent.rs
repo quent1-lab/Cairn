@@ -206,6 +206,11 @@ pub enum TaskKind {
     /// peuvent être blessés ou tués, et un raid réussi razzie le stock du rival.
     /// La cible est le rival hostile le plus proche, re-visé en chemin.
     Raid,
+    /// Défendre les siens (D13) : un adulte qui voit un humain d'un clan en
+    /// tension **razzier** près de lui va le frapper. Ce n'est pas un raid : on
+    /// ne vise que l'assaillant, et l'on ne prend rien. La cible est
+    /// l'assaillant le plus proche, re-visé en chemin.
+    Defend,
 }
 
 /// Le composant « comportement » : la tâche en cours et l'activité de l'heure.
