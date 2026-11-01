@@ -95,6 +95,10 @@ fn main() {
     // MAR-6d (contre-lecture) : chaque nuit jugée, et les règles concurrentes.
     let mut nights_log = std::fs::File::create(format!("{out}.nuits.csv")).expect("journal des nuits");
     writeln!(nights_log, "tick,clan,parti,ici,ici_saison,ici_rayon,connus,meilleur,second,meilleur_h,meilleur_chasse,meilleur_travaille,alt_saison,alt_rayon,alt_hors_chasse,alt_travailles,alt_marge").unwrap();
+    // CHA-5 : le bilan quotidien du gibier, et ce qu'en porte le pays autour
+    // des humains (fourrage produit et demandé dans le périmètre de la faune).
+    let mut fauna_log = std::fs::File::create(format!("{out}.faune.csv")).expect("bilan de la faune");
+    writeln!(fauna_log, "jour,tetes,troupeaux,predateurs,meutes,croit,predation,chasse,ote,dissous,abandonnes,immigres,predateurs_immigres,mailles_perimetre,production_kg,demande_kg,satiete,tetes_4km5,tetes_10km").unwrap();
     let mut seen_nights = 0usize;
     let mut camp_prev: BTreeMap<u64, (f64, f64)> = BTreeMap::new();
     let causes_head: Vec<String> = CAUSES.iter().map(|c| format!("morts_{c:?}")).collect();
@@ -374,6 +378,58 @@ fn main() {
             .iter()
             .map(|(_, (_, p))| ((p.x / side).floor() as i64, (p.y / side).floor() as i64))
             .collect();
+
+        {
+            let flows = std::mem::take(&mut sim.fauna_flows);
+            let humans: Vec<(f64, f64)> = sim.agents.query::<&Position>().iter().map(|(_, p)| (p.x, p.y)).collect();
+            let r = cairn_sim::fauna::FAUNA_PERIMETER_TILES;
+            let side = cairn_sim::fauna::RANGE_ZONE_TILES;
+            let mut perimeter: BTreeSet<(i64, i64)> = BTreeSet::new();
+            for h in &humans {
+                let (z0, z1) = (((h.0 - r) / side).floor() as i64, ((h.0 + r) / side).floor() as i64);
+                let (w0, w1) = (((h.1 - r) / side).floor() as i64, ((h.1 + r) / side).floor() as i64);
+                for zx in z0..=z1 {
+                    for zy in w0..=w1 {
+                        let c = ((zx as f64 + 0.5) * side, (zy as f64 + 0.5) * side);
+                        if (c.0 - h.0).hypot(c.1 - h.1) <= r {
+                            perimeter.insert((zx, zy));
+                        }
+                    }
+                }
+            }
+            let production: f64 = perimeter.iter().map(|&z| f64::from(sim.rangeland.production(sim.world.worldgen(), z))).sum();
+            let (mut demand, mut sat, mut weight, mut near45, mut near10) = (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64);
+            for (_, (h, p)) in sim.fauna.query::<(&Herd, &Position)>().iter() {
+                let pop = f64::from(h.population);
+                if perimeter.contains(&cairn_sim::fauna::range_zone((p.x, p.y))) {
+                    demand += pop * f64::from(h.species.daily_ration_kg());
+                }
+                sat += pop * f64::from(h.satiation);
+                weight += pop;
+                let d = (p.x - ref_point.0).hypot(p.y - ref_point.1);
+                if d < km_to_tiles(4.5) {
+                    near45 += pop;
+                }
+                if d < km_to_tiles(10.0) {
+                    near10 += pop;
+                }
+            }
+            writeln!(
+                fauna_log,
+                "{day},{heads:.1},{herds},{predators:.1},{packs},{:.2},{:.2},{:.2},{:.2},{:.2},{:.2},{:.1},{:.1},{},{production:.0},{demand:.0},{:.3},{near45:.0},{near10:.0}",
+                flows.growth,
+                flows.predation,
+                flows.hunted,
+                flows.taken,
+                flows.dissolved,
+                flows.abandoned,
+                flows.immigrated,
+                flows.predators_immigrated,
+                perimeter.len(),
+                if weight > 0.0 { sat / weight } else { 0.0 },
+            )
+            .unwrap();
+        }
 
         // MAR-6b : le chemin des foyers de clan depuis hier (km, somme sur les
         // clans), la distance médiane des foyers au point de départ, la plus

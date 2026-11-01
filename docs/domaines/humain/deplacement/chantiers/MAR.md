@@ -2193,3 +2193,53 @@ ouvert** (`docs/domaines/performance/CHANTIERS.md`, PERF-MAR6d).
    reste dans son pays y épuise ou y fait fuir le gibier (le test de surchasse le voit aussi), et
    rien ne lui fait suivre le gibier ailleurs. Morts adultes 15-39 ans concentrées sur f42, f7,
    f1337, t7.
+
+## CHA-5 — suivre le gibier : lecture (2026-11-01)
+
+**Sur quoi** : les runs de 10 ans déjà faites, sans nouveau banc — `an10_moyenne_*` (binaire
+`mar6d-moyenne`, 44f92b1 : MAR-6d jusqu'à l'étape 3 ; `main` y ajoute l'échange des sources et D13
+C0) et `an10_temoin_*` (ancien `main`, bande qui dérive). 4 seeds × 2 scènes, départ jour 135.
+Moyennes des ans 5 à 9 de la bande principale.
+
+| run (moyenne) | troupeaux à 10 km | troupeaux simulés (tout) | têtes simulées | meutes | têtes chassées /j | kcal chasse /j | faim adultes |
+|---|---|---|---|---|---|---|---|
+| t42 | 55,6 | 83 | 5 173 | 6,3 | 2,30 | 154 k | 0,22 |
+| t7 | 1,9 | 3 | 109 | 4,9 | 0,07 | 26 k | 0,25 |
+| t1337 | 3,8 | 5 | 229 | 2,3 | 1,03 | 134 k | 0,22 |
+| t2024 | 66,1 | 86 | 5 292 | 9,5 | 0,04 | 4 k | 0,15 |
+| f42 | 2,4 | 4 | 139 | 6,4 | 0,03 | 10 k | 0,30 |
+| f7 | 4,5 | 7 | 307 | 6,4 | 0,06 | 22 k | 0,25 |
+| f1337 | 22,4 | 28 | 1 693 | 4,5 | 0,49 | 33 k | 0,23 |
+| f2024 | 2,5 | 5 | 179 | 7,0 | 0,13 | 13 k | 0,28 |
+
+**Ce que les chiffres disent :**
+1. **L'épuisement par la chasse est exclu par l'ordre de grandeur** sur les runs où la chasse
+   manque : 0,03 à 0,07 tête par jour (11 à 25 par an) ne vident pas un pays. Et le gibier
+   à 10 km ne baisse pas au fil des années de séjour : il monte sur 3/8 (t2024 4,6 → 125
+   troupeaux de l'an 0 à l'an 9, t42 16 → 48, f1337 2,6 → 19), reste plat et bas sur 5/8.
+   L'hypothèse de la lecture des morts (« la bande épuise ou fait fuir le gibier de son pays »)
+   ne tient pas.
+2. **Le gibier d'une bande, c'est toute la faune simulée** : troupeaux à 10 km ≈ troupeaux
+   simulés au total (55,6/83, 2,4/4…). La faune n'existe qu'autour des humains
+   (`fauna::FAUNA_PERIMETER_TILES` 8 km, bord à flux nul ; immigration tirée autour d'un
+   humain, `daily_immigration`). Il n'y a donc **pas d'ailleurs où le gibier serait** : suivre
+   le gibier est impossible par construction, sauf vers un troupeau déjà dans la boîte.
+3. **La boîte est un couple proie-prédateur non amorti, bimodal** : 5/8 runs coincés en bas
+   (100-300 têtes pour tout le périmètre, 5 à 7 meutes), 3/8 en haut (1 700-5 300 têtes). Le
+   bord à flux nul suppose « dehors, la même densité qu'ici » : un effondrement local devient
+   un effondrement régional, et seule l'immigration (une chance de 0,15 par jour, si aucun
+   troupeau à 3 km) en sort. Écart à la règle 10 (« la nature reste la nature ; le périmètre
+   de simulation ne doit pas changer ce qu'un humain en perçoit ») : la densité du gibier perçu
+   dépend ici de l'histoire de la boîte, pas du climat et de la surface.
+4. **Second écart, indépendant** : t2024 a 66 troupeaux à 10 km et ne chasse presque pas
+   (0,04 tête par jour) — faim des adultes 0,15, cueillette 123 k/j. La chasse n'est tirée que
+   par la faim (la sienne ou la réserve du clan, `brain.rs` « hunt_urgency ») ; chez les
+   fourrageurs réels, les hommes chassent presque tous les jours, rassasiés ou non (à sourcer).
+
+Classement : (3) **modèle**, domaine faune, en amont ; (4) modèle, comportement ; (2) rend
+CHA-5 tel qu'il était posé sans objet tant que (3) tient. Rien de mesuré sur `main` actuel :
+la lecture est à confirmer par un témoin si l'on ouvre (3).
+
+**Décision de l'utilisateur (2026-11-01)** : la faune d'abord — le gibier perçu doit suivre le
+climat et la surface, pas l'histoire de la boîte. Le chantier passe au domaine faune
+(`docs/domaines/faune/chantiers/CHA-5.md`) ; la chasse sans faim (point 4) reste ouverte.

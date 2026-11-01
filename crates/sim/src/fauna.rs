@@ -1792,6 +1792,28 @@ pub fn apply_kills(fauna: &mut hecs::World, kills: &[Kill]) {
     }
 }
 
+/// Le bilan des têtes de gibier (CHA-5, observation seule) : chaque flux qui
+/// fait entrer ou sortir des têtes de la faune simulée, cumulé depuis la
+/// dernière lecture. Le recensement de la veille, plus ces flux, doit donner
+/// celui du jour : deux compteurs indépendants qui doivent concorder.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct FaunaFlows {
+    /// Naissances moins mortalité de fond (`herd_population_step`).
+    pub growth: f64,
+    /// Têtes retirées par les prises : demandées par les meutes, par les
+    /// humains, et réellement ôtées (une prise ne retire pas plus qu'il n'y a).
+    pub predation: f64,
+    pub hunted: f64,
+    pub taken: f64,
+    /// Restes des troupeaux tombés sous `HERD_MIN`.
+    pub dissolved: f64,
+    /// Têtes des troupeaux abandonnés par les humains (`FAUNA_ABANDON_TILES`).
+    pub abandoned: f64,
+    /// Têtes arrivées par l'immigration, et prédateurs arrivés de même.
+    pub immigrated: f64,
+    pub predators_immigrated: f64,
+}
+
 // — Immigration —
 //
 // Un troupeau qui tombe sous `HERD_MIN` disparaît, et rien d'autre ne le

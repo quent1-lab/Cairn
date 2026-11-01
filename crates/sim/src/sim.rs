@@ -425,6 +425,9 @@ pub struct Sim {
     /// faune était épuisée par les prédateurs seuls, ou si la densité de
     /// gibier initiale était nulle) : un choix explicite, pas une heuristique.
     pub allow_fauna_immigration: bool,
+    /// Le bilan des têtes de gibier depuis la dernière lecture (CHA-5,
+    /// observation seule : le banc le lit et le remet à zéro).
+    pub fauna_flows: crate::fauna::FaunaFlows,
     pub(crate) next_agent_id: u64,
     next_fauna_id: u64,
     pub(crate) next_clan_id: u64,
@@ -565,6 +568,7 @@ impl Sim {
             fauna_stats: Default::default(),
             rangeland: Default::default(),
             allow_fauna_immigration: true,
+            fauna_flows: Default::default(),
             next_agent_id: 0,
             next_fauna_id: 0,
             next_clan_id: 0,
@@ -1476,8 +1480,12 @@ impl Sim {
             fauna::update_packs(&mut self.fauna, &self.world, &herds, &mut self.fauna_stats);
         self.end("4a meutes", _ph);
         let _ph = phase(); // 4b prises
+        self.fauna_flows.hunted += kills.iter().map(|k| f64::from(k.head)).sum::<f64>();
+        self.fauna_flows.predation += pred_kills.iter().map(|k| f64::from(k.head)).sum::<f64>();
+        let heads_before = self.fauna_census().0;
         kills.extend(pred_kills);
         fauna::apply_kills(&mut self.fauna, &kills);
+        self.fauna_flows.taken += f64::from(heads_before - self.fauna_census().0);
         for entity in dead_packs {
             let _ = self.fauna.despawn(entity);
         }
@@ -1519,6 +1527,7 @@ impl Sim {
             Vec::new()
         };
         let fence = (!fence_humans.is_empty()).then_some(fence_humans.as_slice());
+        let heads_before = self.fauna_census().0;
         // Les positions humaines seules (pas les meutes) : c'est la présence
         // d'un observateur qui décide de la finesse, pas celle d'un prédateur.
         let (dead_herds, fissions) = fauna::update_herds(
@@ -1534,6 +1543,16 @@ impl Sim {
         );
         #[cfg(feature = "profile")]
         self.prof.count("4d regen", self.world.generated - generated_before);
+        // Le bilan (CHA-5) : ce que la démographie a ajouté, fissions remises
+        // (la mère a cédé la moitié, la fille naît plus bas) ; les restes des
+        // troupeaux condamnés sortent avec eux.
+        let born = self.fauna_census().0 + fissions.iter().map(|f| f.2).sum::<f32>() - heads_before;
+        self.fauna_flows.growth += f64::from(born);
+        for &entity in &dead_herds {
+            if let Ok(h) = self.fauna.get::<&Herd>(entity) {
+                self.fauna_flows.dissolved += f64::from(h.population);
+            }
+        }
         for entity in dead_herds {
             let _ = self.fauna.despawn(entity);
         }
@@ -1608,6 +1627,9 @@ impl Sim {
                     .map(|(e, _)| e)
                     .collect();
                 for e in gone {
+                    if let Ok(h) = self.fauna.get::<&Herd>(e) {
+                        self.fauna_flows.abandoned += f64::from(h.population);
+                    }
                     let _ = self.fauna.despawn(e);
                 }
             }
@@ -1621,6 +1643,7 @@ impl Sim {
                 fauna::daily_immigration(&human_positions, &herd_positions, &mut self.world, seed, time)
             {
                 self.spawn_herd(x, y, fauna::HERD_START);
+                self.fauna_flows.immigrated += f64::from(fauna::HERD_START);
             }
             // Symétrique : sans réensemencement des meutes, une extinction de
             // prédateurs (boom-bust de Lotka-Volterra) est définitive et le
@@ -1641,6 +1664,7 @@ impl Sim {
                 time,
             ) {
                 self.spawn_pack(x, y, fauna::PACK_START);
+                self.fauna_flows.predators_immigrated += f64::from(fauna::PACK_START);
             }
         }
 
