@@ -306,14 +306,9 @@ pub(crate) fn resolve_clashes(sim: &mut Sim, clashes: &[Clash]) {
         if let (Some(a), Some(t)) = (aclan, tclan)
             && a != t
         {
-            // L'affrontement porte le nom du raid : (assaillant, attaqué), que
-            // le coup vienne du raider ou d'un défenseur.
-            let pair = if c.defense { (t, a) } else { (a, t) };
-            if !c.defense {
-                pillage.push(pair);
-            }
-            side.entry(c.attacker.0).or_insert(pair);
-            side.entry(c.target.0).or_insert(pair);
+            pillage.push((a, t));
+            side.entry(c.attacker.0).or_insert((a, t));
+            side.entry(c.target.0).or_insert((a, t));
         }
     }
 

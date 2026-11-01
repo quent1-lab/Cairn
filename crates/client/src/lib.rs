@@ -1809,7 +1809,6 @@ fn task_name(kind: TaskKind) -> String {
         TaskKind::HuntPredator => "chasser un prédateur".to_string(),
         TaskKind::Herd => "garder le cheptel".to_string(),
         TaskKind::Raid => "razzier un rival".to_string(),
-        TaskKind::Defend => "défendre les siens".to_string(),
     }
 }
 

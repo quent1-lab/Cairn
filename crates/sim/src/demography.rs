@@ -228,10 +228,6 @@ pub struct HumanView {
     /// Clan d'appartenance : c'est lui qui distingue un compagnon d'un **rival**
     /// (conflit inter-clans, `crate::combat`). `None` = sans clan.
     pub clan: Option<crate::social::ClanId>,
-    /// Le clan dont il vient de frapper un membre (raid, tick précédent) : ce
-    /// qui fait de lui un assaillant aux yeux de ce clan-là (défense, D13). On
-    /// voit qui est attaqué ; un raider qui approche n'a encore frappé personne.
-    pub raiding: Option<crate::social::ClanId>,
 }
 
 /// Recherche binaire dans un instantané trié par identifiant.
