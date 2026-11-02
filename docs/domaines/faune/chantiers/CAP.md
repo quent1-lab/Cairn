@@ -635,6 +635,39 @@ seeds 42, 7, 1337, 2024, 10 ans, départ jour 135, binaire `d0e6e3e` ; et `accep
   refaire) — verdicts humains dans le bruit déjà mesuré (±50 % sur le gibier à un an).
 Réfutée si une densité dépasse 2 fois la capacité, ou si le gibier s'éteint sur une case.
 
+### Jalon 3.1-3.2 — mesure (binaire `d0e6e3e`, `out/cap/j32/`)
+
+`cap_nature`, sans humains, carré de 12 km ; densité du carré, médiane de l'année (têtes/km²) :
+
+| biome | seed | an 1 | an 2 | an 5 | an 10 (min / méd) | capacité | an 10 ÷ cap. | prédateurs an 10 |
+|---|---|---|---|---|---|---|---|---|
+| forêt | 42 | 11,2 | 14,0 | 31,8 | 82 / 86 | 55 | 1,56 | 0 |
+| forêt | 7 | 8,9 | 12,1 | 24,2 | 35 / 39 | 55 | 0,71 | 0 |
+| forêt | 1337 | 9,0 | 11,5 | 21,4 | 44 / 46 | 55 | 0,84 | 9 |
+| forêt | 2024 | 9,6 | 11,7 | 23,7 | 57 / 60 | 62 | 0,96 | 0 |
+| taïga | 42 | 5,7 | 7,8 | 14,1 | 28 / 32 | 37 | 0,88 | 0 |
+| taïga | 7 | 7,0 | 7,8 | 13,4 | 21 / 24 | 37 | 0,66 | 0 |
+| taïga | 1337 | 7,2 | 9,0 | 10,1 | 12 / 14 | 37 | 0,39 | 9 |
+| taïga | 2024 | 5,6 | 7,1 | 13,7 | 23 / 25 | 37 | 0,68 | 0 |
+| prairie | 42 | 8,4 | 9,0 | 11,3 | 15 / 18 | 41 | 0,45 | 3 |
+| prairie | 7 | 8,7 | 10,5 | 15,8 | 45 / 50 | 41 | 1,22 | 0 |
+| prairie | 1337 | 9,3 | 9,3 | 10,8 | 17 / 19 | 41 | 0,46 | 0 |
+| prairie | 2024 | 8,5 | 9,6 | 13,7 | 21 / 24 | 41 | 0,58 | 0 |
+
+(Témoin de l'étape 2, ancien modèle : 30-50 têtes/km² dès l'an 2, 200+ en steppe.)
+
+- **Croissance ≤ 45 %/an : tenue** (an 1 → an 2 : +0 à +40 % ; puis ~+15-25 %/an).
+- **Densité à l'an 10 entre 0,5 et 1,7 fois la capacité : tenue sur 9/12**, les trois sous 0,5
+  (taïga 1337, prairie 42 et 1337) **encore en croissance** — l'horizon de 10 ans ne suffit pas.
+- **Min ÷ médiane ≥ 0,8 : tenue** (0,83-0,95).
+- **Prédateurs éteints sans immigration sur au moins un tiers : tenue, au-delà** (9 cases sur 12) ;
+  prédation 0-7 % des têtes là où ils survivent.
+- **Gibier éteint : aucune case.**
+- **Acceptation** (8 runs, contre `9802e30`) : population à un an 4 en hausse, 4 en baisse ;
+  tempéré 2024 40 → 27 (19 morts, contre 9) ; aucun sens constant. **Débit plancher en baisse
+  sur 6 runs sur 8 (−4 à −23 %)** : le stock et le signal de saison par maille se calculent à
+  chaque tick — coût à mesurer (voisin PERF), pas un changement de modèle.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de
