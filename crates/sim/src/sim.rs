@@ -1603,6 +1603,7 @@ impl Sim {
                     h.young += o.young;
                     h.bearing += o.bearing;
                     h.bearing_ticks = h.bearing_ticks.max(o.bearing_ticks);
+                    h.since_birth_season = h.since_birth_season.min(o.since_birth_season);
                     h.population += gained;
                 }
                 let _ = self.fauna.despawn(views[absorbed].0);

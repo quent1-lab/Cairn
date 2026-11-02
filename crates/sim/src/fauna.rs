@@ -75,6 +75,12 @@ const YOUNG_STARVING_CONDITION: f32 = 0.5;
 /// Durée de la saison des naissances après le reverdissement (renne : 80-90 %
 /// en 10 jours, saison complète en 4-5 semaines).
 const BIRTH_WINDOW_DAYS: u16 = 30;
+/// Une seule portée par an : un reverdissement n'ouvre une saison des
+/// naissances que si la précédente a commencé il y a au moins ce nombre de
+/// jours. Sans cette garde, un troupeau qui suit le front vert vers des mailles
+/// plus tardives mettait bas à chaque maille (contre-lecture du jalon 3.1-3.2).
+/// Gestation du cerf ~8 mois, du renne ~7,5 ; 300 jours est un choix.
+const BIRTH_INTERVAL_DAYS: u32 = 300;
 /// Mortalité de faim, par jour, aux réserves nulles : un mois. Choix.
 const HERB_STARVE_DEATH_PER_DAY: f32 = 1.0 / 30.0;
 /// Biomasse broutée par tête et par tick, étalée sur la tuile et ses voisines.
@@ -726,6 +732,8 @@ pub struct Herd {
     pub bearing: f32,
     /// Ticks qui restent dans la saison des naissances.
     pub bearing_ticks: u16,
+    /// Ticks depuis l'ouverture de la dernière saison des naissances (saturé).
+    pub since_birth_season: u32,
     /// L'espèce (cerf, aurochs…) : paramètre l'habitat et la vigilance.
     pub species: Species,
     /// Apprivoisement, dans [0, 1] (domestication, `crate::pastoral`) : monte
@@ -752,6 +760,7 @@ impl Herd {
             young: 0.0,
             bearing: 0.0,
             bearing_ticks: 0,
+            since_birth_season: u32::MAX,
             species,
             tameness: 0.0,
             anchor: None,
@@ -902,8 +911,10 @@ pub fn herd_life_tick(herd: &mut Herd, food: f32, spring: Spring) {
     let year = cairn_core::DAYS_PER_YEAR as f32;
     let mut young = herd.young.clamp(0.0, herd.population);
     let mut adults = herd.population - young;
+    herd.since_birth_season = herd.since_birth_season.saturating_add(1);
     match spring {
-        Spring::GreenUp => {
+        Spring::GreenUp if herd.since_birth_season >= BIRTH_INTERVAL_DAYS * cairn_core::TICKS_PER_DAY as u32 => {
+            herd.since_birth_season = 0;
             adults += young;
             young = 0.0;
             herd.bearing = adults * v.births * c;
@@ -914,7 +925,7 @@ pub fn herd_life_tick(herd: &mut Herd, food: f32, spring: Spring) {
             young += adults * v.births * c * DT_DAYS / year - grown;
             adults += grown;
         }
-        Spring::None => {}
+        Spring::GreenUp | Spring::None => {}
     }
     if herd.bearing_ticks > 0 {
         let born = herd.bearing / f32::from(herd.bearing_ticks);
@@ -1423,6 +1434,7 @@ pub fn update_herds(
             daughter.young = herd.young;
             daughter.bearing = herd.bearing;
             daughter.bearing_ticks = herd.bearing_ticks;
+            daughter.since_birth_season = herd.since_birth_season;
             fissions.push((pos.x + angle.cos() * d, pos.y + angle.sin() * d, daughter));
         }
     }
@@ -2426,6 +2438,29 @@ mod tests {
             veille = h.population;
         });
         assert_eq!(hors_fenetre, 0, "{hors_fenetre} jours de croissance hors de la saison des naissances");
+    }
+
+    /// CAP 3.2, contre-lecture : un troupeau qui passe dans une maille qui
+    /// reverdit plus tard ne met pas bas deux fois dans l'année. Reverdi au
+    /// jour 0 puis encore au jour 20 (le renne qui suit le front vert), il
+    /// doit finir l'année comme s'il n'avait reverdi qu'une fois (±1 %).
+    #[test]
+    fn un_second_reverdissement_dans_l_annee_ne_fait_pas_une_seconde_portee() {
+        let mut une = Herd::new(100.0, Species::Reindeer);
+        let mut deux = Herd::new(100.0, Species::Reindeer);
+        for day in 0..360u64 {
+            for h in 0..24 {
+                herd_life_tick(&mut une, 1.0, if day == 0 && h == 0 { Spring::GreenUp } else { Spring::None });
+                let s = if (day == 0 || day == 20) && h == 0 { Spring::GreenUp } else { Spring::None };
+                herd_life_tick(&mut deux, 1.0, s);
+            }
+        }
+        assert!(
+            (deux.population / une.population - 1.0).abs() <= 0.01,
+            "un reverdissement : {:.1} têtes au bout d'un an ; deux à 20 jours d'écart : {:.1}",
+            une.population,
+            deux.population
+        );
     }
 
     /// CAP 3.2 : à 35 % de réserves, les jeunes meurent de faim, pas les
