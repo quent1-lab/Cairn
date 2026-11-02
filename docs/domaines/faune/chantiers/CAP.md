@@ -441,6 +441,54 @@ Mesure (`cap_demo` 50 ans, après le changement) — densité min / méd / max d
 - Conséquence : sans saison, 3.1a ne change pas le niveau ; elle change la réponse au manque
   (la faim tue, les naissances suivent les réserves). Le niveau et l'hiver se jouent en 3.1b.
 
+### 3.1a, défaut trouvé par 3.1b : réserves linéaires (2026-11-02)
+
+Le premier banc saisonnier figeait la forêt de seed 42 à 88,8 têtes/km² (capacité 52), réserves
+0,498, fourrage 0,6 jour de demande toute l'année. Lecture : la condition ne se remplissait
+qu'à ration entière ; avec un stock, les bêtes mangent à satiété ~14 h puis rien ~10 h, et
+cette alternance gardait les réserves qu'une ration régulière de même total (58 %) vidait. La
+réponse dépendait de la répartition des repas dans la journée — un artefact de pas de temps.
+Test rouge `les_reserves_suivent_la_ration_du_jour_pas_sa_repartition` (0,653 contre 0,722 en
+30 jours). Correction : réserves **linéaires** dans la nourriture, `(f − m)/T`, vidées en 85 j à
+f = 0, remplies en 120 j à f = 1 (choix : un été), d'où une part d'entretien m ≈ 0,59 de la
+ration — non sourcée ; une ration réelle (2-3 % de la masse) est l'ingestion volontaire,
+au-dessus de l'entretien.
+
+Effet sur `cap_demo` à offre annuelle constante (code de 3.1a) : la densité ne se pose plus à la
+capacité ; elle **oscille chaque année** entre ~0,95 et ~3,5 fois la capacité, médiane ~2 fois
+(forêt 51,8 / 109,7 / 194,4 à l'an 50 ; savane 700 / 1 520 / 2 624). Le niveau moyen ~1,7 fois
+la capacité est celui où les bêtes ne trouvent que leur entretien (1/m) ; l'amplitude vient des
+taux vitaux (r = 3,6 /an), à juger en 3.2. La conclusion de 3.1a (« sans saison, le niveau ne
+change pas ») ne tient plus : elle venait de la forme non linéaire.
+
+### 3.1b — le fourrage sur pied, saison par saison
+
+Changement : `Rangeland` tient un **stock de fourrage par maille** (kg MS), sur le patron du
+stock de cueillette : il croît de la production annuelle accessible (inchangée) répartie sur les
+seuls jours de croissance de la maille, se perd avec τ = 300 j (litière et herbe sur pied :
+−28 % de l'été à l'automne, −22 à −50 % l'hiver, prairie tempérée ; milieu des fourchettes,
+choix), et les bêtes y prélèvent leur ration tant qu'il en reste — la ration manque quand le
+stock est vide, une impossibilité physique, pas un seuil. Avancé jour par jour à la
+consultation, rejoué sur un an à la première visite (sans broutage). La **tuile ne nourrit
+plus** : sa biomasse sert au choix du pas et au rendu (décision de l'utilisateur). Le facteur
+d'habitat reste un multiplicateur de la part trouvée. L'année de la conversion passe de 365 à
+360 jours (contre-lecture, point 7), dans le même mouvement puisque la production se répartit
+désormais sur les jours de l'année du jeu.
+
+Test rouge (vu échouer, ancien comportement derrière `Rangeland::graze`) :
+`l_hiver_affame_un_pays_charge_a_sa_production_annuelle` — forêt tempérée à saisons, demande =
+production annuelle : part de ration trouvée 1,00 toute l'année ; attendu < 0,5 au creux et 1 l'été.
+
+Prédictions (`cap_demo` repris sur une maille réelle par biome, seeds 42, 7, 1337, 2024,
+50 ans ; taux vitaux encore ceux du modèle) :
+- **le niveau descend sous la capacité annuelle** dans les biomes à hiver : médiane de l'an 50
+  entre 40 et 90 % de la capacité annuelle (forêt, taïga, prairie, steppe), 20-60 % en toundra ;
+- **un cycle annuel** : max ÷ min dans l'année ≥ 1,3 (mortalité de fin d'hiver, croissance
+  d'été) ; part de ration trouvée < 0,5 à la fin de chaque hiver ;
+- biome sans saison (savane près de l'équateur, `season` = None) : comme 3.1a, à ±10 %.
+Réfutée si la médiane reste au-dessus de 90 % de la capacité annuelle dans un biome à hiver sur
+au moins 3 seeds (l'hiver ne borne pas), ou si un biome s'éteint sur 3 seeds.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de
