@@ -228,9 +228,42 @@ Verdict sur les prédictions :
 - **Non prédit, 2/2** : en toundra, la charge du carré plafonne à 0,19-0,30 ; satiété ~0,5 pour
   une maille qui offrirait 1,7-2,6 : l'herbe de la tuile borne (capacité 25), pas la maille.
 
-**Seuil de décision atteint** : P1 et P2 tiennent ; la lecture de l'étape 1 est confirmée par
-la mesure. Le niveau du gibier n'est fixé que par le fourrage, ni la prédation ni l'hiver n'y
-prennent part.
+**Seuil de décision atteint**, avec la portée que lui laisse le débat ci-dessous : P1 et P3
+vérifient surtout que **le code fait ce que dit sa formule** (aucun terme saisonnier, équilibre
+écrit à charge 1) — aucune autre règle ne la contredit. Ce qui pouvait échouer et a parlé : les
+prédateurs éteints, la toundra bloquée.
+
+## Débat (2026-11-02, contre-lecture des étapes 1-2)
+
+1. P1 et P3 étaient acquis par construction (`zone_satiation`, aucun terme saisonnier) : le banc
+   vérifie le code, pas la régulation. → **Retenu** : verdict reformulé ci-dessus ; les prochaines
+   prédictions distingueront vérification de code et prédiction réfutable.
+2. Prédation ≤ 1,3 % : arithmétique des plafonds (0,05 loup /km² × 18 = 0,9 tête /km² /an),
+   pas une preuve sur les taux vitaux ; avec r réel = 0,15 /an et K = 55, le prélèvement
+   soutenable maximal (r·K/4) vaut ~2 /km² /an. → **Retenu en partie** : le niveau (×100 pour le
+   bison) vient du fourrage accessible, pas des taux vitaux. Mais, en logistique, 0,9 /km² /an
+   ôté à r = 0,15 abaisse l'équilibre d'environ 12 % (N/K = ½ + √(¼ − H/rK) ≈ 0,875), contre
+   < 1 % à r = 3,6 : les taux vitaux décident bien de la **sensibilité** au prélèvement —
+   prédateurs et chasseurs humains. Deux défauts distincts, pas un.
+3. Extinction des prédateurs : une meute sur le fil (≥ 0,048 prise par jour sur 0,05 possibles),
+   pas un manque de proie ; les prédateurs sont comptés sur tout le monde. → **Retenu** : à
+   instrumenter (prises par loup et par jour contre le seuil, temps à portée) avant de corriger.
+4. Toundra : peut-être l'hiver (la tuile ne repousse pas) ou la taille des groupes, pas la seule
+   capacité de la tuile ; la scène de jeu n'y place jamais de troupeau. → **Retenu** : satiété
+   décomposée tuile / maille par saison, biomasse des tuiles broutées ; ma lecture « la tuile
+   borne » reste une hypothèse.
+5. Monde ouvert : l'extérieur vide est un puits, la prairie à 0,80-0,88 peut en venir. →
+   **Retenu comme réserve** : flux sortant du carré à mesurer si la prairie compte.
+6. Charge mêlée (rennes hivernant en taïga, aurochs et gazelles en steppe). → **Retenu** :
+   ventiler par espèce, coût nul.
+7. `G_M2_YR_TO_KG_KM2_DAY` divise par 365 quand l'année en compte 360 (~1,4 %). → **Retenu**
+   comme bug mineur, mode léger, plus tard.
+- **Ordre proposé** : « la faim tue » et la production saisonnière d'abord, sur un **banc
+  démographique réduit** (une maille, équations de flux, des décennies en secondes) ; puis les
+  taux vitaux ; le fourrage accessible en dernier, jugé sur la biomasse d'ongulés par biome
+  (à sourcer). Raison : un goulot d'hiver mesuré à r = 3,6 se refait en un été, et des taux
+  réels sans saison ni faim mortelle ne sont bornés par rien sous K. → **Retenu comme
+  proposition**, à trancher par l'utilisateur.
 
 ## Étape 3 — corriger règle par règle
 
