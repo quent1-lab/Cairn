@@ -730,6 +730,19 @@ Réfutée si une densité dépasse 2 fois la capacité, ou si le gibier s'étein
   l'instrument ; la garde d'une portée par an déplace la steppe (méd. 340 → 178 et 367 → 267) :
   certaines mailles y reverdissaient deux fois par an (redoux).
 
+- **Point 6 corrigé** : test rouge `un_troupeau_hors_de_sa_niche_ne_retire_que_ce_qu_il_mange`
+  (cerf en savane, habitat 0,6 : 5,0 kg retirés par tick pour 3,0 mangés) ; la demande d'un
+  troupeau à la maille est désormais sa ration × son facteur d'habitat.
+- **Point 8 corrigé** (et plus grave que lu) : une maille vierge n'était rejouée que depuis le
+  jour 0 — visitée au jour 135, elle portait 135 jours de pousse (75 642 kg contre 171 465 pour
+  un an, taïga seed 42). Test rouge `une_maille_vierge_porte_une_annee_de_fourrage_quel_que_soit_le_jour` ;
+  le rejeu porte maintenant sur les 360 jours de l'année qui précède (même jour de l'année).
+  `cap_demo` : seule la première année change (taïga an 1, méd. 3,6 → 15) ; équilibres
+  identiques. **Voisin non corrigé** : le stock de cueillette (`gathering`, D10) a le même
+  rejeu depuis le jour 0 — les humains de toutes les scènes partent avec 135 jours de cueillette
+  sur pied au lieu d'une année ; à ouvrir dans son domaine.
+- Suite complète avant ces deux corrections (`e747c14`) : 301 verts, deux rouges connus.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de
