@@ -319,6 +319,32 @@ jour 135, 4 seeds × 2 scènes :
 Réfuté si le gibier ou la population humaine s'écarte de plus de 15 % dans le même sens sur
 au moins 6 runs sur 8.
 
+### Mesure (2026-11-02, `out/cap/meutes/`)
+
+| run | prédateurs j1 / j90 / an 1 (témoin → variante) | têtes moyennes sur l'an | têtes à 10 km (moy.) | têtes au jour 360 | pop an 1 |
+|---|---|---|---|---|---|
+| t42 | 30/14/13 → 15/14/22 | 1 329 → 711 | 918 → 484 | 2 141 → 710 | 49 → 54 |
+| t7 | 39/32/13 → 20/25/12 | 890 → 954 | 216 → 506 | 1 011 → 952 | 44 → 46 |
+| t1337 | 30/14/5 → 15/18/5 | 131 → 98 | 88 → 53 | 286 → 159 | 49 → 49 |
+| t2024 | 39/32/19 → 20/31/12 | 1 075 → 633 | 189 → 324 | 1 378 → 191 | 47 → 38 |
+| f42 | 39/27/19 → 20/22/19 | 285 → 572 | 154 → 228 | 386 → 86 | 22 → 47 |
+| f7 | 39/35/11 → 20/33/4 | 514 → 500 | 236 → 266 | 281 → 26 | 60 → 51 |
+| f1337 | 10/3/2 → 5/5/9 | 205 → 202 | 91 → 165 | 155 → 60 | 49 → 71 |
+| f2024 | 39/39/13 → 20/36/16 | 553 → 277 | 125 → 98 | 308 → 157 | 68 → 65 |
+
+- **Prédateurs : tenue.** Départ divisé par 2 ; dès 90 jours, écarts sans sens constant.
+- **Gibier : réfutée en grandeur** (écarts de −50 à +100 %), **sans sens constant** sur la moyenne
+  de l'an (5 en baisse, 2 en hausse, 1 égal) ni à 10 km du camp (5 en hausse, 3 en baisse). Le
+  bilan des flux dit pourquoi : l'abandon (126 à 2 588 têtes par an) domine et dépend de la
+  marche de la bande, chaotique (CHA-5). Dans ce régime, à 1 an, le bruit du gibier vaut ±50 % :
+  ce banc ne peut pas voir un effet de la taille de celui-ci. Seul signe constant : les têtes au
+  jour 360, plus basses 8 fois sur 8 — instantané, non expliqué, à ne pas lire seul.
+- **Humains : sans sens constant** (population à 1 an : 4 en hausse, 3 en baisse, 1 égal) ; des
+  verdicts d'acceptation changent (mortalité nulle ou non) au gré du chaos, aucun dans un sens.
+- **Verdict** : la correction tient par construction (test) ; elle change le témoin de tous les
+  bancs de la scène de référence. Les chiffres antérieurs à `9802e30` sur cette scène portaient
+  20 prédateurs de trop au départ.
+
 ## Étape 3.1 — la faim qui tue et la saison : proposition de conception (2026-11-02, à valider)
 
 Écart (étape 1, Vie 1-2 ; sources CAP) : la nourriture borne dans le réel **par la saison maigre**
