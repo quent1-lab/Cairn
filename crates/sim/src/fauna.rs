@@ -312,11 +312,24 @@ impl Rangeland {
         today: u64,
     ) -> &mut (f32, u64) {
         let p = self.pasture(worldgen, climate, zone);
-        let stock = self.stocks.entry(zone).or_insert((0.0, today.saturating_sub(361)));
-        if today.saturating_sub(stock.1) > 360 {
-            *stock = (0.0, today - 360);
-        }
         let keep = (-1.0 / FORAGE_PERSISTENCE_DAYS).exp();
+        let stock = self.stocks.entry(zone).or_insert((f32::NAN, today));
+        // Première visite, ou plus d'un an sans visite : la maille porte une
+        // année de pousse sans broutage, rejouée sur les 360 jours qui
+        // précèdent. La saison ne dépend que du jour de l'année : on rejoue
+        // `today + 1 ..= today + 360`, les mêmes jours de l'année, ce qui
+        // marche aussi avant le jour 360 (contre-lecture, point 8 : rejouée
+        // depuis le jour 0, la maille visitée au jour 135 n'en avait que 135).
+        if stock.0.is_nan() || today.saturating_sub(stock.1) > 360 {
+            let mut kg = 0.0f32;
+            for d in today + 1..=today + 360 {
+                kg *= keep;
+                if crate::gathering::grows(climate, p.mean_temp, p.y, d) {
+                    kg += p.per_growing_day;
+                }
+            }
+            *stock = (kg, today);
+        }
         while stock.1 < today {
             stock.1 += 1;
             stock.0 *= keep;
@@ -2393,6 +2406,25 @@ mod tests {
             min_f < 0.5 && max_f >= 1.0,
             "à charge annuelle 1, la part de ration trouvée va de {min_f:.2} à {max_f:.2} sur l'année : \
              aucun hiver ne pèse"
+        );
+    }
+
+    /// CAP 3.1b, contre-lecture (point 8) : une maille vierge porte, à sa
+    /// première visite, le fourrage d'une année de pousse sans broutage — au
+    /// jour 135 comme au jour 495 (même jour de l'année). Avant : rejoué depuis
+    /// le jour 0 seulement, la maille visitée au jour 135 n'avait que 135 jours.
+    #[test]
+    fn une_maille_vierge_porte_une_annee_de_fourrage_quel_que_soit_le_jour() {
+        let sim = Sim::new(WorldSeed(42), 64);
+        let zone = taiga_zone(&sim);
+        let (wg, climate) = (sim.world.worldgen(), &sim.climate);
+        let mut tot = Rangeland::default();
+        let mut tard = Rangeland::default();
+        let a = tot.peek_stock(wg, climate, zone, SimTime { tick: 135 * 24 });
+        let b = tard.peek_stock(wg, climate, zone, SimTime { tick: 495 * 24 });
+        assert!(
+            (a / b - 1.0).abs() < 0.01,
+            "maille vierge au jour 135 : {a:.0} kg ; au jour 495 : {b:.0} kg"
         );
     }
 
