@@ -273,6 +273,35 @@ du chantier — **ce qui borne les ongulés dans le réel** — n'a pas encore d
 étapes 1-2 ont dit ce qui les borne **dans le modèle**. À sourcer avant de figer l'ordre
 (régulation par le bas ou par le haut selon la taille, l'hiver, la prédation).
 
+## La question de base : ce qui borne les ongulés dans le réel (2026-11-02, `../SOURCES.md`, seconde main)
+
+- **Cela dépend de la taille** (Sinclair 2003, Serengeti) : sous ~150 kg, la prédation borne ;
+  au-dessus, la nourriture. Dans le modèle : cerf (120 kg), renne (110), gazelle (25) sont du
+  côté des prédateurs ; seul l'aurochs (700) est du côté du fourrage.
+- **Sans prédateurs, c'est la saison maigre qui borne, par les jeunes** : faons de Rùm qui meurent
+  l'hiver d'autant plus que la densité est forte, fécondité qui baisse ; veaux de gnou en
+  saison sèche. La nourriture borne donc **par la faim qui tue en saison maigre**, pas par une
+  natalité qui suit une moyenne annuelle.
+- **Avec prédateurs, sous 150 kg, la densité reste bien sous ce plafond** : caribou sédentaire
+  régulé par les loups (lichens non limitants) ; orignal tenu bas par loups et ours en Alaska ;
+  wapiti divisé par 2 à 4 après le retour des loups (mais sécheresse et chasse y ont pris part).
+- **La part de végétation mangée** : 1,5 % de la PPN en forêt, 23 % en prairie, **tous herbivores
+  confondus, insectes compris** (Cebrian 1999) ; 66 % au Serengeti. Le modèle donne aux seuls
+  grands ongulés, et à une seule espèce, 5 % de la PPN en forêt (×3 au moins) et 30 % en prairie.
+
+**Ce que le modèle a de faux, rapporté à cette réponse** : il n'a que le mécanisme de
+l'aurochs (le fourrage), et sous une forme sans saison ni faim qui tue ; le mécanisme des
+trois autres espèces (la prédation) n'y peut rien, ni par ses taux (meute sur le fil, éteinte
+sans immigration), ni par la vitesse de la proie (r ×20).
+
+**Conséquence sur l'ordre validé** : les prédateurs n'y figuraient pas comme étape. Ils doivent
+y entrer **avant** le fourrage accessible : pour trois espèces sur quatre, c'est eux qui fixent
+la densité réelle, et juger le fourrage accessible sur la densité d'un cerf sans loups capables
+de le réguler reviendrait à lui faire porter la borne de la prédation (calibration déguisée).
+Ordre proposé : (1) faim qui tue et saison ; (2) taux vitaux par espèce ; (3) prédateurs qui
+persistent et régulent (réponse aux proies, dispersion au lieu de la mort) ; (4) fourrage
+accessible. **Question posée à l'utilisateur.**
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de
