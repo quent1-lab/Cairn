@@ -489,6 +489,43 @@ Prédictions (`cap_demo` repris sur une maille réelle par biome, seeds 42, 7, 1
 Réfutée si la médiane reste au-dessus de 90 % de la capacité annuelle dans un biome à hiver sur
 au moins 3 seeds (l'hiver ne borne pas), ou si un biome s'éteint sur 3 seeds.
 
+Mesure (`cap_demo` saisonnier, 50 ans, une maille dont les 4 quarts portent le biome, cherchée
+à 240 km au plus du point de référence ; réserves linéaires ; densité min / méd / max de
+l'année ; capacité annuelle = production ÷ ration) :
+
+| biome | seeds trouvées | an 50 (min / méd / max, têtes/km²) | capacité | forme |
+|---|---|---|---|---|
+| forêt | 42, 7, 1337, 2024 | 48,8/108/184 · 8,6/175/309 · 52/115/197 · 72/160/275 | 52-63 | cycle annuel stable (3 seeds) ; seed 7 : effondrements à 0,3 /km² et rebonds |
+| taïga | 7, 2024 | 0,5/1,2/63 (identiques sur les deux seeds) | 37 | effondrements et rebonds, ×100 d'une année à l'autre |
+| toundra | 2024 | 0,0/0,1/39 | 27 | quasi-extinction l'hiver, rebond l'été |
+| prairie | 42, 7, 1337, 2024 | 33/77/157 · 1,5/3,6/45 · 37/81/138 · 33/79/184 | 39-42 | cycle annuel stable (3 seeds) ; seed 7 chaotique |
+| steppe | 7, 2024 | 20/47/785 · 6/14/235 | 278-333 | chaotique |
+| savane | 7 | 703/1 554/2 656 | 750 | cycle annuel stable |
+
+- **Test rouge passé au vert** ; part de ration trouvée à 0 chaque fin d'hiver presque partout :
+  l'hiver pèse.
+- **« Niveau entre 40 et 90 % de la capacité » : réfutée.** Là où le cycle est stable (forêt,
+  prairie, savane), la médiane est à ~2 fois la capacité, le minimum à ~1 fois : le niveau est
+  celui de l'entretien (1/m ≈ 1,7), et le troupeau triple chaque été (r = 3,6 /an) avant de
+  fondre l'hiver.
+- **Cycle annuel ≥ 1,3 : tenue**, au-delà (×3 à ×100).
+- **Non prédit** : dans les pays froids et la steppe, la population **s'effondre puis rebondit**
+  (0,1 à 900 têtes/km² d'une année à l'autre) ; seed 7 fait de même en forêt et en prairie. Un
+  troupeau qui croît de ×36 par an dépasse tout stock d'hiver, et la mort de faim le ramène
+  près de zéro : c'est la vitesse vitale qui commande, comme la contre-lecture l'avait dit.
+- Réserve : les seeds 7 et 2024 donnent la taïga au chiffre près (même maille de climat ?), non
+  vérifié ; beaucoup de biomes sans maille trouvée dans le rayon de recherche.
+- Tests : 297 verts hors rouges connus. `l_hiver_affame…` cherche désormais une maille de
+  **taïga** : la forêt tempérée proche du point de référence pousse toute l'année (aucun jour
+  sous 5 °C), le test n'y voyait pas d'hiver. `un_pays_surpeuple…` (simulation entière) est
+  **retiré** : avec un an de fourrage sur pied au départ et des gazelles qui s'étalent sur leur
+  domaine vital (une dizaine de mailles vierges), il ne surpeuplait plus rien (réserves 0,902 à
+  60 jours, attendu ≤ 0,85) ; remplacé au niveau de la maille par
+  `dix_fois_trop_de_bouches_vident_la_maille` (≤ 20 % de ration du 40e au 60e jour) — garde de
+  régression, **qui passait aussi avant** 3.1b : elle ne prouve pas le changement.
+- **Lecture** : le mécanisme (stock, hiver, faim) fait ce qu'il doit ; le niveau ne peut pas se
+  juger avant les taux vitaux réels (3.2). Rien n'est réglé ici.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de

@@ -216,25 +216,35 @@ pub fn range_zone(pos: (f64, f64)) -> (i64, i64) {
     )
 }
 
-/// Part de leur ration que la maille offre à ses bêtes : **production ÷
-/// demande**, non bornée (c'est l'appelant qui borne à 1). Jusqu'à CAP 3.1a,
-/// elle était multipliée par la satiété d'équilibre (0,5) pour que la natalité
-/// compense la mortalité à demande = production ; c'est désormais la condition
-/// des bêtes qui porte l'équilibre, et la nourriture dit ce qu'elles mangent.
-pub fn zone_food(production_kg: f32, demand_kg: f32) -> f32 {
-    if demand_kg <= 0.0 {
-        return f32::MAX;
-    }
-    production_kg / demand_kg
-}
-
 /// Production de fourrage des mailles de pâturage, en kg/jour. Fonction pure
 /// du worldgen, donc mise en cache sans effet sur la trajectoire : le cache ne
 /// fait qu'éviter de relire seize fois le biome à chaque tick.
 #[derive(Default)]
 pub struct Rangeland {
     production: std::collections::BTreeMap<(i64, i64), f32>,
+    /// Ce que chaque maille produit les jours de croissance (CAP 3.1b) : pur
+    /// du worldgen et du climat, mis en cache.
+    pastures: std::collections::BTreeMap<(i64, i64), Pasture>,
+    /// Le fourrage sur pied de chaque maille broutée, et le dernier jour
+    /// intégré.
+    stocks: std::collections::BTreeMap<(i64, i64), (f32, u64)>,
 }
+
+/// Production saisonnière d'une maille : kg MS par jour de croissance, et ce
+/// qu'il faut pour savoir quels jours poussent (température moyenne des terres,
+/// ordonnée du centre). Même règle de saison que la cueillette.
+#[derive(Clone, Copy, Debug)]
+struct Pasture {
+    per_growing_day: f32,
+    mean_temp: f64,
+    y: i64,
+}
+
+/// Durée de vie du fourrage laissé sur pied, en jours (CAP 3.1b) : l'herbe
+/// d'une prairie tempérée perd ~28 % de l'été à l'automne et 22 à 50 % de plus
+/// l'hiver (`SOURCES.md`, section CAP 3.1) ; 300 jours est le milieu de ces
+/// fourchettes. Choix, à revoir pour les broutilles de forêt et le lichen.
+const FORAGE_PERSISTENCE_DAYS: f32 = 300.0;
 
 impl Rangeland {
     pub fn production(&mut self, worldgen: &cairn_worldgen::WorldGen, zone: (i64, i64)) -> f32 {
@@ -251,6 +261,104 @@ impl Rangeland {
             let mean = sum / (RANGE_ZONE_SAMPLES * RANGE_ZONE_SAMPLES) as f32;
             mean * G_M2_YR_TO_KG_KM2_DAY * RANGE_ZONE_KM2
         })
+    }
+
+    fn pasture(&mut self, worldgen: &cairn_worldgen::WorldGen, climate: &Climate, zone: (i64, i64)) -> Pasture {
+        *self.pastures.entry(zone).or_insert_with(|| {
+            let step = RANGE_ZONE_TILES / RANGE_ZONE_SAMPLES as f64;
+            let (mut g_m2_yr, mut temp, mut land) = (0.0f32, 0.0f64, 0u32);
+            for j in 0..RANGE_ZONE_SAMPLES {
+                for i in 0..RANGE_ZONE_SAMPLES {
+                    let x = (zone.0 as f64 * RANGE_ZONE_TILES + (i as f64 + 0.5) * step) as i64;
+                    let y = (zone.1 as f64 * RANGE_ZONE_TILES + (j as f64 + 0.5) * step) as i64;
+                    let biome = worldgen.biome(x, y);
+                    g_m2_yr += accessible_forage_g_m2_yr(biome);
+                    if accessible_forage_g_m2_yr(biome) > 0.0 {
+                        temp += worldgen.mean_temperature(x, y, worldgen.elevation(x, y));
+                        land += 1;
+                    }
+                }
+            }
+            let n = (RANGE_ZONE_SAMPLES * RANGE_ZONE_SAMPLES) as f32;
+            let y = ((zone.1 as f64 + 0.5) * RANGE_ZONE_TILES) as i64;
+            let mean_temp = if land > 0 { temp / f64::from(land) } else { 0.0 };
+            let growing = (0..cairn_core::DAYS_PER_YEAR)
+                .filter(|&d| crate::gathering::grows(climate, mean_temp, y, d))
+                .count()
+                .max(1) as f32;
+            // g/m²/an → kg/km²/an (×1 000), sur 4 km², répartis sur les jours qui poussent.
+            Pasture { per_growing_day: g_m2_yr / n * 1000.0 * RANGE_ZONE_KM2 / growing, mean_temp, y }
+        })
+    }
+
+    /// Le fourrage sur pied de `zone` au jour `today` : il croît les jours de
+    /// croissance et se perd tous les jours ; rejoué depuis la dernière visite
+    /// (au plus un an, au-delà le passé est oublié, comme pour la cueillette).
+    fn stock(
+        &mut self,
+        worldgen: &cairn_worldgen::WorldGen,
+        climate: &Climate,
+        zone: (i64, i64),
+        today: u64,
+    ) -> &mut (f32, u64) {
+        let p = self.pasture(worldgen, climate, zone);
+        let stock = self.stocks.entry(zone).or_insert((0.0, today.saturating_sub(361)));
+        if today.saturating_sub(stock.1) > 360 {
+            *stock = (0.0, today - 360);
+        }
+        let keep = (-1.0 / FORAGE_PERSISTENCE_DAYS).exp();
+        while stock.1 < today {
+            stock.1 += 1;
+            stock.0 *= keep;
+            if crate::gathering::grows(climate, p.mean_temp, p.y, stock.1) {
+                stock.0 += p.per_growing_day;
+            }
+        }
+        stock
+    }
+
+    /// Les bêtes de la maille `zone` broutent pendant un tick, pour une demande
+    /// de `demand_kg_day` (somme des rations, kg/jour). Elles prennent leur
+    /// ration tant qu'il reste du fourrage sur pied. Renvoie la part de leur
+    /// ration qu'elles trouvent (0–1).
+    pub fn graze(
+        &mut self,
+        worldgen: &cairn_worldgen::WorldGen,
+        climate: &Climate,
+        zone: (i64, i64),
+        time: SimTime,
+        demand_kg_day: f32,
+    ) -> f32 {
+        if demand_kg_day <= 0.0 {
+            return 1.0;
+        }
+        let stock = self.stock(worldgen, climate, zone, time.tick / cairn_core::TICKS_PER_DAY);
+        let want = demand_kg_day * DT_DAYS;
+        let eaten = want.min(stock.0);
+        stock.0 -= eaten;
+        eaten / want
+    }
+
+    /// Fourrage sur pied de `zone` aujourd'hui, en kg, **sans rien écrire**
+    /// (instruments).
+    pub fn peek_stock(
+        &mut self,
+        worldgen: &cairn_worldgen::WorldGen,
+        climate: &Climate,
+        zone: (i64, i64),
+        time: SimTime,
+    ) -> f32 {
+        let saved = self.stocks.get(&zone).copied();
+        let kg = self.stock(worldgen, climate, zone, time.tick / cairn_core::TICKS_PER_DAY).0;
+        match saved {
+            Some(s) => {
+                self.stocks.insert(zone, s);
+            }
+            None => {
+                self.stocks.remove(&zone);
+            }
+        }
+        kg
     }
 
     /// Mailles déjà évaluées (taille du cache).
@@ -675,44 +783,6 @@ pub type Fission = (f64, f64, f32, Species, f32);
 
 // — Équations pures (testables sans monde) —
 
-/// Satiété d'un troupeau : la part **de sa capacité** que la pâture trouvée
-/// porte encore, pondérée par l'adéquation du biome à son espèce.
-///
-/// — **Le rapport est local, et c'est tout l'enjeu.** `found / cap`, non
-///   `found / 255`. Normalisée sur la plage du `u8`, la satiété valait
-///   exactement `K(biome) / 255 × habitat` : une **constante** par couple
-///   (espèce, biome), que le broutage ne déplaçait jamais. Mesuré sur
-///   2 234 548 herd-ticks et quatre seeds — 0,824 en forêt tempérée (210/255),
-///   0,431 en prairie (110/255), 0,497 hors habitat — et **pas un seul déclin
-///   causé par le broutage**. Le signe de la croissance d'un troupeau était
-///   donc décidé par le biome où il était né, pour toute sa vie : 0 % de
-///   déclin en forêt (croissance illimitée), 100 % en prairie (extinction
-///   garantie), alors qu'une prairie pleine est une *bonne* pâture.
-///
-///   Avec le rapport local, pâture pleine ⇒ satiété = `habitat` ; pâture
-///   broutée de moitié ⇒ 0,5, soit exactement
-///   [`HERB_SATIATION_EQUILIBRIUM`]. Une capacité de charge émerge donc dans
-///   **tous** les biomes, et elle s'échelonne d'elle-même : à mi-hauteur, une
-///   pâture riche repousse plus vite qu'une pauvre (la logistique donne
-///   `r·K/4`), donc elle nourrit plus de têtes. Rien de cela n'est écrit.
-///
-///   Le facteur d'habitat continue de cantonner les espèces : à 0,35 (biome
-///   hostile), l'équilibre demanderait une pâture à 143 % de sa capacité —
-///   inatteignable, donc le troupeau y fond quoi qu'il arrive. C'est la niche,
-///   et elle survit au changement.
-///
-///   **Pas de borne haute ici.** Une averse peut porter la biomasse au-dessus
-///   de la capacité de temps sec (voir `ecology`), et il est juste qu'une
-///   pâture gorgée d'eau nourrisse mieux — surtout un troupeau hors de son
-///   habitat, qui y gagne sa seule marge. `herd_population_step` écrête déjà
-///   la satiété à 1 pour la natalité. —
-pub fn satiation_from_forage(found: u8, cap: u8, habitat: f32) -> f32 {
-    if cap == 0 {
-        return 0.0; // océan, glacier : rien n'y pousse, rien n'y paît
-    }
-    (f32::from(found) / f32::from(cap)) * habitat
-}
-
 /// Un tick de démographie herbivore : la natalité suit les **réserves**
 /// (fécondité liée à la condition, cerf de Rùm), la mortalité est de fond, et
 /// la faim tue sous `HERD_STARVING_CONDITION`. Renvoie le nouvel effectif.
@@ -999,6 +1069,12 @@ pub fn update_herds(
         *demand.entry(range_zone((pos.x, pos.y))).or_insert(0.0) +=
             herd.population * herd.species.daily_ration_kg();
     }
+    // Ce que chaque maille offre ce tick : les bêtes y broutent le fourrage sur
+    // pied (CAP 3.1b), une fois par maille, avant que chacune ne lise sa part.
+    let food: std::collections::BTreeMap<(i64, i64), f32> = demand
+        .iter()
+        .map(|(&zone, &d)| (zone, range.graze(world.worldgen(), climate, zone, time, d)))
+        .collect();
     #[cfg(feature = "profile")]
     {
         prof[3] += t0.elapsed().as_nanos() as u64;
@@ -1039,6 +1115,7 @@ pub fn update_herds(
         // Où il était avant de bouger : le bord de la faune se juge sur le pas
         // entier du tick (fuite, pâture ou migration — un seul par tick).
         let start = (pos.x, pos.y);
+        let here_tile = world.tile(start.0.floor() as i64, start.1.floor() as i64);
 
         // — Fuite : elle prime sur tout le reste, y compris la faim — mais
         //   seulement si la bête a encore du souffle.
@@ -1080,16 +1157,10 @@ pub fn update_herds(
             //   fondre puis dériver le troupeau, sans stampede.
             #[cfg(feature = "profile")]
             let t0 = std::time::Instant::now();
+            // L'herbe de la tuile ne dit plus que **où** brouter (CAP 3.1b) :
+            // ce que le troupeau mange vient du fourrage de sa maille.
             let (target, biomass) = best_pasture(world, &mut rng, (pos.x, pos.y), stats);
-            // La satiété = l'herbe trouvée, PONDÉRÉE par l'adéquation du biome
-            // à l'espèce (un cerf en plein désert broute mal) — c'est ce qui
-            // cantonne chaque espèce à sa niche, sans règle « ne va pas là ».
-            let here_tile = world.tile(pos.x.floor() as i64, pos.y.floor() as i64);
-            herd.satiation = satiation_from_forage(
-                biomass,
-                crate::ecology::effective_capacity(&here_tile),
-                herd.species.habitat_factor(here_tile.biome),
-            );
+            let _ = biomass;
             #[cfg(feature = "profile")]
             {
                 prof[1] += t0.elapsed().as_nanos() as u64;
@@ -1191,23 +1262,16 @@ pub fn update_herds(
         // troupeau a bougé (fuite, pâture ou migration confondues).
         stats.herd_step(id.0, (pos.x, pos.y), time.tick / cairn_core::TICKS_PER_DAY);
 
-        // — Le pays : la plus rare des deux satiétés commande, **que le
-        //   troupeau ait brouté ou fui**. Une tuile pleine ne nourrit pas un
-        //   troupeau dont la maille est surpeuplée — et fuir n'en dispense pas.
-        //   Appliqué d'abord à la seule pâture, ce plafond laissait un fuyard
-        //   chronique garder sa satiété de naissance (1,0) : mesuré sur seed
-        //   42, 57 à 90 % des têtes des amas les plus denses en fuite depuis
-        //   plus de 30 jours, satiété 0,95 contre 0,005 au calme — un million
-        //   de têtes à l'an 5. La maille se lit à la position de début de
-        //   tour, celle qui a servi à compter sa demande. —
+        // — Le pays : la part de ration que sa maille offre, **que le troupeau
+        //   ait brouté ou fui** (un fuyard chronique qui y échappait montait à
+        //   un million de têtes à l'an 5, chantier de dérive G), pondérée par
+        //   l'adéquation du biome à l'espèce — ce qui cantonne chaque espèce à
+        //   sa niche, sans règle « ne va pas là ». La maille se lit à la
+        //   position de début de tour, celle qui a servi à compter sa demande.
         #[cfg(feature = "profile")]
         let t0 = std::time::Instant::now();
-        let zone = range_zone(start);
-        let zone_food = zone_food(
-            range.production(world.worldgen(), zone),
-            demand.get(&zone).copied().unwrap_or(0.0),
-        );
-        herd.satiation = herd.satiation.min(zone_food).min(1.0);
+        let zone_share = food.get(&range_zone(start)).copied().unwrap_or(1.0);
+        herd.satiation = (zone_share * herd.species.habitat_factor(here_tile.biome)).min(1.0);
         #[cfg(feature = "profile")]
         {
             prof[3] += t0.elapsed().as_nanos() as u64;
@@ -2113,6 +2177,33 @@ mod tests {
         assert_eq!(trails[&2].len() as u64, TRAIL_HOURS, "les traces de plus de deux jours s'effacent");
     }
 
+    /// CAP 3.1b : dix fois trop de bouches pour une maille vident son
+    /// fourrage sur pied, puis ne trouvent que ce qui pousse au jour le jour —
+    /// au plus un cinquième de leur ration en moyenne, du 40e au 60e jour.
+    /// Remplace, au niveau de la maille, le critère de l'étape 4 que
+    /// `un_pays_surpeuple…` jugeait dans la simulation entière.
+    #[test]
+    fn dix_fois_trop_de_bouches_vident_la_maille() {
+        let mut sim = Sim::new(WorldSeed(42), 64);
+        let zone = taiga_zone(&sim);
+        let (wg, climate, range) = (sim.world.worldgen(), &sim.climate, &mut sim.rangeland);
+        let demand = 10.0 * range.production(wg, zone) * 365.0 / 360.0;
+        let (mut sum, mut n) = (0.0f32, 0u32);
+        for tick in 0..60 * 24u64 {
+            let f = range.graze(wg, climate, zone, SimTime { tick }, demand);
+            if tick >= 40 * 24 {
+                sum += f;
+                n += 1;
+            }
+        }
+        let moyenne = sum / n as f32;
+        assert!(
+            moyenne <= 0.2,
+            "dix fois trop de bouches trouvent encore {:.0} % de leur ration du 40e au 60e jour",
+            100.0 * moyenne
+        );
+    }
+
     /// CAP 3.1a, défaut trouvé par le stock saisonnier : les réserves doivent
     /// suivre ce que le troupeau mange **dans la journée**, pas la façon dont
     /// ses repas s'y répartissent. Deux troupeaux trouvent en moyenne 58 % de
@@ -2138,6 +2229,56 @@ mod tests {
     /// sans nourriture vident les réserves d'un renne (85 j en moyenne,
     /// Svalbard) : la mortalité du jour doit alors dépasser de loin la
     /// mortalité de fond — au moins trois fois.
+    /// Une maille de taïga à saisons près du point de référence (seed 42).
+    fn taiga_zone(sim: &Sim) -> (i64, i64) {
+                let origin = crate::scenario::reference_seed_point();
+        let z0 = range_zone((origin.0 as f64, origin.1 as f64));
+        let mut zone = None;
+        'search: for r in 0..300i64 {
+            for dx in -r..=r {
+                for dy in [-r, r] {
+                    let z = (z0.0 + dx, z0.1 + dy);
+                    let c = ((z.0 as f64 + 0.5) * RANGE_ZONE_TILES, (z.1 as f64 + 0.5) * RANGE_ZONE_TILES);
+                    if sim.world.worldgen().biome(c.0 as i64, c.1 as i64) == Biome::Taiga
+                        && sim.climate.season(c.1 as i64, SimTime { tick: 0 }).is_some()
+                    {
+                        zone = Some(z);
+                        break 'search;
+                    }
+                }
+            }
+        }
+        zone.expect("aucune maille de taïga à saisons")
+    }
+
+    /// CAP 3.1b : en pays à hiver (taïga : la forêt tempérée proche du point
+    /// de référence pousse toute l'année), la maille ne produit que les jours de
+    /// croissance ; l'hiver, les bêtes vivent sur ce qui reste sur pied, qui se
+    /// perd. À une demande égale à la production annuelle, la ration doit donc
+    /// manquer à la fin de l'hiver (moins de la moitié trouvée) et être entière
+    /// l'été.
+    #[test]
+    fn l_hiver_affame_un_pays_charge_a_sa_production_annuelle() {
+        let mut sim = Sim::new(WorldSeed(42), 64);
+        let zone = taiga_zone(&sim);
+        let (wg, climate, range) = (sim.world.worldgen(), &sim.climate, &mut sim.rangeland);
+        // Production annuelle (kg/j sur 365 j) ramenée à l'année du jeu (360 j).
+        let demand = range.production(wg, zone) * 365.0 / 360.0;
+        let (mut min_f, mut max_f) = (f32::MAX, 0.0f32);
+        for tick in 0..2 * 360 * 24u64 {
+            let f = range.graze(wg, climate, zone, SimTime { tick }, demand);
+            if tick >= 360 * 24 {
+                min_f = min_f.min(f);
+                max_f = max_f.max(f);
+            }
+        }
+        assert!(
+            min_f < 0.5 && max_f >= 1.0,
+            "à charge annuelle 1, la part de ration trouvée va de {min_f:.2} à {max_f:.2} sur l'année : \
+             aucun hiver ne pèse"
+        );
+    }
+
     #[test]
     fn la_faim_tue_une_fois_les_reserves_epuisees() {
         let (mut pop, mut c) = (100.0f32, 1.0f32);
@@ -2203,62 +2344,6 @@ mod tests {
             pop = herd_population_step(pop, 0.5);
         }
         assert!((pop - 40.0).abs() < 0.5, "doit rester ~40 têtes : {pop:.2}");
-    }
-
-    #[test]
-    fn une_pature_pleine_rassasie_dans_tous_les_biomes() {
-        // Un troupeau dans sa niche, sur une pâture **intacte**, doit pouvoir
-        // croître — donc dépasser la satiété d'équilibre. Avec une satiété
-        // normalisée sur la plage du u8, il ne le peut qu'au-dessus de K = 128 :
-        // une prairie pleine (K = 110) condamne l'aurochs à fondre sur de
-        // l'herbe vierge, et la steppe encore plus. Mesuré sur 2 234 548
-        // herd-ticks : 100 % de déclin en prairie, 0 % en forêt, et pas un seul
-        // déclin causé par le broutage. La satiété ne mesurait pas la pâture,
-        // elle mesurait le biome.
-        for (nom, k) in
-            [("steppe", 70u8), ("savane", 90), ("prairie", 110), ("forêt tempérée", 210)]
-        {
-            let s = satiation_from_forage(k, k, 1.0);
-            assert!(
-                s > HERB_SATIATION_EQUILIBRIUM,
-                "{nom} pleine (K = {k}) ne rassasie pas : satiété {s:.3} ≤ équilibre {:.3}",
-                HERB_SATIATION_EQUILIBRIUM
-            );
-        }
-    }
-
-    #[test]
-    fn une_pature_pleine_vaut_autant_partout() {
-        // L'invariant qui fait de la satiété une mesure de la **pâture** et non
-        // du biome : plein, c'est plein, que le biome porte 70 ou 210. Sans lui,
-        // le troupeau ne peut pas distinguer « j'ai tout mangé » de « je suis
-        // dans un pays pauvre » — une prairie pleine donnait 0,431 et une forêt
-        // broutée de moitié 0,412, deux situations écologiquement opposées.
-        let steppe = satiation_from_forage(70, 70, 1.0);
-        let foret = satiation_from_forage(210, 210, 1.0);
-        assert_eq!(
-            steppe, foret,
-            "pâture pleine : la satiété dépend encore du biome ({steppe:.3} vs {foret:.3})"
-        );
-    }
-
-    #[test]
-    fn la_satiete_suit_ce_qui_reste_a_brouter() {
-        // Et elle doit **descendre** quand la pâture baisse, sinon aucune
-        // capacité de charge ne peut émerger : c'est le mécanisme même du
-        // régulateur par le bas. À moitié broutée, on est pile à l'équilibre —
-        // c'est donc là que l'effectif se stabilise, dans n'importe quel biome.
-        let k = 210u8;
-        assert!(satiation_from_forage(k, k, 1.0) > HERB_SATIATION_EQUILIBRIUM);
-        assert!((satiation_from_forage(k / 2, k, 1.0) - HERB_SATIATION_EQUILIBRIUM).abs() < 0.01);
-        assert!(satiation_from_forage(k / 4, k, 1.0) < HERB_SATIATION_EQUILIBRIUM);
-    }
-
-    #[test]
-    fn un_sol_sterile_ne_nourrit_personne() {
-        // Capacité nulle (océan, glacier) : pas de division par zéro, et pas de
-        // satiété non plus.
-        assert_eq!(satiation_from_forage(0, 0, 1.0), 0.0);
     }
 
     #[test]

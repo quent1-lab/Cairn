@@ -209,7 +209,7 @@ impl Gathering {
 
 /// La végétation pousse-t-elle ce jour-là, pour une maille de température
 /// moyenne `mean_temp` ? Même règle que l'écologie (`Climate::grows`).
-fn grows(climate: &Climate, mean_temp: f64, y: i64, day: u64) -> bool {
+pub(crate) fn grows(climate: &Climate, mean_temp: f64, y: i64, day: u64) -> bool {
     let time = SimTime { tick: day * TICKS_PER_DAY + TICKS_PER_DAY / 2 };
     mean_temp + climate.seasonal_offset(y, time) > GROWTH_THRESHOLD_C
 }
