@@ -300,7 +300,24 @@ la densité réelle, et juger le fourrage accessible sur la densité d'un cerf s
 de le réguler reviendrait à lui faire porter la borne de la prédation (calibration déguisée).
 Ordre proposé : (1) faim qui tue et saison ; (2) taux vitaux par espèce ; (3) prédateurs qui
 persistent et régulent (réponse aux proies, dispersion au lieu de la mort) ; (4) fourrage
-accessible. **Question posée à l'utilisateur.**
+accessible. **Validé par l'utilisateur (2026-11-02).**
+
+## Bug : les meutes de la scène de référence posées deux fois (mode léger, 2026-11-02)
+
+`scenario::reference` (et `longue`, `contact`) appelait `populate`, qui pose 4 meutes à 4 km du
+foyer, puis `reference_packs`, qui en posait 4 autres aux mêmes points. Test rouge
+`scenario::tests::la_scene_de_reference_pose_quatre_meutes` (seed 42, tempéré : 6 meutes, 30
+prédateurs) ; correction : `reference_packs` supprimée. Témoin `4dd43d8` (`out/bin/main/`),
+variante `out/bin/meutes/`.
+
+Prédictions (écrites avant) — régime : `acceptation 1 135 42,7,1337,2024 1` et `longue` 1 an,
+jour 135, 4 seeds × 2 scènes :
+- prédateurs au départ divisés par 2 (30-40 → 15-20) ; écart à 90 jours < 30 %, à 1 an < 20 %,
+  sans sens constant (la famine retire l'excédent en 2-3 mois, demi-vie ~35 jours) ;
+- têtes de gibier à 1 an : écart < 15 % (la prédation pèse ≤ 1,3 %/an, témoin nature) ;
+- critères d'acceptation : mêmes verdicts sur les 8 runs.
+Réfuté si le gibier ou la population humaine s'écarte de plus de 15 % dans le même sens sur
+au moins 6 runs sur 8.
 
 ## Étape 3 — corriger règle par règle
 
