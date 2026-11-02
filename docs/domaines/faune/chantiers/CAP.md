@@ -526,6 +526,41 @@ l'année ; capacité annuelle = production ÷ ration) :
 - **Lecture** : le mécanisme (stock, hiver, faim) fait ce qu'il doit ; le niveau ne peut pas se
   juger avant les taux vitaux réels (3.2). Rien n'est réglé ici.
 
+## 3.2 — taux vitaux par espèce, naissances au printemps, jeunes de l'année (conception, 2026-11-02)
+
+3.1c (jeunes de l'année) rejoint 3.2 : une classe de jeunes n'a de sens qu'avec une saison des
+naissances, et les deux portent les taux de chaque espèce.
+
+Mécanismes (aucune densité visée ; chaque taux est une entrée physiologique, la densité en sort) :
+1. **Deux classes** par troupeau : adultes (yearlings compris) et jeunes de l'année. Prises,
+   fission et fusion se partagent à proportion des têtes.
+2. **Naissances à la reprise de la pousse** dans la maille du troupeau (premier jour de
+   croissance après un jour sans) — la mise bas suit le reverdissement (caribou, cerf), aucune
+   date écrite ; étalées sur 30 jours (renne : 80-90 % en 10 j, saison complète 4-5 semaines).
+   Nombre : adultes × fécondité de l'espèce × condition au reverdissement (Rùm : fécondité liée
+   au poids). Maille sans saison (toujours en pousse) : naissances continues au même total
+   annuel. Maille qui ne pousse jamais : aucune.
+3. **Les jeunes de l'an passé deviennent adultes** au reverdissement, juste avant les
+   naissances (en continu, 1/360 par jour, sans saison).
+4. **Mortalités** : de fond par classe et par espèce, plus la faim ; **les jeunes meurent de
+   faim les premiers** : sous 50 % de réserves pour eux, 20 % pour les adultes (choix : un
+   renne maigre tient ~45 j de moins sur 85, Svalbard).
+
+| espèce | mort. adulte /an | mort. de fond des jeunes /an | jeunes par adulte et par an (pleine condition) | sources (`../SOURCES.md`) |
+|---|---|---|---|---|
+| cerf | 0,03 | 0,10 | 0,45 | adulte Rùm 3 % ; 10 % des faons meurent en 2 semaines ; 0,55 de femelles × ~0,8 de gestation (choix : pourcentages de Rùm non trouvés) |
+| renne | 0,05 | 0,10 | 0,43 | adultes 4-6 % (peu de prédateurs) ; vêlage 79 % × 0,55 de femelles |
+| aurochs | 0,05 | 0,10 | 0,23 | survie adulte du bison 0,95 ; fécondité **déduite** du r max du bison (0,145-0,16 /an), faute de taux de gestation sourcé |
+| gazelle | 0,33 | 0,10 | 0,9 | mortalité adulte ~1/3 /an (source faible) ; 1 petit, jusqu'à 2 mises bas par an, 0,6 de femelles (choix) |
+
+Contrôle à la main (sans faim) : λ ≈ 1 + b·(1 − μj) − μa → cerf 1,37, renne 1,34, aurochs 1,16,
+gazelle 1,48 : r max de 0,15 à 0,4 /an, contre 3,6 aujourd'hui.
+
+Tests rouges prévus : (a) un troupeau de cerfs bien nourri croît au plus de 40 % par an
+(aujourd'hui ×36) ; (b) toutes les naissances d'une maille à saisons tombent dans les 30 jours
+qui suivent le reverdissement ; (c) à réserves de 35 %, les jeunes meurent de faim et pas les
+adultes.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de
