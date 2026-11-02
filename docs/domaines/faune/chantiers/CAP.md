@@ -668,6 +668,37 @@ Réfutée si une densité dépasse 2 fois la capacité, ou si le gibier s'étein
   sur 6 runs sur 8 (−4 à −23 %)** : le stock et le signal de saison par maille se calculent à
   chaque tick — coût à mesurer (voisin PERF), pas un changement de modèle.
 
+## Débat (2026-11-02, contre-lecture du jalon 3.1-3.2)
+
+1. La part d'entretien 0,585 découle de deux durées dont une non sourcée (120 j) ; elle fixe le
+   niveau des mailles sans hiver (1/m = 1,71) et pèse sur les autres — paramètre non sourcé le
+   plus lourd, devant la fécondité linéaire et τ = 300 j. → **Retenu** : sourceur lancé
+   (entretien ÷ ingestion volontaire, hypophagie d'hiver, vitesse d'engraissement) ; puis
+   sensibilité de `cap_demo` à m ± 0,1.
+2. « Les jeunes meurent en fin d'hiver » n'est pas démontré : cycle 1,00-1,10, réserves ~0,5 —
+   c'est peut-être la natalité écrasée qui borne. → **Retenu** : ventiler naissances et morts
+   (fond, faim) par classe dans `cap_demo` ; la phrase de lecture est suspendue.
+3. **Bug probable** : un troupeau qui passe dans une maille qui reverdit plus tard reçoit un
+   second reverdissement : ses jeunes de quelques jours deviennent adultes et une portée
+   complète écrase la première. → **Retenu** : test rouge, une portée par an.
+4. « Pousse toute l'année » est mal posé : la saison ne lit que la température ; la savane n'a
+   pas de saison sèche, qui borne dans le réel (gnou). Les cas à 1,71 sont ces mailles. →
+   **Retenu, question de modèle pour l'utilisateur** (l'eau comme saison maigre) ; compter la
+   part des mailles habitées « sans saison ».
+5. 9/12 « tenue » juge un transitoire ; deux des trois cas bas ont des prédateurs vivants ; le
+   carré ouvert laisse l'émigration fixer sa densité. → **Retenu** : verdict suspendu ; banc à
+   30 ans avec l'effectif du monde entier, à lancer détaché.
+6. Hors de sa niche, un troupeau retire du stock sa ration entière mais n'en profite qu'à 60 %
+   (le reste disparaît) ; 0,6 ≈ m, il se maintient de justesse. → **Retenu** : la demande d'un
+   troupeau hors niche doit être ce qu'il mange ; test à écrire.
+7. La baisse de débit (−4 à −23 %) attribuée au coût est déduite. → **Retenu** : mesure `profile`
+   contre `9802e30`, dans PERF.
+8. Cas limites : `day.wrapping_sub(1)` au jour 0 (sans effet au départ jour 135) ; le stock de
+   départ (un an rejoué sans broutage) surnourrit la première année. → **Retenu** : corrigé en
+   léger pour le jour 0 ; la première année se lit comme transitoire.
+- **Ordre** : pas 3.3 tout de suite ; d'abord le bug (3), la ventilation des causes (2), m
+  sourcé (1). → **Retenu.**
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de
