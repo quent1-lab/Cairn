@@ -265,6 +265,14 @@ prédateurs éteints, la toundra bloquée.
   réels sans saison ni faim mortelle ne sont bornés par rien sous K. → **Retenu comme
   proposition**, à trancher par l'utilisateur.
 
+**Décision de l'utilisateur (2026-11-02)** : ordre validé (faim qui tue et saison, puis taux
+vitaux, puis fourrage accessible) ; banc démographique réduit validé ; un banc avec humains après
+validation. Taux vitaux propres à chaque espèce : oui, « éviter de scripter dans tous les cas, le
+modèle doit être réaliste par rapport au réel ». Rappel de l'utilisateur : la question de base
+du chantier — **ce qui borne les ongulés dans le réel** — n'a pas encore de réponse sourcée ; les
+étapes 1-2 ont dit ce qui les borne **dans le modèle**. À sourcer avant de figer l'ordre
+(régulation par le bas ou par le haut selon la taille, l'hiver, la prédation).
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de
