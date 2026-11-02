@@ -319,6 +319,37 @@ jour 135, 4 seeds × 2 scènes :
 Réfuté si le gibier ou la population humaine s'écarte de plus de 15 % dans le même sens sur
 au moins 6 runs sur 8.
 
+## Étape 3.1 — la faim qui tue et la saison : proposition de conception (2026-11-02, à valider)
+
+Écart (étape 1, Vie 1-2 ; sources CAP) : la nourriture borne dans le réel **par la saison maigre**
+(production nulle l'hiver ou en saison sèche, l'animal vit sur ce qui reste sur pied et sur ses
+réserves) et **par la mort**, des jeunes d'abord ; dans le modèle, par une natalité qui suit une
+production annuelle moyenne, la mort restant fixe.
+
+Mécanismes proposés, tous lus dans le réel, aucune densité visée :
+1. **Fourrage sur pied par maille**, sur le patron exact du stock de cueillette (`gathering`,
+   D10) : `dS/dt = production(jour) − S/τ − broutage`, production les seuls jours de croissance
+   (même total annuel qu'aujourd'hui), perte de ce qui reste sur pied (τ à sourcer), avancé jour
+   par jour à la consultation. La satiété d'un troupeau devient ce qu'il trouve dans ce stock ÷
+   sa ration. Corollaire à trancher : la biomasse de la tuile ne servirait plus qu'à choisir où
+   brouter et au rendu (elle bloque aujourd'hui la toundra).
+2. **Réserves** : une condition corporelle par troupeau, qui se remplit quand il mange plus que
+   sa ration et se vide quand il mange moins (vitesse : perte de masse d'hiver réelle, à
+   sourcer) ; **la mortalité monte quand la condition s'épuise** ; la mortalité de fond devient
+   celle des adultes réels.
+3. **Naissances** : la fécondité dépend de la condition (gestation selon la condition à
+   l'automne, Rùm) — la forme saisonnière (mise bas au printemps) appartient à l'étape 3.2
+   (taux vitaux par espèce), mais les deux se mesurent ensemble sur le banc réduit.
+
+Question de vision ouverte : faut-il une **classe d'âge** (jeunes de l'année) dans le troupeau ?
+Dans le réel, la faim d'hiver tue d'abord les jeunes, et c'est ce qui régule (Rùm, gnou) ; un
+effectif sans âge ne peut que faire mourir « tout le monde un peu ». Coût : un nombre de plus par
+troupeau.
+
+Banc réduit (validé) : les fonctions de démographie restent pures dans `fauna.rs`, et le banc les
+appelle sans espace (une maille, un troupeau agrégé, des décennies en secondes) — le même code que
+la simulation, pas une copie.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de
