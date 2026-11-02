@@ -53,12 +53,24 @@ const HERB_BIRTH_PER_DAY: f32 = 0.020;
 /// il croît. Aucune capacité de charge n'est écrite en dur : elle émerge de
 /// ce que la pâture peut soutenir.
 const HERB_DEATH_PER_DAY: f32 = 0.010;
+/// Réserves d'un troupeau (CAP 3.1a) : jours de jeûne complet qui vident une
+/// condition pleine. Endurance au jeûne du renne de Svalbard, 85 ± 17 jours
+/// (48-137, Tyler ; `SOURCES.md`, section CAP 3.1).
+const HERD_RESERVE_DAYS: f32 = 85.0;
+/// Constante de temps du remplissage des réserves à ration entière : un été
+/// d'engraissement. Choix, non sourcé.
+const HERD_REFILL_DAYS: f32 = 60.0;
+/// Sous cette condition, les réserves ne suffisent plus et la faim tue. Choix :
+/// aucun seuil létal de graisse ou de masse n'a été trouvé.
+const HERD_STARVING_CONDITION: f32 = 0.2;
+/// Mortalité de faim, par jour, aux réserves nulles : un mois. Choix.
+const HERB_STARVE_DEATH_PER_DAY: f32 = 1.0 / 30.0;
 /// Biomasse broutée par tête et par tick, étalée sur la tuile et ses voisines.
 const GRAZE_PER_HEAD: f32 = 1.0;
-/// **Satiété d'équilibre** : en dessous le troupeau fond, au-dessus il croît.
-/// Ce n'est pas un réglage indépendant, c'est exactement le rapport
-/// mortalité/natalité — le nommer évite de le recalculer de tête dans les
-/// bancs, et de le lire comme un seuil réglable séparément.
+/// **Condition d'équilibre** : sous elle, hors faim, le troupeau fond ;
+/// au-dessus il croît. Ce n'est pas un réglage indépendant, c'est exactement
+/// le rapport mortalité/natalité. Jusqu'à CAP 3.1a, c'était la *satiété*
+/// d'équilibre : la natalité suivait le repas du jour.
 pub const HERB_SATIATION_EQUILIBRIUM: f32 = HERB_DEATH_PER_DAY / HERB_BIRTH_PER_DAY;
 
 // — Démographie des prédateurs —
@@ -195,16 +207,16 @@ pub fn range_zone(pos: (f64, f64)) -> (i64, i64) {
     )
 }
 
-/// Satiété que la maille peut offrir : **0,5 × production / demande**. Le
-/// facteur est la satiété d'équilibre, si bien que la natalité compense
-/// exactement la mortalité quand la demande égale la production — l'effectif
-/// d'équilibre est la capacité du pays, pas le double. Non bornée à 1 : c'est
-/// la satiété de pâture qui plafonne quand le pays est vide.
-pub fn zone_satiation(production_kg: f32, demand_kg: f32) -> f32 {
+/// Part de leur ration que la maille offre à ses bêtes : **production ÷
+/// demande**, non bornée (c'est l'appelant qui borne à 1). Jusqu'à CAP 3.1a,
+/// elle était multipliée par la satiété d'équilibre (0,5) pour que la natalité
+/// compense la mortalité à demande = production ; c'est désormais la condition
+/// des bêtes qui porte l'équilibre, et la nourriture dit ce qu'elles mangent.
+pub fn zone_food(production_kg: f32, demand_kg: f32) -> f32 {
     if demand_kg <= 0.0 {
         return f32::MAX;
     }
-    HERB_SATIATION_EQUILIBRIUM * production_kg / demand_kg
+    production_kg / demand_kg
 }
 
 /// Production de fourrage des mailles de pâturage, en kg/jour. Fonction pure
@@ -513,8 +525,13 @@ pub struct Herd {
     /// Ticks de souffle restants : tant qu'ils courent, la bête ne peut plus
     /// galoper (voir [`FLEE_COOLDOWN`]).
     pub flee_ticks: u16,
-    /// Satiété du dernier tick (0–1) : lue par la démo et les overlays.
+    /// Satiété du dernier tick (0–1) : la part de sa ration trouvée. Lue par
+    /// la démo et les overlays.
     pub satiation: f32,
+    /// Réserves corporelles (0–1, CAP 3.1a) : se vident quand il mange moins
+    /// que sa ration, se remplissent à ration entière. La natalité les suit,
+    /// et la faim tue quand elles s'épuisent.
+    pub condition: f32,
     /// L'espèce (cerf, aurochs…) : paramètre l'habitat et la vigilance.
     pub species: Species,
     /// Apprivoisement, dans [0, 1] (domestication, `crate::pastoral`) : monte
@@ -537,6 +554,7 @@ impl Herd {
             state: HerdState::Grazing,
             flee_ticks: 0,
             satiation: 1.0,
+            condition: 1.0,
             species,
             tameness: 0.0,
             anchor: None,
@@ -643,8 +661,8 @@ pub struct Kill {
 }
 
 /// Une scission de troupeau à faire naître (hors itération) : position `(x, y)`,
-/// effectif, et **espèce héritée de la mère**.
-pub type Fission = (f64, f64, f32, Species);
+/// effectif, **espèce et condition héritées de la mère**.
+pub type Fission = (f64, f64, f32, Species, f32);
 
 // — Équations pures (testables sans monde) —
 
@@ -686,11 +704,35 @@ pub fn satiation_from_forage(found: u8, cap: u8, habitat: f32) -> f32 {
     (f32::from(found) / f32::from(cap)) * habitat
 }
 
-/// Un tick de démographie herbivore : la natalité suit la satiété, la
-/// mortalité est de fond. Renvoie le nouvel effectif.
-pub fn herd_population_step(population: f32, satiation: f32) -> f32 {
-    let rate = HERB_BIRTH_PER_DAY * satiation.clamp(0.0, 1.0) - HERB_DEATH_PER_DAY;
+/// Un tick de démographie herbivore : la natalité suit les **réserves**
+/// (fécondité liée à la condition, cerf de Rùm), la mortalité est de fond, et
+/// la faim tue sous `HERD_STARVING_CONDITION`. Renvoie le nouvel effectif.
+pub fn herd_population_step(population: f32, condition: f32) -> f32 {
+    let c = condition.clamp(0.0, 1.0);
+    let starving = HERB_STARVE_DEATH_PER_DAY * (1.0 - c / HERD_STARVING_CONDITION).max(0.0);
+    let rate = HERB_BIRTH_PER_DAY * c - HERB_DEATH_PER_DAY - starving;
     (population + population * rate * DT_DAYS).max(0.0)
+}
+
+/// Un tick de réserves : elles se vident au rythme du manque (`food` < 1) et se
+/// remplissent à ration entière. `food` est la part de la ration trouvée.
+pub fn herd_condition_step(condition: f32, food: f32) -> f32 {
+    let f = food.clamp(0.0, 1.0);
+    let rate = if f < 1.0 {
+        (f - 1.0) / HERD_RESERVE_DAYS
+    } else {
+        (1.0 - condition) / HERD_REFILL_DAYS
+    };
+    (condition + rate * DT_DAYS).clamp(0.0, 1.0)
+}
+
+/// Un tick de vie d'un troupeau, tout compris : `food` est la part de sa
+/// ration qu'il trouve (0–1), `condition` ses réserves (0–1). Renvoie
+/// (effectif, condition). Le point d'entrée commun de `update_herds` et du
+/// banc réduit `cap_demo`.
+pub fn herd_tick(population: f32, condition: f32, food: f32) -> (f32, f32) {
+    let condition = herd_condition_step(condition, food);
+    (herd_population_step(population, condition), condition)
 }
 
 /// Un tick de démographie de meute : elle croît de ses prises, décline sans.
@@ -1150,20 +1192,19 @@ pub fn update_herds(
         #[cfg(feature = "profile")]
         let t0 = std::time::Instant::now();
         let zone = range_zone(start);
-        let zone_sat = zone_satiation(
+        let zone_food = zone_food(
             range.production(world.worldgen(), zone),
             demand.get(&zone).copied().unwrap_or(0.0),
         );
-        herd.satiation = herd.satiation.min(zone_sat);
+        herd.satiation = herd.satiation.min(zone_food).min(1.0);
         #[cfg(feature = "profile")]
         {
             prof[3] += t0.elapsed().as_nanos() as u64;
         }
 
-        // — Démographie : la satiété commande. `steps` fois quand le troupeau
-        //   est simulé grossièrement — on rattrape le temps sauté, on ne le
-        //   perd pas.
-        herd.population = herd_population_step(herd.population, herd.satiation);
+        // — Démographie : la nourriture remplit ou vide les réserves, et les
+        //   réserves commandent (CAP 3.1a). —
+        (herd.population, herd.condition) = herd_tick(herd.population, herd.condition, herd.satiation);
         if herd.population < HERD_MIN {
             doomed.push(entity);
         } else if herd.population > HERD_FISSION {
@@ -1179,6 +1220,7 @@ pub fn update_herds(
                 pos.y + angle.sin() * d,
                 herd.population,
                 herd.species,
+                herd.condition,
             ));
         }
     }
@@ -2058,6 +2100,54 @@ mod tests {
             lay_trails(&fauna, &mut trails, h);
         }
         assert_eq!(trails[&2].len() as u64, TRAIL_HOURS, "les traces de plus de deux jours s'effacent");
+    }
+
+    /// CAP 3.1a : la faim tue quand les réserves sont épuisées. Cent jours
+    /// sans nourriture vident les réserves d'un renne (85 j en moyenne,
+    /// Svalbard) : la mortalité du jour doit alors dépasser de loin la
+    /// mortalité de fond — au moins trois fois.
+    #[test]
+    fn la_faim_tue_une_fois_les_reserves_epuisees() {
+        let (mut pop, mut c) = (100.0f32, 1.0f32);
+        let mut veille = pop;
+        for day in 0..100 {
+            veille = pop;
+            for _ in 0..24 {
+                (pop, c) = herd_tick(pop, c, 0.0);
+            }
+            let _ = day;
+        }
+        let taux = (veille - pop) / veille;
+        assert!(
+            taux >= 3.0 * HERB_DEATH_PER_DAY,
+            "au 100e jour de famine, {:.2} % des bêtes meurent par jour (fond : {:.2} %) : la faim ne tue pas",
+            100.0 * taux,
+            100.0 * HERB_DEATH_PER_DAY
+        );
+    }
+
+    /// CAP 3.1a : les naissances suivent les réserves, pas le repas du jour.
+    /// Un troupeau gras qui jeûne dix jours a encore presque toutes ses
+    /// réserves : il doit encore croître, à au moins la moitié de sa
+    /// croissance repue.
+    #[test]
+    fn dix_jours_de_jeune_n_arretent_pas_un_troupeau_gras() {
+        let (mut pop, mut c) = (100.0f32, 1.0f32);
+        let mut veille = pop;
+        for _ in 0..10 {
+            veille = pop;
+            for _ in 0..24 {
+                (pop, c) = herd_tick(pop, c, 0.0);
+            }
+        }
+        let croissance = (pop - veille) / veille;
+        let repue = HERB_BIRTH_PER_DAY - HERB_DEATH_PER_DAY;
+        assert!(
+            croissance >= 0.5 * repue,
+            "au 10e jour de jeûne, croissance {:.3} %/j contre {:.3} %/j repu : le troupeau vit au jour le jour",
+            100.0 * croissance,
+            100.0 * repue
+        );
     }
 
     #[test]

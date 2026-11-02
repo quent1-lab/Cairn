@@ -376,6 +376,71 @@ Banc réduit (validé) : les fonctions de démographie restent pures dans `fauna
 appelle sans espace (une maille, un troupeau agrégé, des décennies en secondes) — le même code que
 la simulation, pas une copie.
 
+**Décision de l'utilisateur (2026-11-02)** : oui aux deux — les troupeaux mangent dans un stock
+de fourrage par maille (la tuile ne sert plus qu'à choisir où brouter et au rendu) ; une classe
+d'âge (jeunes de l'année) dans le troupeau.
+
+Découpage, un mécanisme à la fois : **3.1a** réserves et faim qui tue (offre inchangée) ;
+**3.1b** stock saisonnier par maille à la place de la production moyenne et de la tuile ;
+**3.1c** jeunes de l'année. Puis 3.2 (taux vitaux par espèce, mise bas au printemps).
+
+### 3.1a — réserves et faim qui tue
+
+Changement : une **condition** (réserves, 0-1) par troupeau. Elle se vide au rythme du manque,
+`(nourriture − 1) / 85 j` (endurance au jeûne du renne de Svalbard, 85 ± 17 j), et se remplit
+quand la ration est entière, `(1 − c) / 60 j` (choix : l'engraissement d'un été). La natalité
+suit la condition (`0,020 × c` ; Rùm : fécondité liée au poids — forme linéaire, choix) ; la
+mortalité de fond reste 0,010 /j et s'y ajoute la **mort de faim**, `1/30 j × (1 − c/0,2)` sous
+20 % de réserves (choix, aucun seuil létal sourcé). La nourriture devient la **part de la ration
+trouvée** : min(production ÷ demande de la maille, satiété de la tuile), bornée à 1 ; le facteur
+0,5 de `zone_satiation` disparaît (la condition d'équilibre, 0,5, est désormais celle des
+réserves). Taux de 3.2 inchangés ici.
+
+Tests rouges sur l'ancien `herd_tick` (vus échouer) : `la_faim_tue_une_fois_les_reserves_epuisees`
+(1,00 %/j au 100e jour de famine, attendu ≥ 3 %) ; `dix_jours_de_jeune_n_arretent_pas_un_troupeau_gras`
+(−0,995 %/j, attendu ≥ +0,5 %/j).
+
+Témoin `cap_demo` (offre annuelle constante, sans prédateur ni saison ; déterministe, sans
+RNG, donc sans seeds) : densité plate à la capacité dès l'an 10 dans les 6 biomes (forêt 54,8,
+prairie 41,1, savane 739,7…).
+
+Prédictions (`cap_demo`, 50 ans) :
+- **plus de plateau** : un cycle de dépassement puis d'effondrement, la condition réagissant
+  avec ~3 mois de retard ; après l'an 10, max ÷ min ≥ 1,5 dans les 6 biomes ;
+- max au-dessus de la capacité de 20 à 100 % ; médiane à ±30 % de la capacité ;
+- la même forme dans tous les biomes (la capacité ne fait que changer d'échelle).
+Réfutée si max ÷ min < 1,1 après l'an 10 (le retard ne suffit pas à osciller) ou si la
+population s'éteint. Risque connu : pas de saison ici, donc pas de goulot d'hiver ; c'est 3.1b.
+Voisin à surveiller : hors de son habitat (facteur 0,6), un troupeau ne trouve plus que 60 %
+de sa ration et meurt de faim en ~4 mois, là où il se maintenait parfois.
+
+Mesure (`cap_demo` 50 ans, après le changement) — densité min / méd / max de l'année :
+
+| biome (capacité /km²) | an 1 | an 10 | an 50 |
+|---|---|---|---|
+| forêt (54,8) | 11,1 / 64,4 / 113,8 | 54,6 / 56,9 / 58,6 | 54,8 / 55,3 / 55,4 |
+| taïga (36,5) | 11,1 / 42,8 / 75,9 | 36,4 / 38,1 / 39,1 | 36,5 / 36,8 / 36,9 |
+| toundra (25,6) | 11,1 / 30,0 / 53,1 | 25,5 / 26,9 / 27,4 | 25,6 / 25,8 / 25,9 |
+| prairie (41,1) | 11,1 / 48,2 / 85,4 | 41,0 / 42,7 / 44,0 | 41,1 / 41,4 / 41,5 |
+| steppe (274) | 11,1 / 67,2 / 394 | 273 / 288 / 295 | 274 / 277 / 278 |
+| savane (740) | 11,1 / 67,2 / 402 | 737 / 774 / 801 | 740 / 746 / 749 |
+
+- **Cycle entretenu : réfuté.** Dépassement la première année (×1,4 à ×2,1 la capacité), puis
+  oscillation **amortie** : max ÷ min = 1,05-1,09 à l'an 10, ~1,01 à l'an 50. Sans forçage, le
+  troupeau se pose à demande ≈ production, condition ≈ 0,5 (naissances = morts), ration à peine
+  entamée : le retard des réserves (85 j) ne suffit pas à entretenir un cycle contre une
+  croissance qui s'annule d'elle-même. Un cycle demandera un forçage — la saison (3.1b).
+- **Médiane à ±30 % de la capacité : tenue** (+0 à +1 % à l'an 50).
+- **Même forme partout : tenue.**
+- Tests : 299 verts ; rouges connus inchangés (surchasse, curieux). Deux tests de l'étape 4
+  supposaient une natalité instantanée (horizon 20-30 j) : `un_troupeau_qui_fuit_n_echappe_pas…`
+  passe à 150 jours (vert) ; `un_pays_surpeuple…` juge désormais la **condition** à 20 jours
+  (≤ 0,894 ; vue échouer à 0,999 en neutralisant le frein de la maille) — sur 150 jours, ses
+  gazelles passent de 29 600 à 45 778 parce qu'elles s'étalent sur leur domaine vital, une dizaine
+  de mailles : le test ne surpeuplait qu'une maille.
+- Conséquence : sans saison, 3.1a ne change pas le niveau ; elle change la réponse au manque
+  (la faim tue, les naissances suivent les réserves). Le niveau et l'hiver se jouent en 3.1b.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de

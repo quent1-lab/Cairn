@@ -34,13 +34,14 @@ fn main() {
         let ration = species.daily_ration_kg();
         let capacity = production / ration / ZONE_KM2;
         let mut n = start * ZONE_KM2;
+        let mut c = 1.0f32;
         let mut out = String::new();
         for year in 1..=years {
             let mut d: Vec<f32> = Vec::with_capacity(360);
             for _day in 0..360 {
                 for _ in 0..TICKS_PER_DAY {
-                    let sat = fauna::zone_satiation(production, n * ration);
-                    n = fauna::herd_population_step(n, sat);
+                    let food = fauna::zone_food(production, n * ration).min(1.0);
+                    (n, c) = fauna::herd_tick(n, c, food);
                 }
                 d.push(n / ZONE_KM2);
             }

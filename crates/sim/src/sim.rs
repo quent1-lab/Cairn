@@ -700,9 +700,24 @@ impl Sim {
         population: f32,
         species: fauna::Species,
     ) -> FaunaId {
+        self.spawn_herd_condition(x, y, population, species, 1.0)
+    }
+
+    /// Fait naître un troupeau avec ses **réserves** (CAP 3.1a) : la fille d'une
+    /// fission hérite de la condition de sa mère.
+    fn spawn_herd_condition(
+        &mut self,
+        x: f64,
+        y: f64,
+        population: f32,
+        species: fauna::Species,
+        condition: f32,
+    ) -> FaunaId {
         let id = FaunaId(self.next_fauna_id);
         self.next_fauna_id += 1;
-        self.fauna.spawn((id, Position { x, y }, Herd::new(population, species)));
+        let mut herd = Herd::new(population, species);
+        herd.condition = condition;
+        self.fauna.spawn((id, Position { x, y }, herd));
         self.herd_births.insert(id.0, (self.time.tick, 0));
         id
     }
@@ -1564,8 +1579,8 @@ impl Sim {
         for entity in dead_herds {
             let _ = self.fauna.despawn(entity);
         }
-        for (x, y, population, species) in fissions {
-            let id = self.spawn_herd_species(x, y, population, species);
+        for (x, y, population, species, condition) in fissions {
+            let id = self.spawn_herd_condition(x, y, population, species, condition);
             self.herd_births.insert(id.0, (time.tick, 2));
         }
         // Les troupeaux laissent leur piste (CHA-2).
@@ -1586,7 +1601,14 @@ impl Sim {
             let plan_input: Vec<fauna::MergeView> = views.iter().map(|(_, v)| *v).collect();
             for (absorber, absorbed) in fauna::merge_plan(&plan_input) {
                 let gained = views[absorbed].1.2;
+                let gained_condition =
+                    self.fauna.get::<&Herd>(views[absorbed].0).map_or(1.0, |h| h.condition);
                 if let Ok(mut h) = self.fauna.get::<&mut Herd>(views[absorber].0) {
+                    // Les réserves se mêlent à proportion des têtes (CAP 3.1a).
+                    let total = h.population + gained;
+                    if total > 0.0 {
+                        h.condition = (h.condition * h.population + gained_condition * gained) / total;
+                    }
                     h.population += gained;
                 }
                 let _ = self.fauna.despawn(views[absorbed].0);
@@ -2453,6 +2475,12 @@ mod tests {
     /// production mesurée de la maille), sans prédateur ni humain. Sans
     /// densité-dépendance, M1-faune a mesuré que la pâture ne freine à aucune
     /// densité : l'effectif monte au plafond de 0,010/j. Ici, il doit baisser.
+    /// Depuis CAP 3.1a, les naissances suivent les **réserves**, qui tiennent
+    /// ~85 jours de jeûne : en 20 jours, le frein se lit dans la condition, pas
+    /// encore dans l'effectif. Sur 150 jours, l'effectif ne baisse pas non plus
+    /// dans ce test (mesuré : 29 600 → 45 778 gazelles) — les troupeaux
+    /// s'étalent sur leur domaine vital (~1,8 km de rayon), qui couvre une
+    /// dizaine de mailles : le pays n'est plus surpeuplé.
     #[test]
     fn un_pays_surpeuple_ne_fait_pas_croitre_ses_troupeaux() {
         let (mut sim, home) = scenario_setup(11, 0, 0);
@@ -2480,10 +2508,21 @@ mod tests {
         for _ in 0..20 * TICKS_PER_DAY {
             sim.step();
         }
-        let after = heads(&sim);
+        // Réserves moyennes (pondérées par les têtes) : à un dixième de ration,
+        // elles perdent 0,9/85 par jour ; on exige au moins la moitié de cette
+        // perte sur 20 jours.
+        let condition = |sim: &Sim| -> f32 {
+            let (mut c, mut n) = (0.0, 0.0);
+            for (_, h) in sim.fauna.query::<&Herd>().iter() {
+                c += h.condition * h.population;
+                n += h.population;
+            }
+            c / n.max(1e-6)
+        };
+        let c = condition(&sim);
         assert!(
-            after < before,
-            "{before:.0} {species:?} pour une maille qui en nourrit {:.0} ont crû jusqu'à {after:.0} \
+            c <= 1.0 - 0.5 * 20.0 * 0.9 / 85.0,
+            "{before:.0} {species:?} pour une maille qui en nourrit {:.0} gardent {c:.3} de réserves \
              en 20 jours : rien ne freine la natalité quand le pays est surpeuplé",
             production / species.daily_ration_kg()
         );
@@ -2944,7 +2983,10 @@ mod tests {
     /// menace posée à chaque tick sur chaque troupeau : ils fuient sans cesse.
     /// Mesuré sur `derive` (seed 42) : 57 à 90 % des têtes des amas les plus
     /// denses fuyaient depuis plus de 30 jours, satiété 0,95 contre 0,005 au
-    /// calme — un million de têtes à l'an 5. Ici, l'effectif doit baisser.
+    /// calme — un million de têtes à l'an 5. Ici, l'effectif doit baisser en
+    /// 150 jours depuis CAP 3.1a (les réserves tiennent ~85 jours de jeûne ;
+    /// la menace perpétuelle les garde sur place, contrairement au pays
+    /// surpeuplé où ils s'étalent).
     #[test]
     fn un_troupeau_qui_fuit_n_echappe_pas_au_frein_de_sa_maille() {
         let (mut sim, home) = scenario_setup(11, 0, 0);
@@ -2969,7 +3011,7 @@ mod tests {
         let heads = |sim: &Sim| -> f32 { sim.fauna.query::<&Herd>().iter().map(|(_, h)| h.population).sum() };
         let before = heads(&sim);
         let seed = sim.world.seed();
-        for _ in 0..30 * TICKS_PER_DAY {
+        for _ in 0..150 * TICKS_PER_DAY {
             // Une menace sur chaque troupeau, à chaque tick : ils fuient sans fin.
             let threats: Vec<(f64, f64)> =
                 sim.fauna.query::<(&Herd, &Position)>().iter().map(|(_, (_, p))| (p.x, p.y)).collect();
@@ -2991,7 +3033,7 @@ mod tests {
         assert!(
             after < before,
             "{before:.0} têtes en fuite perpétuelle dans une maille qui en nourrit {:.0} \\
-             ont crû jusqu'à {after:.0} en 30 jours : la fuite fait échapper au frein de la maille",
+             ont crû jusqu'à {after:.0} en 150 jours : la fuite fait échapper au frein de la maille",
             production / species.daily_ration_kg()
         );
     }
