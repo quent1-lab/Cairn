@@ -699,6 +699,19 @@ Réfutée si une densité dépasse 2 fois la capacité, ou si le gibier s'étein
 - **Ordre** : pas 3.3 tout de suite ; d'abord le bug (3), la ventilation des causes (2), m
   sourcé (1). → **Retenu.**
 
+### Suites de la contre-lecture (2026-11-02)
+
+- **Point 3 corrigé** : test rouge `un_second_reverdissement_dans_l_annee_ne_fait_pas_une_seconde_portee`
+  (renne reverdi aux jours 0 et 20 : 172,8 têtes au bout d'un an contre 134,2) ; garde d'une
+  portée par an (`BIRTH_INTERVAL_DAYS` = 300 j, choix ; gestation du cerf ~8 mois), héritée par
+  la fille d'une fission, la plus récente gardée à la fusion.
+- **Point 1, m sourcé indirectement** : cerf élaphe, entretien 567 kJ EM/kg^0,75/j contre
+  ingestion volontaire d'été 89 g MS/kg^0,75/j ; à 9-11 MJ EM par kg MS de fourrage (hypothèse,
+  non sourcée), m = 0,58-0,71 — la valeur retenue (0,585) est au bas de cette fourchette. Les
+  120 jours de remplissage s'accordent avec le renne (+11-12 kg du printemps à mi-septembre) ;
+  l'hiver, l'ingestion volontaire baisse de 34-37 % (cerf, renne) — l'**hypophagie d'hiver**,
+  absente du modèle (ration constante), serait un mécanisme de plus. Sensibilité à m à mesurer.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de

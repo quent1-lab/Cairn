@@ -66,3 +66,12 @@ par (moi, sous-agent `sourceur`) · lu en entier ou de seconde main.
 - Bison, Yellowstone 2000-2019 : accroissement potentiel 11 %/an sans prélèvement ; survie des femelles adultes 0,92 (0,87-0,95) ; veaux par vache 0,44 (0,47 sur 5 ans) · Geremia, Hobbs (extrait de recherche, PDF illisible)
 - Bison, Wind Cave : survie des femelles 0,94 ± 0,04, des mâles 0,80 ± 0,13 (extrait, page bloquée)
 - Gazelle de Thomson : **aucun chiffre primaire** (mortalité adulte, survie des faons, fécondité, r max) ; Borner et al. 1987 (Oecologia 73:32) et FitzGibbon 1990 inaccessibles. Saïga : effondrement de la reproduction sous 2,5 % de mâles adultes (Milner-Gulland 2003, Nature 422:135, extrait) ; fécondité chiffrée non obtenue.
+
+## Entretien, ingestion volontaire, engraissement (CAP 3.2, contre-lecture, 2026-11-02, `sourceur`, toutes de seconde main)
+- Cerf élaphe, mâles captifs : ingestion volontaire 89 g MS/kg PV^0,75/j l'été, 59 l'hiver (−34 %) · [Animal Science](https://core-cms.cambridgecore.org/core/journals/animal-science/article/effect-of-diet-energy-density-and-season-on-voluntary-drymatter-and-energy-intake-in-male-red-deer/6767771C0D36E6D58D42F3A621241C7B) (résumé) ; entretien 567 kJ EM/kg PV^0,75/j (étude séparée, même espèce)
+- Cerf élaphe, biches captives (Vienne, 48° N, 16 biches, 22 mois) : apport d'énergie d'hiver plus de deux fois inférieur au pic d'été · Turbill et al. · [PMC4525327](https://pmc.ncbi.nlm.nih.gov/articles/PMC4525327)
+- Cerf de Virginie : entretien net 106 ± 11 kcal/kg^0,75/j (hiver 97, été 125) ; EM d'entretien 148-162 · Holter et al. 1977, J. Anim. Sci. 45:365
+- Renne : ingestion 3,2 kg/biche/j en novembre, 2,0 en mars (−37,5 %) ; biches +11-12 kg du printemps à mi-septembre · Heiskari & Nieminen 1990, [Rangifer](https://septentrio.uit.no/index.php/rangifer/article/view/856) (PDF scanné, non lu)
+- Renne, faons : +0,36-0,41 kg/j du 4 juin au 8 juillet · Seward (Alaska) 1984-1999, n = 9 749 · [Rangifer](https://septentrio.uit.no/index.php/rangifer/article/view/1517)
+- Cerf de Virginie : −22 % de masse de février à mai, +45 % de mai à octobre · DelGiudice et al. 1992, Minnesota · [USGS](https://pubs.usgs.gov/publication/5222896)
+- Non trouvé : rapport entretien ÷ ingestion volontaire dans des unités communes ; ingestion du bison.
