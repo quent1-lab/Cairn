@@ -231,21 +231,6 @@ pub fn reference_home(sim: &mut Sim, cold: bool, around: (i64, i64)) -> (i64, i6
     }
 }
 
-/// Les quatre meutes de la scène de référence, à 4 km du foyer aux quatre
-/// points cardinaux (à peu près), là où le sol porte.
-pub fn reference_packs(sim: &mut Sim, home: (i64, i64)) {
-    for i in 0..4i64 {
-        let angle = i as f64 * 1.57;
-        let (x, y) = (
-            home.0 + (angle.cos() * km_to_tiles(4.0)) as i64,
-            home.1 + (angle.sin() * km_to_tiles(4.0)) as i64,
-        );
-        if sim.world.tile(x, y).is_walkable() {
-            sim.spawn_pack(x as f64, y as f64, fauna::PACK_START);
-        }
-    }
-}
-
 /// **La scène de référence** : celle du banc d'acceptation, que les autres
 /// bancs et le serveur reprennent pour que ce qu'on regarde soit ce qu'on a
 /// mesuré. Une seule définition : la changer ici la change partout.
@@ -255,6 +240,27 @@ pub fn reference(seed: u64, cold: bool, start_day: u64) -> (Sim, (i64, i64), usi
     start_on_day(&mut sim, start_day);
     let home = reference_home(&mut sim, cold, reference_seed_point());
     let placed = populate(&mut sim, home, reference_agents(cold), 2);
-    reference_packs(&mut sim, home);
     (sim, home, placed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fauna::Pack;
+
+    /// La scène de référence pose **quatre** meutes de `PACK_START` (CAP,
+    /// 2026-11-02) : `populate` les posait déjà, et `reference_packs` en
+    /// rajoutait quatre aux mêmes points — 40 prédateurs pour un territoire
+    /// qui en porte une dizaine.
+    #[test]
+    fn la_scene_de_reference_pose_quatre_meutes() {
+        let (sim, _, _) = reference(42, false, 135);
+        let packs: Vec<f32> = sim.fauna.query::<&Pack>().iter().map(|(_, p)| p.population).collect();
+        let predators: f32 = packs.iter().sum();
+        assert!(
+            packs.len() <= 4 && predators <= 4.0 * fauna::PACK_START,
+            "{} meutes, {predators} prédateurs au départ : les meutes sont posées deux fois",
+            packs.len()
+        );
+    }
 }

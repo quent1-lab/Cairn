@@ -53,7 +53,6 @@ fn main() {
     let second = near_home(&mut sim, home, km);
     for h in [home, second] {
         scenario::populate(&mut sim, h, agents, 2);
-        scenario::reference_packs(&mut sim, h);
     }
     let d_km = tiles_to_km(((home.0 - second.0) as f64).hypot((home.1 - second.1) as f64));
 

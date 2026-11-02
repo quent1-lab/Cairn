@@ -80,7 +80,6 @@ fn main() {
         for (_, id) in sim.agents.query::<&AgentId>().iter() {
             origin.entry(id.0).or_insert(k as u8);
         }
-        scenario::reference_packs(&mut sim, home);
     }
     if homes.len() == 2 {
         let d = ((homes[0].0 - homes[1].0) as f64).hypot((homes[0].1 - homes[1].1) as f64);
