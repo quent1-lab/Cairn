@@ -550,11 +550,13 @@ Mécanismes (aucune densité visée ; chaque taux est une entrée physiologique,
 |---|---|---|---|---|
 | cerf | 0,03 | 0,10 | 0,45 | adulte Rùm 3 % ; 10 % des faons meurent en 2 semaines ; 0,55 de femelles × ~0,8 de gestation (choix : pourcentages de Rùm non trouvés) |
 | renne | 0,05 | 0,10 | 0,43 | adultes 4-6 % (peu de prédateurs) ; vêlage 79 % × 0,55 de femelles |
-| aurochs | 0,05 | 0,10 | 0,23 | survie adulte du bison 0,95 ; fécondité **déduite** du r max du bison (0,145-0,16 /an), faute de taux de gestation sourcé |
-| gazelle | 0,33 | 0,10 | 0,9 | mortalité adulte ~1/3 /an (source faible) ; 1 petit, jusqu'à 2 mises bas par an, 0,6 de femelles (choix) |
+| aurochs | 0,05 | 0,10 | 0,23 | survie adulte du bison 0,92-0,95 ; veaux par vache 0,44-0,47 (Yellowstone) × ~0,5 de femelles (choix) ; gestation des adultes 57-74 % (Fuller, lu en entier ; USGS) |
+| gazelle | 0,33 | 0,10 | 0,9 | **sources faibles, aucun chiffre primaire trouvé** (deux recherches) : mortalité adulte ~1/3 /an (vulgarisation), 1 petit, jusqu'à 2 mises bas par an, 0,6 de femelles (choix) — décision de l'utilisateur : retenues faute de mieux |
 
 Contrôle à la main (sans faim) : λ ≈ 1 + b·(1 − μj) − μa → cerf 1,37, renne 1,34, aurochs 1,16,
 gazelle 1,48 : r max de 0,15 à 0,4 /an, contre 3,6 aujourd'hui.
+
+Fécondité de l'aurochs : la seconde recherche (gestation du bison) donne 0,44-0,47 veau par vache, soit ~0,23 par adulte, la valeur qu'aurait donnée le r max : retenue sur la gestation, plus sur le r max.
 
 Tests rouges prévus : (a) un troupeau de cerfs bien nourri croît au plus de 40 % par an
 (aujourd'hui ×36) ; (b) toutes les naissances d'une maille à saisons tombent dans les 30 jours

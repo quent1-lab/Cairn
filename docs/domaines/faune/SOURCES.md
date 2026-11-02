@@ -58,3 +58,11 @@ par (moi, sous-agent `sourceur`) · lu en entier ou de seconde main.
 - Renne, Yakoutie 1950-2003 : faons 17-25 % de la population ; perte des faons l'été et l'automne ~34,5 % (6-100) · [Rangifer](https://septentrio.uit.no/index.php/rangifer/article/download/1284/1223/4904)
 - Renne/caribou : mortalité adulte ~4-6 %/an avec peu de prédateurs, 7-13 % avec ; femelles 4-9 %, mâles 9-16 % ; longévité 15-20 ans · [Canada](https://www.canada.ca), [Britannica](https://www.britannica.com/animal/reindeer)
 - Non trouvé : seuil létal de masse ou de graisse ; part du fourrage d'été encore sur pied l'hiver pour cerf et bison ; gestation du bison ; sex-ratio de Rùm.
+
+## Bison et gazelle : fécondité (CAP 3.2, 2026-11-02, `sourceur`)
+- Bison sauvage, Yellowstone 1964-66 : gestation 14 % à 2,5 ans, 27 % à 3,5, 71 % à 4,5, **57 % des adultes**, 52 % de toutes les femelles (71 femelles) ; la plupart des femelles mûres à 4 ans ; mortalité naturelle d'hiver < 1 % les hivers doux · Fuller · [npshistory](https://npshistory.com/series/science/1/chap5.htm) — **lu en entier**
+- Bison semi-domestique, Yellowstone 1940-41 : 0 % à 2,5 ans, 50 % à 3,5, 92 % à 4,5, 86 % des adultes (86 femelles) · même source, lu en entier
+- Bison, Yellowstone central 1996-2003 : gestation 65 % à ≥ 2 ans ; 50-57 % à 2-3 ans, 69-74 % à ≥ 4 ans · [USGS](https://www.usgs.gov/publications/pregnancy-rates-central-yellowstone-bison) (résumé)
+- Bison, Yellowstone 2000-2019 : accroissement potentiel 11 %/an sans prélèvement ; survie des femelles adultes 0,92 (0,87-0,95) ; veaux par vache 0,44 (0,47 sur 5 ans) · Geremia, Hobbs (extrait de recherche, PDF illisible)
+- Bison, Wind Cave : survie des femelles 0,94 ± 0,04, des mâles 0,80 ± 0,13 (extrait, page bloquée)
+- Gazelle de Thomson : **aucun chiffre primaire** (mortalité adulte, survie des faons, fécondité, r max) ; Borner et al. 1987 (Oecologia 73:32) et FitzGibbon 1990 inaccessibles. Saïga : effondrement de la reproduction sous 2,5 % de mâles adultes (Milner-Gulland 2003, Nature 422:135, extrait) ; fécondité chiffrée non obtenue.
