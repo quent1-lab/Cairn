@@ -87,6 +87,7 @@ fn main() {
             for year in 1..=years {
                 let mut d: Vec<f32> = Vec::with_capacity(360);
                 let mut food_min = 1.0f32;
+                let mut flows = fauna::LifeFlows::default();
                 for day in 0..360 {
                     if trace.is_some() && year == years && day % 10 == 0 {
                         let kg = range.peek_stock(wg, climate, zone, SimTime { tick });
@@ -111,7 +112,12 @@ fn main() {
                                 _ => fauna::Spring::None,
                             }
                         };
-                        fauna::herd_life_tick(&mut herd, food, spring);
+                        let f = fauna::herd_life_tick(&mut herd, food, spring);
+                        flows.born += f.born;
+                        flows.adults_died += f.adults_died;
+                        flows.adults_starved += f.adults_starved;
+                        flows.young_died += f.young_died;
+                        flows.young_starved += f.young_starved;
                         tick += 1;
                     }
                     d.push(herd.population / ZONE_KM2);
@@ -119,6 +125,18 @@ fn main() {
                 if year == 1 || year % 10 == 0 {
                     d.sort_by(f32::total_cmp);
                     out += &format!(" · an {year} : {:.1}/{:.1}/{:.1} nourr. {food_min:.2}", d[0], d[180], d[359]);
+                }
+                if year == years {
+                    // Flux de la dernière année, en têtes par km² : nés, morts de fond et de faim par classe.
+                    let k = 1.0 / ZONE_KM2;
+                    out += &format!(
+                        " · flux an {year} : nés {:.1}, adultes fond {:.1} faim {:.1}, jeunes fond {:.1} faim {:.1}",
+                        flows.born * k,
+                        flows.adults_died * k,
+                        flows.adults_starved * k,
+                        flows.young_died * k,
+                        flows.young_starved * k
+                    );
                 }
             }
             println!(

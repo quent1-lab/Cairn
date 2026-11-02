@@ -891,6 +891,17 @@ pub fn herd_condition_step(condition: f32, food: f32) -> f32 {
 /// ration qu'il trouve (0–1), `condition` ses réserves (0–1). Renvoie
 /// (effectif, condition). Le point d'entrée commun de `update_herds` et du
 /// banc réduit `cap_demo`.
+/// Ce qu'un tick de vie a fait aux têtes d'un troupeau (observation : la
+/// simulation l'ignore, les bancs le cumulent — contre-lecture du jalon 3.1-3.2).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LifeFlows {
+    pub born: f32,
+    pub adults_died: f32,
+    pub adults_starved: f32,
+    pub young_died: f32,
+    pub young_starved: f32,
+}
+
 /// Mortalité de faim, par jour, à la condition `c` pour un seuil `threshold`.
 fn starvation(c: f32, threshold: f32) -> f32 {
     HERB_STARVE_DEATH_PER_DAY * (1.0 - c / threshold).max(0.0)
@@ -904,12 +915,13 @@ fn starvation(c: f32, threshold: f32) -> f32 {
 /// `adultes × fécondité × réserves` petits étalés sur `BIRTH_WINDOW_DAYS` ;
 /// sans saison, naissances et maturation sont continues. Chaque classe meurt
 /// à sa mortalité de fond, plus la faim — les jeunes d'abord.
-pub fn herd_life_tick(herd: &mut Herd, food: f32, spring: Spring) {
+pub fn herd_life_tick(herd: &mut Herd, food: f32, spring: Spring) -> LifeFlows {
     herd.condition = herd_condition_step(herd.condition, food);
     let c = herd.condition;
     let v = herd.species.vital();
     let year = cairn_core::DAYS_PER_YEAR as f32;
     let mut young = herd.young.clamp(0.0, herd.population);
+    let mut continuous_born = 0.0;
     let mut adults = herd.population - young;
     herd.since_birth_season = herd.since_birth_season.saturating_add(1);
     match spring {
@@ -922,21 +934,30 @@ pub fn herd_life_tick(herd: &mut Herd, food: f32, spring: Spring) {
         }
         Spring::Continuous => {
             let grown = young * DT_DAYS / year;
-            young += adults * v.births * c * DT_DAYS / year - grown;
+            let born = adults * v.births * c * DT_DAYS / year;
+            young += born - grown;
             adults += grown;
+            continuous_born = born;
         }
         Spring::GreenUp | Spring::None => {}
     }
+    let mut flows = LifeFlows { born: continuous_born, ..LifeFlows::default() };
     if herd.bearing_ticks > 0 {
         let born = herd.bearing / f32::from(herd.bearing_ticks);
         young += born;
         herd.bearing -= born;
         herd.bearing_ticks -= 1;
+        flows.born += born;
     }
-    adults -= adults * (v.adult_death / year + starvation(c, HERD_STARVING_CONDITION)) * DT_DAYS;
-    young -= young * (v.young_death / year + starvation(c, YOUNG_STARVING_CONDITION)) * DT_DAYS;
+    flows.adults_died = adults * v.adult_death / year * DT_DAYS;
+    flows.adults_starved = adults * starvation(c, HERD_STARVING_CONDITION) * DT_DAYS;
+    flows.young_died = young * v.young_death / year * DT_DAYS;
+    flows.young_starved = young * starvation(c, YOUNG_STARVING_CONDITION) * DT_DAYS;
+    adults -= flows.adults_died + flows.adults_starved;
+    young -= flows.young_died + flows.young_starved;
     herd.young = young.max(0.0);
     herd.population = adults.max(0.0) + herd.young;
+    flows
 }
 
 /// Un tick de démographie de meute : elle croît de ses prises, décline sans.
@@ -1415,7 +1436,7 @@ pub fn update_herds(
         // — Démographie : la nourriture remplit ou vide les réserves, les
         //   réserves commandent (CAP 3.1a), la saison ouvre les naissances
         //   (CAP 3.2). —
-        herd_life_tick(herd, herd.satiation, spring);
+        let _ = herd_life_tick(herd, herd.satiation, spring);
         if herd.population < HERD_MIN {
             doomed.push(entity);
         } else if herd.population > HERD_FISSION {

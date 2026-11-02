@@ -712,6 +712,24 @@ Réfutée si une densité dépasse 2 fois la capacité, ou si le gibier s'étein
   l'hiver, l'ingestion volontaire baisse de 34-37 % (cerf, renne) — l'**hypophagie d'hiver**,
   absente du modèle (ration constante), serait un mécanisme de plus. Sensibilité à m à mesurer.
 
+- **Point 2, ventilation** (`herd_life_tick` rend ses flux, `LifeFlows`, ignorés par la
+  simulation ; `cap_demo` les cumule) — an 50, têtes/km² par an :
+
+  | case | nés | adultes : fond / faim | jeunes : fond / faim | ce qui borne |
+  |---|---|---|---|---|
+  | forêt 42, 1337 (sans hiver) | 13-14 | 2,6-2,8 / 0 | 0,3 / 10,2-10,9 | mort de faim des jeunes |
+  | forêt 2024 | 6,6 | 2,4 / 0,9 | 0,5 / 2,8 | les deux |
+  | forêt 7, taïga, toundra, prairie 7 et 2024 | 1,7-10 | 1-2,3 / 0 | 0,1-0,8 / 0,1-0,9 | **natalité écrasée** (réserves basses au reverdissement) |
+  | prairie 42, 1337 | 5,4-6,7 | 3,2-3,4 / 0 | 0,2-0,3 / 3,2-4,4 | mort de faim des jeunes |
+  | steppe 7 | 15 | 52 / 42 | 3,5 / 63 | faim de tous (gazelle) |
+  | steppe 2024, savane | 142-425 | 47-318 / 0 | 11-32 / 0-76 | mortalité de fond de la gazelle (33 %) |
+
+  La contre-lecture avait raison : la mort des jeunes ne borne que dans la moitié des cas ;
+  ailleurs c'est la natalité, qui suit des réserves basses. Les deux sont des mécanismes réels
+  (Rùm : fécondité **et** survie juvénile baissent avec la densité). Densités inchangées par
+  l'instrument ; la garde d'une portée par an déplace la steppe (méd. 340 → 178 et 367 → 267) :
+  certaines mailles y reverdissaient deux fois par an (redoux).
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de
