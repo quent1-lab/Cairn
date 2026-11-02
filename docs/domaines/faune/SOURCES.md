@@ -44,3 +44,17 @@ par (moi, sous-agent `sourceur`) · lu en entier ou de seconde main.
 - Consommation par **tous** les herbivores (invertébrés compris), en % de la PPN : forêts et arbustaies moyenne 1,5 % (0-14) ; prairies moyenne 23 % (0-65) · Cebrian 1999 (citations secondaires) ; toundra non trouvée
 - Serengeti : consommation ÷ production nette réelle, moyenne 0,66 (médiane 0,71), de 17 % à 94 % selon le site · McNaughton · [synthèse](https://holisticmanagement.org/?p=57)
 - Biomasse des grands herbivores africains croissante avec la pluie · Coe, Cumming & Phillipson 1976, Oecologia 22:341 ; chiffres non trouvés ; forêt tempérée et toundra : non trouvés
+
+## Faim, réserves, fécondité, âges (CAP 3.1, 2026-11-02, `sourceur`, toutes de seconde main : extraits, aucun PDF ouvert)
+- Prairie tempérée (générique) : biomasse herbacée sur pied −28 à −29 % du pic d'été à l'automne, puis −22 à −50 % de plus l'hiver ; décomposition de la litière 0,57-0,86 g/(kg·j) l'hiver contre 2,12-2,69 l'été · [J. Range Manage.](https://journals.uair.arizona.edu/index.php/jrm/article/download/5887/5497)
+- Renne : lichen en pinède sèche 632 kg MS/ha (54-380 selon les districts, années 1970) ; le caribou choisit > 1 250 kg/ha ; accès bloqué au-delà de ~50 cm de neige, creusement surtout sous 20 cm · [Arctic](https://journalhosting.ucalgary.ca/index.php/arctic/article/download/64264/48199/183457), [Rangifer](https://septentrio.uit.no/index.php/rangifer/article/view/388)
+- Bison, Yellowstone : biomasse herbacée d'automne −23 % pâturée contre protégée ; neige moyenne 27 cm · [IJS](https://arc.lib.montana.edu/ojs/index.php/IJS/article/view/1800/1463)
+- Cerf élaphe : mâles −19,5 % de masse pendant le rut ; −23 % du poids éviscéré du début du rut à la fin de l'hiver · [Front. Ecol. Evol. 2020](https://www.frontiersin.org/journals/ecology-and-evolution/articles/10.3389/fevo.2020.521767/pdf)
+- Renne de Svalbard : endurance au jeûne 85 ± 17 j (48-137) ; les gras tiennent ~45 j de plus que les maigres · Tyler · [Rangifer](https://septentrio.uit.no/index.php/rangifer/article/view/664) (résumé)
+- Cerf de Rùm : fécondité liée au poids, relation densité-dépendante · Albon, Mitchell & Staines 1983, J. Anim. Ecol. 52:969 ; pourcentages non trouvés
+- Renne : vêlage moyen 79,2 % des biches · Kaamanen (Finlande) 1970-85 · [Rangifer](https://septentrio.uit.no/index.php/rangifer/article/download/635/604/2409)
+- Gazelle de Thomson : maturité ~2 ans, gestation ~6 mois, jusqu'à 2 mises bas par an, 1 petit · [Wikipedia](https://en.wikipedia.org/wiki/Thomson%27s_gazelle) ; mortalité adulte ~1/3 par an (source non identifiée)
+- Bison, Yellowstone nord : jeunes de l'année 30 % de la population en août (2019), 15 % (2010) · [rapport Geremia et al. 2019](https://buffalofieldcampaign.org) ; survie adulte ≈ 0,95 (2000-2019), femelles 0,92 avant · [J. Wildl. Manage.](https://complete.bioone.org/journals/journal-of-wildlife-management/) ; longévité 22-25 ans
+- Renne, Yakoutie 1950-2003 : faons 17-25 % de la population ; perte des faons l'été et l'automne ~34,5 % (6-100) · [Rangifer](https://septentrio.uit.no/index.php/rangifer/article/download/1284/1223/4904)
+- Renne/caribou : mortalité adulte ~4-6 %/an avec peu de prédateurs, 7-13 % avec ; femelles 4-9 %, mâles 9-16 % ; longévité 15-20 ans · [Canada](https://www.canada.ca), [Britannica](https://www.britannica.com/animal/reindeer)
+- Non trouvé : seuil létal de masse ou de graisse ; part du fourrage d'été encore sur pied l'hiver pour cerf et bison ; gestation du bison ; sex-ratio de Rùm.
