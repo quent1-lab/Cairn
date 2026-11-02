@@ -57,9 +57,18 @@ const HERB_DEATH_PER_DAY: f32 = 0.010;
 /// condition pleine. Endurance au jeûne du renne de Svalbard, 85 ± 17 jours
 /// (48-137, Tyler ; `SOURCES.md`, section CAP 3.1).
 const HERD_RESERVE_DAYS: f32 = 85.0;
-/// Constante de temps du remplissage des réserves à ration entière : un été
+/// Jours de ration entière qui remplissent des réserves vides : un été
 /// d'engraissement. Choix, non sourcé.
-const HERD_REFILL_DAYS: f32 = 60.0;
+///
+/// Avec `HERD_RESERVE_DAYS`, il fixe la part d'entretien de la ration : les
+/// réserves suivent `(nourriture − m) / T`, **linéaire** dans la nourriture,
+/// pour qu'elles dépendent de ce que le troupeau mange dans la journée et non
+/// de la répartition de ses repas. Vides à 0 en 85 j, pleines à 1 en 120 j :
+/// m = 120 / (120 + 85) ≈ 0,59 — un troupeau qui trouve 59 % de sa ration ne
+/// perd ni ne gagne de réserves. Une ration réelle (2-3 % de la masse) est
+/// l'ingestion volontaire, au-dessus de l'entretien : l'ordre de grandeur se
+/// défend, la valeur n'est pas sourcée.
+const HERD_REFILL_DAYS: f32 = 120.0;
 /// Sous cette condition, les réserves ne suffisent plus et la faim tue. Choix :
 /// aucun seuil létal de graisse ou de masse n'a été trouvé.
 const HERD_STARVING_CONDITION: f32 = 0.2;
@@ -714,16 +723,18 @@ pub fn herd_population_step(population: f32, condition: f32) -> f32 {
     (population + population * rate * DT_DAYS).max(0.0)
 }
 
-/// Un tick de réserves : elles se vident au rythme du manque (`food` < 1) et se
-/// remplissent à ration entière. `food` est la part de la ration trouvée.
+/// Un tick de réserves : `(food − m) / T`, où `m` est la part d'entretien de la
+/// ration ; elles se vident en `HERD_RESERVE_DAYS` sans rien manger et se
+/// remplissent en `HERD_REFILL_DAYS` à ration entière. Linéaire dans `food`
+/// (CAP 3.1a, défaut trouvé par le stock saisonnier) : sous la forme
+/// précédente, qui ne remplissait qu'à ration entière, des repas alternés
+/// (rassasié 14 h, rien 10 h) gardaient les réserves qu'une ration régulière de
+/// même total vidait.
 pub fn herd_condition_step(condition: f32, food: f32) -> f32 {
     let f = food.clamp(0.0, 1.0);
-    let rate = if f < 1.0 {
-        (f - 1.0) / HERD_RESERVE_DAYS
-    } else {
-        (1.0 - condition) / HERD_REFILL_DAYS
-    };
-    (condition + rate * DT_DAYS).clamp(0.0, 1.0)
+    let rate = 1.0 / HERD_RESERVE_DAYS + 1.0 / HERD_REFILL_DAYS;
+    let upkeep = HERD_REFILL_DAYS / (HERD_RESERVE_DAYS + HERD_REFILL_DAYS);
+    (condition + (f - upkeep) * rate * DT_DAYS).clamp(0.0, 1.0)
 }
 
 /// Un tick de vie d'un troupeau, tout compris : `food` est la part de sa
@@ -2100,6 +2111,27 @@ mod tests {
             lay_trails(&fauna, &mut trails, h);
         }
         assert_eq!(trails[&2].len() as u64, TRAIL_HOURS, "les traces de plus de deux jours s'effacent");
+    }
+
+    /// CAP 3.1a, défaut trouvé par le stock saisonnier : les réserves doivent
+    /// suivre ce que le troupeau mange **dans la journée**, pas la façon dont
+    /// ses repas s'y répartissent. Deux troupeaux trouvent en moyenne 58 % de
+    /// leur ration, l'un à chaque heure, l'autre à satiété 14 heures puis rien
+    /// pendant 10 : en 30 jours, leurs réserves ne doivent pas différer de plus
+    /// de 0,01.
+    #[test]
+    fn les_reserves_suivent_la_ration_du_jour_pas_sa_repartition() {
+        let (mut reguliere, mut alternee) = (0.8f32, 0.8f32);
+        for _ in 0..30 {
+            for h in 0..24 {
+                reguliere = herd_condition_step(reguliere, 14.0 / 24.0);
+                alternee = herd_condition_step(alternee, if h < 14 { 1.0 } else { 0.0 });
+            }
+        }
+        assert!(
+            (reguliere - alternee).abs() <= 0.01,
+            "même ration du jour, réserves {reguliere:.3} (régulière) contre {alternee:.3} (alternée)"
+        );
     }
 
     /// CAP 3.1a : la faim tue quand les réserves sont épuisées. Cent jours
