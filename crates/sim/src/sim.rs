@@ -2967,6 +2967,47 @@ mod tests {
         );
     }
 
+    /// CAP 3.2, contre-lecture : un troupeau hors de sa niche ne profite que
+    /// d'une part de sa ration (facteur d'habitat) ; il ne doit retirer du
+    /// fourrage de sa maille que ce qu'il en profite, sans quoi il affame ses
+    /// voisins pour rien.
+    #[test]
+    fn un_troupeau_hors_de_sa_niche_ne_retire_que_ce_qu_il_mange() {
+        let (mut sim, home) = scenario_setup(11, 0, 0);
+        let (x, y) = (home.0 as f64 + 0.5, home.1 as f64 + 0.5);
+        let biome = sim.world.tile(home.0, home.1).biome;
+        let species = [fauna::Species::Gazelle, fauna::Species::Deer, fauna::Species::Aurochs, fauna::Species::Reindeer]
+            .into_iter()
+            .find(|s| s.habitat_factor(biome) < 1.0)
+            .expect("une espèce hors de sa niche");
+        let habitat = species.habitat_factor(biome);
+        sim.spawn_herd_species(x, y, 40.0, species);
+        // Au jour 135, comme les scènes : la maille porte du fourrage sur pied.
+        sim.time.tick = 135 * TICKS_PER_DAY;
+        let zone = fauna::range_zone((x, y));
+        let time = sim.time;
+        let avant = sim.rangeland.peek_stock(sim.world.worldgen(), &sim.climate, zone, time);
+        let seed = sim.world.seed();
+        fauna::update_herds(
+            &mut sim.fauna,
+            &mut sim.world,
+            &sim.climate,
+            time,
+            seed,
+            &[],
+            &mut sim.fauna_stats,
+            &mut sim.rangeland,
+            None,
+        );
+        let apres = sim.rangeland.peek_stock(sim.world.worldgen(), &sim.climate, zone, time);
+        let attendu = 40.0 * species.daily_ration_kg() * habitat / 24.0;
+        assert!(
+            avant - apres <= 1.05 * attendu,
+            "{species:?} hors niche (habitat {habitat}) : {:.2} kg retirés en un tick, {attendu:.2} mangés",
+            avant - apres
+        );
+    }
+
     /// CHA-2c, le paysage de la peur : un troupeau dérangé une fois revient à
     /// son domaine ; harcelé sans cesse du même côté, il l'abandonne. Une
     /// menace qui le suit dix jours durant, puis deux jours de calme.

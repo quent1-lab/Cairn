@@ -1205,13 +1205,17 @@ pub fn update_herds(
     let mut prof = [0u64; 4];
 
     // La demande de chaque maille, sur l'état du début du tour : toutes les
-    // têtes qui y paissent, chacune à sa ration.
+    // têtes qui y paissent, chacune à ce qu'elle peut manger.
     #[cfg(feature = "profile")]
     let t0 = std::time::Instant::now();
     let mut demand: std::collections::BTreeMap<(i64, i64), f32> = std::collections::BTreeMap::new();
+    // Hors de sa niche, un troupeau ne mange qu'une part de sa ration (facteur
+    // d'habitat) : c'est elle qu'il demande à la maille, pas sa ration entière
+    // (contre-lecture du jalon 3.1-3.2 : il retirait le reste pour rien).
     for (_, (herd, pos)) in fauna.query::<(&Herd, &Position)>().iter() {
+        let biome = world.tile(pos.x.floor() as i64, pos.y.floor() as i64).biome;
         *demand.entry(range_zone((pos.x, pos.y))).or_insert(0.0) +=
-            herd.population * herd.species.daily_ration_kg();
+            herd.population * herd.species.daily_ration_kg() * herd.species.habitat_factor(biome);
     }
     // Ce que chaque maille offre ce tick : les bêtes y broutent le fourrage sur
     // pied (CAP 3.1b), une fois par maille, avant que chacune ne lise sa part.
