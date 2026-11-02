@@ -46,13 +46,9 @@ pub const HERD_START: f32 = 25.0;
 pub const HERD_MIN: f32 = 4.0;
 /// Au-dessus, le troupeau devient ingérable et **fissionne** en deux.
 pub const HERD_FISSION: f32 = 90.0;
-/// Natalité maximale (pâture pleine), par jour.
-const HERB_BIRTH_PER_DAY: f32 = 0.020;
-/// Mortalité de fond, par jour. Le rapport mortalité/natalité fixe la
-/// **satiété d'équilibre** : ici 0,5 — en dessous le troupeau fond, au-dessus
-/// il croît. Aucune capacité de charge n'est écrite en dur : elle émerge de
-/// ce que la pâture peut soutenir.
-const HERB_DEATH_PER_DAY: f32 = 0.010;
+// Natalité et mortalité de fond : propres à chaque espèce depuis CAP 3.2
+// (`Species::vital`). Elles valaient 0,020 et 0,010 par jour pour toutes —
+// r max = 3,6 /an, dix à vingt fois celui d'un ongulé réel.
 /// Réserves d'un troupeau (CAP 3.1a) : jours de jeûne complet qui vident une
 /// condition pleine. Endurance au jeûne du renne de Svalbard, 85 ± 17 jours
 /// (48-137, Tyler ; `SOURCES.md`, section CAP 3.1).
@@ -69,18 +65,24 @@ const HERD_RESERVE_DAYS: f32 = 85.0;
 /// l'ingestion volontaire, au-dessus de l'entretien : l'ordre de grandeur se
 /// défend, la valeur n'est pas sourcée.
 const HERD_REFILL_DAYS: f32 = 120.0;
-/// Sous cette condition, les réserves ne suffisent plus et la faim tue. Choix :
-/// aucun seuil létal de graisse ou de masse n'a été trouvé.
+/// Sous cette condition, les réserves d'un adulte ne suffisent plus et la faim
+/// le tue. Choix : aucun seuil létal de graisse ou de masse n'a été trouvé.
 const HERD_STARVING_CONDITION: f32 = 0.2;
+/// Même seuil pour les jeunes de l'année, plus haut : ils meurent de faim les
+/// premiers (faons de Rùm en fin d'hiver ; un renne maigre tient ~45 jours de
+/// moins sur 85, Svalbard). Choix.
+const YOUNG_STARVING_CONDITION: f32 = 0.5;
+/// Durée de la saison des naissances après le reverdissement (renne : 80-90 %
+/// en 10 jours, saison complète en 4-5 semaines).
+const BIRTH_WINDOW_DAYS: u16 = 30;
 /// Mortalité de faim, par jour, aux réserves nulles : un mois. Choix.
 const HERB_STARVE_DEATH_PER_DAY: f32 = 1.0 / 30.0;
 /// Biomasse broutée par tête et par tick, étalée sur la tuile et ses voisines.
 const GRAZE_PER_HEAD: f32 = 1.0;
-/// **Condition d'équilibre** : sous elle, hors faim, le troupeau fond ;
-/// au-dessus il croît. Ce n'est pas un réglage indépendant, c'est exactement
-/// le rapport mortalité/natalité. Jusqu'à CAP 3.1a, c'était la *satiété*
-/// d'équilibre : la natalité suivait le repas du jour.
-pub const HERB_SATIATION_EQUILIBRIUM: f32 = HERB_DEATH_PER_DAY / HERB_BIRTH_PER_DAY;
+/// **Part d'entretien de la ration** : à cette satiété, les réserves ne
+/// bougent pas ; en dessous elles se vident, au-dessus elles se remplissent
+/// (voir `HERD_REFILL_DAYS`).
+pub const HERD_UPKEEP: f32 = HERD_REFILL_DAYS / (HERD_RESERVE_DAYS + HERD_REFILL_DAYS);
 
 // — Démographie des prédateurs —
 
@@ -236,6 +238,8 @@ pub struct Rangeland {
 #[derive(Clone, Copy, Debug)]
 struct Pasture {
     per_growing_day: f32,
+    /// Jours de croissance par an (0 : ne pousse jamais ; 360 : sans saison).
+    growing_days: u32,
     mean_temp: f64,
     y: i64,
 }
@@ -282,12 +286,12 @@ impl Rangeland {
             let n = (RANGE_ZONE_SAMPLES * RANGE_ZONE_SAMPLES) as f32;
             let y = ((zone.1 as f64 + 0.5) * RANGE_ZONE_TILES) as i64;
             let mean_temp = if land > 0 { temp / f64::from(land) } else { 0.0 };
-            let growing = (0..cairn_core::DAYS_PER_YEAR)
+            let growing_days = (0..cairn_core::DAYS_PER_YEAR)
                 .filter(|&d| crate::gathering::grows(climate, mean_temp, y, d))
-                .count()
-                .max(1) as f32;
+                .count() as u32;
+            let growing = growing_days.max(1) as f32;
             // g/m²/an → kg/km²/an (×1 000), sur 4 km², répartis sur les jours qui poussent.
-            Pasture { per_growing_day: g_m2_yr / n * 1000.0 * RANGE_ZONE_KM2 / growing, mean_temp, y }
+            Pasture { per_growing_day: g_m2_yr / n * 1000.0 * RANGE_ZONE_KM2 / growing, growing_days, mean_temp, y }
         })
     }
 
@@ -337,6 +341,25 @@ impl Rangeland {
         let eaten = want.min(stock.0);
         stock.0 -= eaten;
         eaten / want
+    }
+
+    /// Ce que la saison dit aux mères de la maille `zone` ce jour-là (CAP 3.2) :
+    /// la pousse reprend-elle aujourd'hui, pousse-t-elle toute l'année, ou
+    /// rien de cela. Pur du worldgen et du climat.
+    pub fn spring(
+        &mut self,
+        worldgen: &cairn_worldgen::WorldGen,
+        climate: &Climate,
+        zone: (i64, i64),
+        day: u64,
+    ) -> Spring {
+        let p = self.pasture(worldgen, climate, zone);
+        if p.growing_days >= cairn_core::DAYS_PER_YEAR as u32 {
+            return Spring::Continuous;
+        }
+        let today = crate::gathering::grows(climate, p.mean_temp, p.y, day);
+        let yesterday = crate::gathering::grows(climate, p.mean_temp, p.y, day.wrapping_sub(1));
+        if today && !yesterday { Spring::GreenUp } else { Spring::None }
     }
 
     /// Fourrage sur pied de `zone` aujourd'hui, en kg, **sans rien écrire**
@@ -518,6 +541,34 @@ impl Species {
         }
     }
 
+    /// Taux vitaux annuels (CAP 3.2, `SOURCES.md`) : mortalité de fond des
+    /// adultes, mortalité de fond des jeunes de l'année (hors faim), jeunes nés
+    /// par adulte et par an à pleine condition. La faim s'y ajoute.
+    ///
+    /// - cerf : adultes 3 %/an (Rùm, sans prédateurs) ; 10 % des faons meurent
+    ///   dans leurs deux premières semaines ; ~0,55 de femelles × ~0,8 de
+    ///   gestation (choix : pourcentages de Rùm non trouvés) ;
+    /// - renne : adultes 4-6 %/an avec peu de prédateurs ; vêlage 79 % des
+    ///   biches (Finlande) × ~0,55 de femelles ;
+    /// - aurochs (bison) : survie adulte 0,92-0,95 ; 0,44-0,47 veau par vache
+    ///   (Yellowstone) × ~0,5 de femelles ;
+    /// - gazelle : **aucune source primaire** — mortalité adulte ~1/3 par an,
+    ///   un petit, jusqu'à deux mises bas par an, ~0,6 de femelles (choix
+    ///   retenus faute de mieux, décision de l'utilisateur).
+    ///
+    /// La mortalité des jeunes hors faim (0,10) est un choix. Nuls pour un
+    /// prédateur, dont la démographie est ailleurs.
+    pub fn vital(self) -> Vital {
+        let (adult_death, young_death, births) = match self {
+            Species::Deer => (0.03, 0.10, 0.45),
+            Species::Reindeer => (0.05, 0.10, 0.43),
+            Species::Aurochs => (0.05, 0.10, 0.23),
+            Species::Gazelle => (0.33, 0.10, 0.9),
+            Species::Wolf | Species::CaveLion => (0.0, 0.0, 0.0),
+        };
+        Vital { adult_death, young_death, births }
+    }
+
     /// Rayon d'alerte d'un herbivore : à quelle distance il repère une menace
     /// et détale. La gazelle voit loin, l'aurochs se laisse approcher. Sans
     /// objet pour un prédateur (il ne fuit pas dans ce modèle).
@@ -635,6 +686,26 @@ pub enum HerdState {
     Migrating,
 }
 
+/// Taux vitaux annuels d'une espèce (voir [`Species::vital`]).
+#[derive(Debug, Clone, Copy)]
+pub struct Vital {
+    pub adult_death: f32,
+    pub young_death: f32,
+    pub births: f32,
+}
+
+/// Le signal de saison que lit la démographie d'un troupeau (CAP 3.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Spring {
+    /// La pousse reprend aujourd'hui dans la maille : les jeunes de l'an passé
+    /// deviennent adultes et la saison des naissances s'ouvre.
+    GreenUp,
+    /// La maille pousse toute l'année : naissances et maturation continues.
+    Continuous,
+    /// Rien de cela aujourd'hui.
+    None,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct Herd {
     pub population: f32,
@@ -649,6 +720,12 @@ pub struct Herd {
     /// que sa ration, se remplissent à ration entière. La natalité les suit,
     /// et la faim tue quand elles s'épuisent.
     pub condition: f32,
+    /// Jeunes de l'année, compris dans `population` (CAP 3.2).
+    pub young: f32,
+    /// Naissances qui restent à venir dans la saison en cours (CAP 3.2).
+    pub bearing: f32,
+    /// Ticks qui restent dans la saison des naissances.
+    pub bearing_ticks: u16,
     /// L'espèce (cerf, aurochs…) : paramètre l'habitat et la vigilance.
     pub species: Species,
     /// Apprivoisement, dans [0, 1] (domestication, `crate::pastoral`) : monte
@@ -672,6 +749,9 @@ impl Herd {
             flee_ticks: 0,
             satiation: 1.0,
             condition: 1.0,
+            young: 0.0,
+            bearing: 0.0,
+            bearing_ticks: 0,
             species,
             tameness: 0.0,
             anchor: None,
@@ -777,21 +857,12 @@ pub struct Kill {
     pub head: f32,
 }
 
-/// Une scission de troupeau à faire naître (hors itération) : position `(x, y)`,
-/// effectif, **espèce et condition héritées de la mère**.
-pub type Fission = (f64, f64, f32, Species, f32);
+/// Une scission de troupeau à faire naître (hors itération) : position `(x, y)`
+/// et la fille, qui **hérite de l'espèce, des réserves et de la moitié des
+/// jeunes et des naissances à venir** de sa mère.
+pub type Fission = (f64, f64, Herd);
 
 // — Équations pures (testables sans monde) —
-
-/// Un tick de démographie herbivore : la natalité suit les **réserves**
-/// (fécondité liée à la condition, cerf de Rùm), la mortalité est de fond, et
-/// la faim tue sous `HERD_STARVING_CONDITION`. Renvoie le nouvel effectif.
-pub fn herd_population_step(population: f32, condition: f32) -> f32 {
-    let c = condition.clamp(0.0, 1.0);
-    let starving = HERB_STARVE_DEATH_PER_DAY * (1.0 - c / HERD_STARVING_CONDITION).max(0.0);
-    let rate = HERB_BIRTH_PER_DAY * c - HERB_DEATH_PER_DAY - starving;
-    (population + population * rate * DT_DAYS).max(0.0)
-}
 
 /// Un tick de réserves : `(food − m) / T`, où `m` est la part d'entretien de la
 /// ration ; elles se vident en `HERD_RESERVE_DAYS` sans rien manger et se
@@ -811,9 +882,50 @@ pub fn herd_condition_step(condition: f32, food: f32) -> f32 {
 /// ration qu'il trouve (0–1), `condition` ses réserves (0–1). Renvoie
 /// (effectif, condition). Le point d'entrée commun de `update_herds` et du
 /// banc réduit `cap_demo`.
-pub fn herd_tick(population: f32, condition: f32, food: f32) -> (f32, f32) {
-    let condition = herd_condition_step(condition, food);
-    (herd_population_step(population, condition), condition)
+/// Mortalité de faim, par jour, à la condition `c` pour un seuil `threshold`.
+fn starvation(c: f32, threshold: f32) -> f32 {
+    HERB_STARVE_DEATH_PER_DAY * (1.0 - c / threshold).max(0.0)
+}
+
+/// Un tick de vie d'un troupeau (CAP 3.2) : `food` est la part de sa ration
+/// trouvée, `spring` le signal de saison de sa maille.
+///
+/// Les réserves suivent la nourriture ; au reverdissement, les jeunes de l'an
+/// passé deviennent adultes et la saison des naissances s'ouvre, pour
+/// `adultes × fécondité × réserves` petits étalés sur `BIRTH_WINDOW_DAYS` ;
+/// sans saison, naissances et maturation sont continues. Chaque classe meurt
+/// à sa mortalité de fond, plus la faim — les jeunes d'abord.
+pub fn herd_life_tick(herd: &mut Herd, food: f32, spring: Spring) {
+    herd.condition = herd_condition_step(herd.condition, food);
+    let c = herd.condition;
+    let v = herd.species.vital();
+    let year = cairn_core::DAYS_PER_YEAR as f32;
+    let mut young = herd.young.clamp(0.0, herd.population);
+    let mut adults = herd.population - young;
+    match spring {
+        Spring::GreenUp => {
+            adults += young;
+            young = 0.0;
+            herd.bearing = adults * v.births * c;
+            herd.bearing_ticks = BIRTH_WINDOW_DAYS * cairn_core::TICKS_PER_DAY as u16;
+        }
+        Spring::Continuous => {
+            let grown = young * DT_DAYS / year;
+            young += adults * v.births * c * DT_DAYS / year - grown;
+            adults += grown;
+        }
+        Spring::None => {}
+    }
+    if herd.bearing_ticks > 0 {
+        let born = herd.bearing / f32::from(herd.bearing_ticks);
+        young += born;
+        herd.bearing -= born;
+        herd.bearing_ticks -= 1;
+    }
+    adults -= adults * (v.adult_death / year + starvation(c, HERD_STARVING_CONDITION)) * DT_DAYS;
+    young -= young * (v.young_death / year + starvation(c, YOUNG_STARVING_CONDITION)) * DT_DAYS;
+    herd.young = young.max(0.0);
+    herd.population = adults.max(0.0) + herd.young;
 }
 
 /// Un tick de démographie de meute : elle croît de ses prises, décline sans.
@@ -1075,6 +1187,17 @@ pub fn update_herds(
         .iter()
         .map(|(&zone, &d)| (zone, range.graze(world.worldgen(), climate, zone, time, d)))
         .collect();
+    // Et ce que la saison y dit (CAP 3.2) : le reverdissement ne se lit qu'au
+    // premier tick du jour, pour n'ouvrir qu'une saison des naissances.
+    let day = time.tick / cairn_core::TICKS_PER_DAY;
+    let first_tick = time.tick % cairn_core::TICKS_PER_DAY == 0;
+    let springs: std::collections::BTreeMap<(i64, i64), Spring> = demand
+        .keys()
+        .map(|&zone| {
+            let s = range.spring(world.worldgen(), climate, zone, day);
+            (zone, if s == Spring::GreenUp && !first_tick { Spring::None } else { s })
+        })
+        .collect();
     #[cfg(feature = "profile")]
     {
         prof[3] += t0.elapsed().as_nanos() as u64;
@@ -1271,32 +1394,36 @@ pub fn update_herds(
         #[cfg(feature = "profile")]
         let t0 = std::time::Instant::now();
         let zone_share = food.get(&range_zone(start)).copied().unwrap_or(1.0);
+        let spring = springs.get(&range_zone(start)).copied().unwrap_or(Spring::None);
         herd.satiation = (zone_share * herd.species.habitat_factor(here_tile.biome)).min(1.0);
         #[cfg(feature = "profile")]
         {
             prof[3] += t0.elapsed().as_nanos() as u64;
         }
 
-        // — Démographie : la nourriture remplit ou vide les réserves, et les
-        //   réserves commandent (CAP 3.1a). —
-        (herd.population, herd.condition) = herd_tick(herd.population, herd.condition, herd.satiation);
+        // — Démographie : la nourriture remplit ou vide les réserves, les
+        //   réserves commandent (CAP 3.1a), la saison ouvre les naissances
+        //   (CAP 3.2). —
+        herd_life_tick(herd, herd.satiation, spring);
         if herd.population < HERD_MIN {
             doomed.push(entity);
         } else if herd.population > HERD_FISSION {
-            // Trop nombreux : la moitié part fonder un troupeau ailleurs.
+            // Trop nombreux : la moitié part fonder un troupeau ailleurs, avec
+            // la moitié des jeunes et des naissances à venir.
             herd.population *= 0.5;
+            herd.young *= 0.5;
+            herd.bearing *= 0.5;
             stats.herd_fission(id.0);
             let angle = rng.next_f64() * std::f64::consts::TAU;
             let d = km_to_tiles(1.0);
             // La fille hérite de l'espèce de la mère (un troupeau de cerfs se
-            // scinde en deux troupeaux de cerfs).
-            fissions.push((
-                pos.x + angle.cos() * d,
-                pos.y + angle.sin() * d,
-                herd.population,
-                herd.species,
-                herd.condition,
-            ));
+            // scinde en deux troupeaux de cerfs) et de ses réserves.
+            let mut daughter = Herd::new(herd.population, herd.species);
+            daughter.condition = herd.condition;
+            daughter.young = herd.young;
+            daughter.bearing = herd.bearing;
+            daughter.bearing_ticks = herd.bearing_ticks;
+            fissions.push((pos.x + angle.cos() * d, pos.y + angle.sin() * d, daughter));
         }
     }
     #[cfg(feature = "profile")]
@@ -1673,8 +1800,8 @@ impl FaunaStats {
             if sat >= 1.0 {
                 c.satiated += 1;
             }
-            c.potential_sum +=
-                f64::from(HERB_BIRTH_PER_DAY * sat.clamp(0.0, 1.0) - HERB_DEATH_PER_DAY);
+            // Depuis CAP 3.2 : la tendance des réserves (satiété − entretien).
+            c.potential_sum += f64::from(sat.clamp(0.0, 1.0) - HERD_UPKEEP);
             c.pop_sum += f64::from(pop);
             if fleeing {
                 c.fleeing += 1;
@@ -1735,7 +1862,7 @@ impl FaunaStats {
         f.fill_sum += fill;
         let bin = ((satiation.clamp(0.0, 0.999) * 10.0) as usize).min(9);
         f.sat_hist[bin] += 1;
-        if satiation < HERB_SATIATION_EQUILIBRIUM {
+        if satiation < HERD_UPKEEP {
             f.declining += 1;
             // Les trois classes sont exclusives et couvrent tout : sans la
             // garde sur `cap`, une tuile stérile tombait dans « broutée à ras »
@@ -1904,7 +2031,12 @@ pub struct PackFission {
 pub fn apply_kills(fauna: &mut hecs::World, kills: &[Kill]) {
     for kill in kills {
         if let Ok(mut herd) = fauna.get::<&mut Herd>(kill.herd) {
-            herd.population = (herd.population - kill.head).max(0.0);
+            // Jeunes et naissances à venir à proportion des têtes (CAP 3.2).
+            let left = (herd.population - kill.head).max(0.0);
+            let share = if herd.population > 0.0 { left / herd.population } else { 0.0 };
+            herd.young *= share;
+            herd.bearing *= share;
+            herd.population = left;
         }
     }
 }
@@ -1915,7 +2047,7 @@ pub fn apply_kills(fauna: &mut hecs::World, kills: &[Kill]) {
 /// celui du jour : deux compteurs indépendants qui doivent concorder.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct FaunaFlows {
-    /// Naissances moins mortalité de fond (`herd_population_step`).
+    /// Naissances moins morts de fond et de faim (`herd_life_tick`).
     pub growth: f64,
     /// Têtes retirées par les prises : demandées par les meutes, par les
     /// humains, et réellement ôtées (une prise ne retire pas plus qu'il n'y a).
@@ -2177,58 +2309,6 @@ mod tests {
         assert_eq!(trails[&2].len() as u64, TRAIL_HOURS, "les traces de plus de deux jours s'effacent");
     }
 
-    /// CAP 3.1b : dix fois trop de bouches pour une maille vident son
-    /// fourrage sur pied, puis ne trouvent que ce qui pousse au jour le jour —
-    /// au plus un cinquième de leur ration en moyenne, du 40e au 60e jour.
-    /// Remplace, au niveau de la maille, le critère de l'étape 4 que
-    /// `un_pays_surpeuple…` jugeait dans la simulation entière.
-    #[test]
-    fn dix_fois_trop_de_bouches_vident_la_maille() {
-        let mut sim = Sim::new(WorldSeed(42), 64);
-        let zone = taiga_zone(&sim);
-        let (wg, climate, range) = (sim.world.worldgen(), &sim.climate, &mut sim.rangeland);
-        let demand = 10.0 * range.production(wg, zone) * 365.0 / 360.0;
-        let (mut sum, mut n) = (0.0f32, 0u32);
-        for tick in 0..60 * 24u64 {
-            let f = range.graze(wg, climate, zone, SimTime { tick }, demand);
-            if tick >= 40 * 24 {
-                sum += f;
-                n += 1;
-            }
-        }
-        let moyenne = sum / n as f32;
-        assert!(
-            moyenne <= 0.2,
-            "dix fois trop de bouches trouvent encore {:.0} % de leur ration du 40e au 60e jour",
-            100.0 * moyenne
-        );
-    }
-
-    /// CAP 3.1a, défaut trouvé par le stock saisonnier : les réserves doivent
-    /// suivre ce que le troupeau mange **dans la journée**, pas la façon dont
-    /// ses repas s'y répartissent. Deux troupeaux trouvent en moyenne 58 % de
-    /// leur ration, l'un à chaque heure, l'autre à satiété 14 heures puis rien
-    /// pendant 10 : en 30 jours, leurs réserves ne doivent pas différer de plus
-    /// de 0,01.
-    #[test]
-    fn les_reserves_suivent_la_ration_du_jour_pas_sa_repartition() {
-        let (mut reguliere, mut alternee) = (0.8f32, 0.8f32);
-        for _ in 0..30 {
-            for h in 0..24 {
-                reguliere = herd_condition_step(reguliere, 14.0 / 24.0);
-                alternee = herd_condition_step(alternee, if h < 14 { 1.0 } else { 0.0 });
-            }
-        }
-        assert!(
-            (reguliere - alternee).abs() <= 0.01,
-            "même ration du jour, réserves {reguliere:.3} (régulière) contre {alternee:.3} (alternée)"
-        );
-    }
-
-    /// CAP 3.1a : la faim tue quand les réserves sont épuisées. Cent jours
-    /// sans nourriture vident les réserves d'un renne (85 j en moyenne,
-    /// Svalbard) : la mortalité du jour doit alors dépasser de loin la
-    /// mortalité de fond — au moins trois fois.
     /// Une maille de taïga à saisons près du point de référence (seed 42).
     fn taiga_zone(sim: &Sim) -> (i64, i64) {
                 let origin = crate::scenario::reference_seed_point();
@@ -2279,71 +2359,152 @@ mod tests {
         );
     }
 
+    /// CAP 3.1b : dix fois trop de bouches pour une maille vident son
+    /// fourrage sur pied, puis ne trouvent que ce qui pousse au jour le jour —
+    /// au plus un cinquième de leur ration en moyenne, du 40e au 60e jour.
+    /// Remplace, au niveau de la maille, le critère de l'étape 4 que
+    /// `un_pays_surpeuple…` jugeait dans la simulation entière.
+    #[test]
+    fn dix_fois_trop_de_bouches_vident_la_maille() {
+        let mut sim = Sim::new(WorldSeed(42), 64);
+        let zone = taiga_zone(&sim);
+        let (wg, climate, range) = (sim.world.worldgen(), &sim.climate, &mut sim.rangeland);
+        let demand = 10.0 * range.production(wg, zone) * 365.0 / 360.0;
+        let (mut sum, mut n) = (0.0f32, 0u32);
+        for tick in 0..60 * 24u64 {
+            let f = range.graze(wg, climate, zone, SimTime { tick }, demand);
+            if tick >= 40 * 24 {
+                sum += f;
+                n += 1;
+            }
+        }
+        let moyenne = sum / n as f32;
+        assert!(
+            moyenne <= 0.2,
+            "dix fois trop de bouches trouvent encore {:.0} % de leur ration du 40e au 60e jour",
+            100.0 * moyenne
+        );
+    }
+
+    /// Fait vivre `herd` `days` jours à nourriture `food`, la pousse reprenant
+    /// au jour `green_up` s'il y en a un (au premier tick de ce jour).
+    fn live(herd: &mut Herd, days: u64, food: f32, green_up: Option<u64>, mut each_day: impl FnMut(u64, &Herd)) {
+        for day in 0..days {
+            for h in 0..24 {
+                let spring = if green_up == Some(day) && h == 0 { Spring::GreenUp } else { Spring::None };
+                herd_life_tick(herd, food, spring);
+            }
+            each_day(day, herd);
+        }
+    }
+
+    /// CAP 3.2 : un troupeau de cerfs repu, sans prédateur, croît au plus de
+    /// 40 % par an (r max du cerf ~0,3 /an ; λ calculé 1,37) — et il croît.
+    /// Avant 3.2 : ×36 par an.
+    #[test]
+    fn un_troupeau_de_cerfs_repu_croit_d_au_plus_40_pour_cent_par_an() {
+        let mut herd = Herd::new(100.0, Species::Deer);
+        live(&mut herd, 360, 1.0, Some(0), |_, _| {});
+        assert!(
+            (115.0..=140.0).contains(&herd.population),
+            "100 cerfs repus sont {:.0} au bout d'un an (attendu 115-140)",
+            herd.population
+        );
+    }
+
+    /// CAP 3.2 : les naissances tombent dans les 30 jours qui suivent le
+    /// reverdissement ; hors de cette fenêtre, l'effectif ne monte jamais.
+    #[test]
+    fn les_naissances_suivent_le_reverdissement() {
+        let mut herd = Herd::new(100.0, Species::Deer);
+        let mut veille = herd.population;
+        let mut hors_fenetre = 0;
+        live(&mut herd, 360, 1.0, Some(100), |day, h| {
+            if !(100..130).contains(&day) && h.population > veille {
+                hors_fenetre += 1;
+            }
+            veille = h.population;
+        });
+        assert_eq!(hors_fenetre, 0, "{hors_fenetre} jours de croissance hors de la saison des naissances");
+    }
+
+    /// CAP 3.2 : à 35 % de réserves, les jeunes meurent de faim, pas les
+    /// adultes (seuils 0,5 et 0,2) : sur 30 jours, la part de jeunes perdue
+    /// dépasse au moins trois fois celle des adultes, et 5 %.
+    #[test]
+    fn a_35_pour_cent_de_reserves_les_jeunes_meurent_de_faim_pas_les_adultes() {
+        let mut herd = Herd::new(100.0, Species::Deer);
+        herd.young = 30.0;
+        herd.condition = 0.35;
+        let upkeep = HERD_REFILL_DAYS / (HERD_RESERVE_DAYS + HERD_REFILL_DAYS);
+        let (young0, adults0) = (herd.young, herd.population - herd.young);
+        live(&mut herd, 30, upkeep, None, |_, _| {});
+        let young_loss = 1.0 - herd.young / young0;
+        let adult_loss = 1.0 - (herd.population - herd.young) / adults0;
+        assert!(
+            young_loss > 0.05 && young_loss >= 3.0 * adult_loss,
+            "à 35 % de réserves, jeunes −{:.1} %, adultes −{:.1} % en 30 jours",
+            100.0 * young_loss,
+            100.0 * adult_loss
+        );
+    }
+
+    /// CAP 3.1a, défaut trouvé par le stock saisonnier : les réserves doivent
+    /// suivre ce que le troupeau mange **dans la journée**, pas la façon dont
+    /// ses repas s'y répartissent. Deux troupeaux trouvent en moyenne 58 % de
+    /// leur ration, l'un à chaque heure, l'autre à satiété 14 heures puis rien
+    /// pendant 10 : en 30 jours, leurs réserves ne doivent pas différer de plus
+    /// de 0,01.
+    #[test]
+    fn les_reserves_suivent_la_ration_du_jour_pas_sa_repartition() {
+        let (mut reguliere, mut alternee) = (0.8f32, 0.8f32);
+        for _ in 0..30 {
+            for h in 0..24 {
+                reguliere = herd_condition_step(reguliere, 14.0 / 24.0);
+                alternee = herd_condition_step(alternee, if h < 14 { 1.0 } else { 0.0 });
+            }
+        }
+        assert!(
+            (reguliere - alternee).abs() <= 0.01,
+            "même ration du jour, réserves {reguliere:.3} (régulière) contre {alternee:.3} (alternée)"
+        );
+    }
+
+    /// CAP 3.1a : la faim tue quand les réserves sont épuisées. Cent jours
+    /// sans nourriture vident les réserves d'un renne (85 j en moyenne,
+    /// Svalbard) : la mortalité du jour doit alors dépasser de loin la
+    /// mortalité de fond — au moins trois fois.
     #[test]
     fn la_faim_tue_une_fois_les_reserves_epuisees() {
-        let (mut pop, mut c) = (100.0f32, 1.0f32);
-        let mut veille = pop;
-        for day in 0..100 {
-            veille = pop;
-            for _ in 0..24 {
-                (pop, c) = herd_tick(pop, c, 0.0);
+        let mut herd = Herd::new(100.0, Species::Deer);
+        let mut veille = herd.population;
+        live(&mut herd, 100, 0.0, None, |day, h| {
+            if day < 99 {
+                veille = h.population;
             }
-            let _ = day;
-        }
-        let taux = (veille - pop) / veille;
+        });
+        let taux = (veille - herd.population) / veille;
+        let fond = Species::Deer.vital().adult_death / 360.0;
         assert!(
-            taux >= 3.0 * HERB_DEATH_PER_DAY,
-            "au 100e jour de famine, {:.2} % des bêtes meurent par jour (fond : {:.2} %) : la faim ne tue pas",
+            taux >= 3.0 * fond,
+            "au 100e jour de famine, {:.3} % des bêtes meurent par jour (fond : {:.3} %) : la faim ne tue pas",
             100.0 * taux,
-            100.0 * HERB_DEATH_PER_DAY
+            100.0 * fond
         );
     }
 
-    /// CAP 3.1a : les naissances suivent les réserves, pas le repas du jour.
-    /// Un troupeau gras qui jeûne dix jours a encore presque toutes ses
-    /// réserves : il doit encore croître, à au moins la moitié de sa
-    /// croissance repue.
+    /// CAP 3.2 : les naissances suivent les réserves au reverdissement
+    /// (fécondité liée à la condition, Rùm) : à moitié de réserves, moitié de
+    /// naissances.
     #[test]
-    fn dix_jours_de_jeune_n_arretent_pas_un_troupeau_gras() {
-        let (mut pop, mut c) = (100.0f32, 1.0f32);
-        let mut veille = pop;
-        for _ in 0..10 {
-            veille = pop;
-            for _ in 0..24 {
-                (pop, c) = herd_tick(pop, c, 0.0);
-            }
-        }
-        let croissance = (pop - veille) / veille;
-        let repue = HERB_BIRTH_PER_DAY - HERB_DEATH_PER_DAY;
-        assert!(
-            croissance >= 0.5 * repue,
-            "au 10e jour de jeûne, croissance {:.3} %/j contre {:.3} %/j repu : le troupeau vit au jour le jour",
-            100.0 * croissance,
-            100.0 * repue
-        );
-    }
-
-    #[test]
-    fn un_troupeau_bien_nourri_croit_et_un_troupeau_affame_fond() {
-        // Satiété au-dessus du point d'équilibre (0,5) : croissance.
-        let mut repu = 30.0;
-        let mut affame = 30.0;
-        for _ in 0..24 * 30 {
-            repu = herd_population_step(repu, 1.0);
-            affame = herd_population_step(affame, 0.0);
-        }
-        assert!(repu > 33.0, "un mois de pâture pleine doit faire croître : {repu:.1}");
-        assert!(affame < 25.0, "un mois sans herbe doit faire fondre : {affame:.1}");
-    }
-
-    #[test]
-    fn la_satiete_d_equilibre_stabilise_l_effectif() {
-        // À satiété = mortalité/natalité = 0,5, le troupeau ne bouge pas.
-        let mut pop = 40.0;
-        for _ in 0..24 * 90 {
-            pop = herd_population_step(pop, 0.5);
-        }
-        assert!((pop - 40.0).abs() < 0.5, "doit rester ~40 têtes : {pop:.2}");
+    fn les_naissances_suivent_les_reserves_au_reverdissement() {
+        let mut gras = Herd::new(100.0, Species::Deer);
+        let mut maigre = Herd::new(100.0, Species::Deer);
+        maigre.condition = 0.5;
+        herd_life_tick(&mut gras, HERD_UPKEEP, Spring::GreenUp);
+        herd_life_tick(&mut maigre, HERD_UPKEEP, Spring::GreenUp);
+        let ratio = maigre.bearing / gras.bearing;
+        assert!((ratio - 0.5).abs() < 0.02, "naissances à moitié de réserves : {ratio:.3} de celles d'un troupeau gras");
     }
 
     #[test]

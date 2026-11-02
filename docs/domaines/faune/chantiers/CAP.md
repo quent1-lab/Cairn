@@ -563,6 +563,64 @@ Tests rouges prévus : (a) un troupeau de cerfs bien nourri croît au plus de 40
 qui suivent le reverdissement ; (c) à réserves de 35 %, les jeunes meurent de faim et pas les
 adultes.
 
+### 3.2 — tests rouges et prédictions (écrites avant le code)
+
+Tests rouges vus échouer (interface `herd_life_tick` posée sur l'ancien comportement) :
+`un_troupeau_de_cerfs_repu_croit_d_au_plus_40_pour_cent_par_an` (100 → 3 657 en un an) ;
+`les_naissances_suivent_le_reverdissement` (330 jours de croissance hors de la fenêtre) ;
+`a_35_pour_cent_de_reserves_les_jeunes_meurent_de_faim_pas_les_adultes` (jeunes −0 %,
+adultes −12,3 %).
+
+Prédictions (`cap_demo` saisonnier, 4 seeds, 50 ans, départ 11 têtes/km²) :
+- **montée lente** : une dizaine d'années pour approcher l'équilibre (r ~0,15-0,4 /an) ;
+- **niveau** : médiane de l'an 50 entre 0,5 et 1,5 fois la capacité annuelle dans les biomes à
+  hiver (la mort des jeunes en fin d'hiver borne, plus la natalité) ;
+- **cycle annuel modéré** : max ÷ min de l'année entre 1,1 et 1,8 (pulse de naissances, puis
+  morts d'hiver) ;
+- **plus d'effondrement ×100** : min de l'an 50 ≥ 0,2 fois sa médiane, sur toutes les seeds.
+Réfutée si une médiane sort de 0,3-2 fois la capacité, ou si une population s'effondre sous
+0,1 fois sa médiane. Ce qui reste choisi et non sourcé : seuils de faim (0,2 adultes, 0,5
+jeunes), mortalité de fond des jeunes (0,10), part d'entretien (0,59), τ du fourrage (300 j),
+toute la gazelle.
+
+### 3.2 — mesure (`cap_demo`, 50 ans, 4 seeds ; mailles trouvées seulement)
+
+| biome | seed | an 10 (min/méd/max) | an 50 (min/méd/max) | capacité annuelle | méd ÷ capacité | saison |
+|---|---|---|---|---|---|---|
+| forêt | 42 | 82/87/93 | 89/89/89 | 52 | 1,71 | pousse toute l'année |
+| forêt | 7 | 52/64/66 | 54/63/64 | 56 | 1,13 | à hiver |
+| forêt | 1337 | 87/90/97 | 95/95/95 | 56 | 1,71 | pousse toute l'année |
+| forêt | 2024 | 79/82/83 | 83/86/88 | 63 | 1,38 | à hiver |
+| taïga | 7, 2024 | 30/31/37 | 35/36/37 | 37 | 0,98 | à hiver |
+| toundra | 2024 | 6/8/8 | 21/21/22 | 27 | 0,80 | à hiver |
+| prairie | 42 | 41/49/50 | 68/70/74 | 42 | 1,67 | à hiver |
+| prairie | 7 | 36/41/42 | 42/43/44 | 41 | 1,06 | à hiver |
+| prairie | 1337 | 39/41/44 | 67/67/67 | 39 | 1,71 | pousse toute l'année |
+| prairie | 2024 | 38/45/46 | 47/49/50 | 42 | 1,17 | à hiver |
+| steppe | 7 | 267/328/369 | 202/340/378 | 278 | 1,22 (75-340 selon l'année) | à hiver |
+| steppe | 2024 | 267/450/500 | 303/367/414 | 333 | 1,10 (208-450) | à hiver |
+| savane | 7 | 200/233/272 | 1 280/1 281/1 283 | 750 | 1,71 | pousse toute l'année |
+
+- **Montée lente : tenue** (10 à 20 ans pour approcher l'équilibre ; an 1 : +10 à +40 %).
+- **Niveau 0,5-1,5 fois la capacité dans les biomes à hiver : tenue** (0,80-1,38 ; prairie 42 à
+  1,67, seule hors fourchette). Là où la maille **pousse toute l'année**, la médiane est à 1,71 :
+  c'est 1/m, le niveau où les bêtes ne trouvent que leur entretien (m = 0,59).
+- **Cycle annuel 1,1-1,8 : réfuté vers le bas** : max ÷ min de 1,00 à 1,10 hors steppe. À
+  l'équilibre, les réserves sont basses (~0,5 ou moins), donc peu de naissances et peu de morts :
+  le pulse ne fait que remplacer.
+- **Plus d'effondrement ×100 : tenue** (min ≥ 0,6 fois la médiane partout ; la steppe varie de
+  ×4 d'une année à l'autre, la gazelle restant la plus rapide, r ~0,4).
+- Tests : 30 tests de faune verts, dont les trois rouges de 3.2. Deux anciens tests retirés,
+  leur sujet n'existant plus (natalité quotidienne suivant la satiété) : `un_troupeau_bien_nourri…`,
+  `la_satiete_d_equilibre…` ; `dix_jours_de_jeune…` remplacé par
+  `les_naissances_suivent_les_reserves_au_reverdissement`.
+
+**Lecture** : le niveau sort désormais d'un mécanisme réel dans les pays à hiver (les jeunes
+meurent en fin d'hiver, les naissances suivent les réserves) et tombe à 0,8-1,4 fois ce que le
+fourrage accessible nourrit. Il reste au-dessus du réel d'autant que ce fourrage l'est (étape 4)
+et que les prédateurs n'y sont pas (étape 3.3). Deux voisins à regarder : la part d'entretien
+(0,59, non sourcée) fixe le niveau des pays sans hiver ; et la toundra (0,8) n'est plus bloquée.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de

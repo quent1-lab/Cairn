@@ -580,10 +580,10 @@ fn fauna_stats_report(sim: &Sim) {
     //   accélérer la repousse. —
     println!("\n╔══ FOURRAGE — CE QUI LIMITE LA SATIÉTÉ, PAR BIOME ═══════════════════╗");
     println!(
-        "  Satiété d'équilibre = {:.2} (mortalité/natalité). En dessous, le troupeau",
-        cairn_sim::fauna::HERB_SATIATION_EQUILIBRIUM
+        "  Part d'entretien = {:.2} (CAP 3.1a). En dessous, le troupeau",
+        cairn_sim::fauna::HERD_UPKEEP
     );
-    println!("  perd des têtes. « rempli » = biomasse trouvée / capacité de la tuile :");
+    println!("  perd ses réserves. « rempli » = biomasse trouvée / capacité de la tuile :");
     println!("  1,00 veut dire pâture pleine *pour ce biome*, donc broutage hors de cause.\n");
     println!(
         "  Les trois dernières colonnes sont LE discriminateur : `rempli` porte sur la"

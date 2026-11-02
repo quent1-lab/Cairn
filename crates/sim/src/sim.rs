@@ -700,23 +700,14 @@ impl Sim {
         population: f32,
         species: fauna::Species,
     ) -> FaunaId {
-        self.spawn_herd_condition(x, y, population, species, 1.0)
+        self.spawn_herd_from(x, y, Herd::new(population, species))
     }
 
-    /// Fait naître un troupeau avec ses **réserves** (CAP 3.1a) : la fille d'une
-    /// fission hérite de la condition de sa mère.
-    fn spawn_herd_condition(
-        &mut self,
-        x: f64,
-        y: f64,
-        population: f32,
-        species: fauna::Species,
-        condition: f32,
-    ) -> FaunaId {
+    /// Fait naître un troupeau **tel quel** : la fille d'une fission hérite des
+    /// réserves, des jeunes et des naissances à venir de sa mère (CAP 3.1a, 3.2).
+    fn spawn_herd_from(&mut self, x: f64, y: f64, herd: Herd) -> FaunaId {
         let id = FaunaId(self.next_fauna_id);
         self.next_fauna_id += 1;
-        let mut herd = Herd::new(population, species);
-        herd.condition = condition;
         self.fauna.spawn((id, Position { x, y }, herd));
         self.herd_births.insert(id.0, (self.time.tick, 0));
         id
@@ -1569,7 +1560,7 @@ impl Sim {
         // Le bilan (CHA-5) : ce que la démographie a ajouté, fissions remises
         // (la mère a cédé la moitié, la fille naît plus bas) ; les restes des
         // troupeaux condamnés sortent avec eux.
-        let born = self.fauna_census().0 + fissions.iter().map(|f| f.2).sum::<f32>() - heads_before;
+        let born = self.fauna_census().0 + fissions.iter().map(|f| f.2.population).sum::<f32>() - heads_before;
         self.fauna_flows.growth += f64::from(born);
         for &entity in &dead_herds {
             if let Ok(h) = self.fauna.get::<&Herd>(entity) {
@@ -1579,8 +1570,8 @@ impl Sim {
         for entity in dead_herds {
             let _ = self.fauna.despawn(entity);
         }
-        for (x, y, population, species, condition) in fissions {
-            let id = self.spawn_herd_condition(x, y, population, species, condition);
+        for (x, y, daughter) in fissions {
+            let id = self.spawn_herd_from(x, y, daughter);
             self.herd_births.insert(id.0, (time.tick, 2));
         }
         // Les troupeaux laissent leur piste (CHA-2).
@@ -1601,14 +1592,17 @@ impl Sim {
             let plan_input: Vec<fauna::MergeView> = views.iter().map(|(_, v)| *v).collect();
             for (absorber, absorbed) in fauna::merge_plan(&plan_input) {
                 let gained = views[absorbed].1.2;
-                let gained_condition =
-                    self.fauna.get::<&Herd>(views[absorbed].0).map_or(1.0, |h| h.condition);
-                if let Ok(mut h) = self.fauna.get::<&mut Herd>(views[absorber].0) {
-                    // Les réserves se mêlent à proportion des têtes (CAP 3.1a).
+                let other = self.fauna.get::<&Herd>(views[absorbed].0).map(|h| *h).ok();
+                if let (Ok(mut h), Some(o)) = (self.fauna.get::<&mut Herd>(views[absorber].0), other) {
+                    // Les réserves se mêlent à proportion des têtes (CAP 3.1a) ;
+                    // jeunes et naissances à venir s'additionnent (CAP 3.2).
                     let total = h.population + gained;
                     if total > 0.0 {
-                        h.condition = (h.condition * h.population + gained_condition * gained) / total;
+                        h.condition = (h.condition * h.population + o.condition * gained) / total;
                     }
+                    h.young += o.young;
+                    h.bearing += o.bearing;
+                    h.bearing_ticks = h.bearing_ticks.max(o.bearing_ticks);
                     h.population += gained;
                 }
                 let _ = self.fauna.despawn(views[absorbed].0);

@@ -2,7 +2,7 @@
 //! dans une maille de pâturage réelle (biome et climat d'une seed), sans
 //! espace, sans prédateur, sans humain. Il appelle les mêmes fonctions que
 //! `fauna::update_herds` — le fourrage de la maille (`Rangeland::graze`) et
-//! la démographie (`herd_tick`) — et fait tenir des décennies en secondes.
+//! la démographie (`herd_life_tick`, avec le signal de saison `Rangeland::spring`) — et fait tenir des décennies en secondes.
 //!
 //! Ce qu'il ne voit pas : les déplacements, la fuite, la prédation, la
 //! migration, le partage d'une maille entre espèces.
@@ -81,8 +81,7 @@ fn main() {
             let (wg, climate, range) = (sim.world.worldgen(), &sim.climate, &mut sim.rangeland);
             // Capacité annuelle : production moyenne (kg/j sur 365 j) ramenée à l'année de 360 j.
             let capacity = range.production(wg, zone) * 365.0 / 360.0 / ration / ZONE_KM2;
-            let mut n = start * ZONE_KM2;
-            let mut c = 1.0f32;
+            let mut herd = fauna::Herd::new(start * ZONE_KM2, species);
             let mut out = String::new();
             let mut tick = 0u64;
             for year in 1..=years {
@@ -91,15 +90,31 @@ fn main() {
                 for day in 0..360 {
                     if trace.is_some() && year == years && day % 10 == 0 {
                         let kg = range.peek_stock(wg, climate, zone, SimTime { tick });
-                        println!("  j{day:>3} densité {:.1} réserves {c:.3} fourrage {:.0} kg ({:.1} j de demande)", n / ZONE_KM2, kg, kg / (n * ration).max(1e-6));
+                        let n = herd.population;
+                        println!(
+                            "  j{day:>3} densité {:.1} (jeunes {:.1}) réserves {:.3} fourrage {:.0} kg ({:.1} j de demande)",
+                            n / ZONE_KM2,
+                            herd.young / ZONE_KM2,
+                            herd.condition,
+                            kg,
+                            kg / (n * ration).max(1e-6)
+                        );
                     }
                     for _ in 0..TICKS_PER_DAY {
-                        let food = range.graze(wg, climate, zone, SimTime { tick }, n * ration);
+                        let food = range.graze(wg, climate, zone, SimTime { tick }, herd.population * ration);
                         food_min = food_min.min(food);
-                        (n, c) = fauna::herd_tick(n, c, food);
+                        let spring = if tick % TICKS_PER_DAY == 0 {
+                            range.spring(wg, climate, zone, tick / TICKS_PER_DAY)
+                        } else {
+                            match range.spring(wg, climate, zone, tick / TICKS_PER_DAY) {
+                                fauna::Spring::Continuous => fauna::Spring::Continuous,
+                                _ => fauna::Spring::None,
+                            }
+                        };
+                        fauna::herd_life_tick(&mut herd, food, spring);
                         tick += 1;
                     }
-                    d.push(n / ZONE_KM2);
+                    d.push(herd.population / ZONE_KM2);
                 }
                 if year == 1 || year % 10 == 0 {
                     d.sort_by(f32::total_cmp);
