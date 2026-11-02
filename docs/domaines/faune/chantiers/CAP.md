@@ -621,6 +621,20 @@ fourrage accessible nourrit. Il reste au-dessus du réel d'autant que ce fourrag
 et que les prédateurs n'y sont pas (étape 3.3). Deux voisins à regarder : la part d'entretien
 (0,59, non sourcée) fixe le niveau des pays sans hiver ; et la toundra (0,8) n'est plus bloquée.
 
+### Jalon 3.1-3.2 — prédictions avant le banc spatial (2026-11-02)
+
+Régime : `cap_nature` (sans humains ni immigration, monde ouvert), forêt, taïga, prairie,
+seeds 42, 7, 1337, 2024, 10 ans, départ jour 135, binaire `d0e6e3e` ; et `acceptation 1 135`
+(4 seeds × 2 scènes) contre la variante `9802e30` (après le correctif des meutes).
+- croissance du carré ≤ 45 %/an les deux premières années (avant : ×3-4 la première année) ;
+- densité du carré à l'an 10 entre 0,5 et 1,7 fois la capacité annuelle ;
+- min ÷ médiane de l'an 10 ≥ 0,8 (pas d'effondrement) ;
+- prédateurs : toujours éteints sans immigration sur au moins un tiers des cases (rien n'a
+  changé chez eux) ; prédation de 1 à 10 % des têtes par an (proie plus lente) ;
+- acceptation : la chasse rend moins (gibier moins dense au départ des runs, plus lent à se
+  refaire) — verdicts humains dans le bruit déjà mesuré (±50 % sur le gibier à un an).
+Réfutée si une densité dépasse 2 fois la capacité, ou si le gibier s'éteint sur une case.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de
