@@ -195,41 +195,42 @@ valent pour les 23 autres cases et pour les années 2 à 4 de celle-ci.
 et saison d'abord, en amont de tout le reste) ; si P2 tombe, la prédation borne déjà quelque
 part, et l'ordre des corrections se rediscute avec l'utilisateur avant d'y toucher.
 
-### Témoin, première moitié (seeds 42 et 1337, binaire `9b31e57`, 2026-11-02)
+### Coût du banc
 
-Coût : la série complète prenait ~8 h par seed (steppe 4 ans : 8 000-11 800 s ; savane : 3 600
-troupeaux à l'an 2). Savane arrêtée à 2 ans ; seeds 7 et 2024 relancées avec forêt, taïga,
-toundra, prairie sur 4 ans, steppe sur 3, savane sur 2 (`out/cap/queue2.sh`). Seed 1337 : aucun
-carré de toundra trouvé. Dernière année complète :
+La série complète prenait ~8 h par seed (steppe 4 ans : 8 000-12 800 s ; savane : 2 200-3 600
+troupeaux à l'an 2) : horizons réduits pour 7 et 2024 (`out/cap/queue2.sh`). Un banc à taux
+vitaux réels (r ~0,15 /an) demandera des décennies de jeu : il faudra un monde plus petit ou
+moins d'entités.
 
-| biome | seed | an | carré min / méd (têtes/km²) | charge méd | mailles occupées (têtes/km²) | prédation /an ÷ têtes | prédateurs en fin |
-|---|---|---|---|---|---|---|---|
-| forêt | 42 | 4 | 46,9 / 49,7 | 0,93 | 43,8 | 1,3 % | 16 |
-| forêt | 1337 | 4 | 38,8 / 42,3 | 0,95 | 44,1 | 1,3 % | 10 |
-| taïga | 42 | 4 | 33,0 / 36,2 | 0,85 | 33,9 | 0,0 % | 0 |
-| taïga | 1337 | 4 | 30,5 / 33,5 | 0,88 | 33,7 | 0,9 % | 4 |
-| toundra | 42 | 4 | 6,5 / 8,4 | 0,30 | 32,0 | 0,0 % | 0 |
-| prairie | 42 | 4 | 34,7 / 37,3 | 0,82 | 34,3 | 0,2 % | 3 |
-| prairie | 1337 | 4 | 31,0 / 35,2 | 0,80 | 33,6 | 1,0 % | 11 |
-| steppe | 42 | 4 | 212,8 / 221,6 | 0,94 | 69,2 | 0,0 % | 0 |
-| steppe | 1337 | 4 | 199,6 / 214,7 | 0,92 | 115,3 | 0,1 % | 6 |
-| savane | 42 | 2 | 190,2 / 478,8 | 0,83 | 228,3 | 0,1 % | 6 |
-| savane | 1337 | 2 | 188,2 / 432,9 | 0,76 | 199,4 | 0,2 % | 11 |
+### Témoin complet (4 seeds, binaire `9b31e57`, 2026-11-02)
 
-Lecture provisoire (2 seeds sur 4) :
-- **P1 tenue hors toundra** : charge 0,80-0,95 et en hausse ; forêt 42-50 /km² (capacité 55),
-  prairie 35-37 (41), steppe 215-222 (gazelles surtout), savane 430-480 dès l'an 2. Prairie
-  légèrement sous 0,85, encore en croissance.
-- **P2 tenue, au-delà** : prédation 0-1,3 % des têtes par an (réel 9-13 %). Et **les prédateurs
-  s'éteignent sans immigration** (0 en fin sur taïga 42, toundra 42, steppe 42) malgré 30 à
-  220 têtes /km² : la meute du modèle ne se maintient qu'à ≥ 96 % de sa capacité de chasse
-  (`PRED_DEATH_PER_DAY`), ce qu'une proie qui détale de 2 km ne lui laisse pas. Dans la
-  simulation habitée, les prédateurs n'existent que par l'immigration, une garde de coût.
-- **P3 tenue** : minimum de l'an 4 à 88-96 % de la médiane ; pas de goulot d'hiver.
-- **Toundra, non prédit** : la charge du carré reste à 0,30 quatre ans durant (≈ 1 100 têtes,
-  7-9 /km²) pendant que les têtes s'étalent ailleurs (339 mailles) ; satiété ~0,5 pour une
-  maille qui en offrirait 1,7 : c'est **l'herbe de la tuile** qui borne en toundra (capacité 25,
-  broutage de population/5 par tuile et par tick), pas la maille. Une seule seed.
+Régime : sans humains ni immigration, départ jour 135 ; forêt, taïga, toundra, prairie 4 ans ;
+steppe 4 ans (42, 1337) ou 3 (7, 2024) ; savane 2 ans. Toundra : carré trouvé sur 42 et 2024
+seulement. Dernière année complète (`out/cap/analyse.py`) :
+
+| biome | seeds | charge méd | carré méd (têtes/km²) | min ÷ méd | prédation /an ÷ têtes | prédateurs en fin |
+|---|---|---|---|---|---|---|
+| forêt | 4 | 0,87-0,95 | 42-50 (capacité 55) | 0,92-0,95 | 0,2-1,3 % | 1-16 |
+| taïga | 4 | 0,81-0,92 | 30-75 (75 : carré mêlé de forêt) | 0,90-0,92 | 0-0,9 % | 0, 0, 3, 4 |
+| toundra | 2 | **0,19-0,30** | 5-8 | — | 0-0,5 % | 0, 11 |
+| prairie | 4 | 0,80-0,88 | 35-37 (capacité 41) | 0,88-0,93 | 0,2-1,0 % | 3-11 |
+| steppe | 4 | 0,92-0,99 | 196-254 | 0,84-0,96 | 0-0,3 % | 0-14 |
+| savane (an 2) | 4 | 0,69-0,83, en hausse | 330-479 | — | 0,1-0,3 % | 6-18 |
+
+Verdict sur les prédictions :
+- **P1 tenue** (forêt, steppe ; taïga) ; prairie à 0,80-0,88, sous la fourchette sur 3 seeds mais
+  au-dessus du seuil de réfutation (0,7) et à −10/−15 % de la capacité : tenue. Savane non jugée
+  (horizon trop court, encore en croissance).
+- **P2 tenue, et au-delà** : prédation ≤ 1,3 % par an sur 22 cases (réel 9-13 %) ; **les
+  prédateurs s'éteignent** sans immigration sur 4 cases sur 22, malgré 30-250 têtes /km².
+- **P3 tenue** : min ÷ médiane ≥ 0,84 partout où elle se juge.
+- **P4 tenue** : les 4 seeds vont dans le même sens.
+- **Non prédit, 2/2** : en toundra, la charge du carré plafonne à 0,19-0,30 ; satiété ~0,5 pour
+  une maille qui offrirait 1,7-2,6 : l'herbe de la tuile borne (capacité 25), pas la maille.
+
+**Seuil de décision atteint** : P1 et P2 tiennent ; la lecture de l'étape 1 est confirmée par
+la mesure. Le niveau du gibier n'est fixé que par le fourrage, ni la prédation ni l'hiver n'y
+prennent part.
 
 ## Étape 3 — corriger règle par règle
 
