@@ -1057,6 +1057,9 @@ Prédictions (écrites avant) :
 - prises par loup et par an entre 15 et 30 en médiane ;
 - densité de loups à l'équilibre entre 0,01 et 0,06 /km² (réel : jusqu'à 0,054).
 Réfutée si les loups s'éteignent sur plus de 6 runs ou si le gibier s'éteint sur une run.
+Suite complète avant la run (`a79bdf6`) : 311 verts ; rouges connus surchasse, curieux, et
+**`un_territoire_ne_porte_qu_une_poignee_de_predateurs`**, rouge depuis le retrait du plafond de
+densité : il attend les combats entre meutes (mécanisme manquant, à traiter).
 **Si réfutée** : décision de l'utilisateur (2026-11-03) — on consigne, et on refait un tour
 d'analyse et de modification dans une nouvelle session.
 

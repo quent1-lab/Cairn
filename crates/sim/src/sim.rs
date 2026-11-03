@@ -2874,6 +2874,13 @@ mod tests {
     /// au plus) en nourrit une dizaine. Sans territoire, rien ne bornait le
     /// prédateur sinon sa proie — mesuré sur 5 ans : 1,5 à 2 prédateurs par
     /// km², et le gibier éteint sur 2 seeds sur 4 à l'an 4.
+    ///
+    /// **Rouge connu depuis CAP 3.3 (2026-11-03)** : le plafond de densité
+    /// (0,05 loup/km²) qui faisait passer ce test a été retiré (règle 10 : les
+    /// valeurs naissent de l'usage) ; ce qui borne réellement 80 loups sur un
+    /// kilomètre — les combats entre meutes, 29 % des morts d'adultes au
+    /// Minnesota (Mech 1977) — n'est pas encore modélisé. Le test reste rouge
+    /// jusqu'à ce mécanisme (`CAP.md`).
     #[test]
     fn un_territoire_ne_porte_qu_une_poignee_de_predateurs() {
         let (mut sim, home) = scenario_setup(11, 0, 0);
