@@ -108,7 +108,7 @@ struct Sample {
     /// a été prise ne permet pas de savoir ce qu'elle réfute.
     density: f64,
     /// **Prises réellement réalisées** par prédateur et par jour, contre un
-    /// plafond en masse `WOLF_MAX_KILL_KG_DAY` quand le gibier est à portée.
+    /// plafond de prises — il n'y en a plus depuis CAP 3.3 (la chasse par les besoins).
     ///
     /// La mesure qui départage « le prédateur ne trouve pas ses proies » de
     /// « l'équation est mal réglée ». Déduite du run long à ~0,044 contre 0,18

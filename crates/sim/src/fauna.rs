@@ -94,14 +94,6 @@ pub const HERD_UPKEEP: f32 = HERD_REFILL_DAYS / (HERD_RESERVE_DAYS + HERD_REFILL
 
 pub const PACK_START: f32 = 5.0;
 pub const PACK_MIN: f32 = 1.0;
-/// Plafond de chasse d'un loup, en kg de viande par jour, quand le gibier est à
-/// portée (CAP 3.3) : le plateau de la réponse fonctionnelle, 3,36 orignaux par
-/// loup et par 100 jours (Messier 1994, 27 études), × ~200 kg comestibles par
-/// orignal (choix : la moitié d'une masse vivante de ~400 kg). Il remplace
-/// 0,05 **tête** par loup et par jour (18 par an, le taux ordinaire et non le
-/// plafond), qui ne donnait que 3 kg de cerf par jour — sous l'entretien d'un
-/// loup — et éteignait les meutes de forêt et de taïga (`CAP.md`, 3.3).
-const WOLF_MAX_KILL_KG_DAY: f32 = 6.7;
 // La démographie des meutes (CAP 3.3) : la même vie que les troupeaux —
 // réserves, une portée par an, jeunes qui meurent de faim les premiers — plus
 // la viande de leurs prises et la dispersion des jeunes. Elle remplace une
@@ -117,11 +109,16 @@ const PACK_RESERVE_DAYS: f32 = 30.0;
 /// reproduction réussie 2,3-3,2 kg/j, wolf.org) ; d'où des réserves remplies en
 /// 45 jours à ration entière.
 const PACK_UPKEEP: f32 = 0.6;
-/// Durée de vie de la viande d'une prise (charognards, pourriture). Choix.
-const MEAT_PERSISTENCE_DAYS: f32 = 5.0;
-/// Une meute ne chasse que si sa viande tombe sous ce nombre de jours de
-/// ration. Choix : un loup repu ne chasse pas.
-const PACK_HUNT_BELOW_DAYS: f32 = 2.0;
+/// Ce que l'estomac d'un loup contient au plus : ~10 kg de viande en un repas
+/// (CAP 3.3, `SOURCES.md`). Il se vide au rythme de la ration ; la meute ne
+/// chasse que l'estomac vide et la carcasse finie : l'apport moyen **sort** de
+/// la digestion, aucun plafond de prises n'est posé (règle 10 : les valeurs
+/// naissent de l'usage).
+const WOLF_STOMACH_KG: f32 = 10.0;
+/// Ce que les corbeaux prennent sur une carcasse, kg par jour (18,5 corbeaux
+/// en moyenne, 14,1 kg/j ; Kaczensky et al. 2005, Yukon).
+const RAVEN_KG_DAY: f32 = 14.0;
+
 /// Mortalité de fond annuelle : adultes (survie 0,78, Superior National
 /// Forest), louveteaux (choix ; 40-60 % meurent la première année, la faim
 /// faisant le reste).
@@ -830,6 +827,8 @@ pub struct Pack {
     pub quarry: Option<hecs::Entity>,
     /// Viande de ses prises qui reste à manger, en kg (CAP 3.3).
     pub meat: f32,
+    /// Contenu de l'estomac d'un loup, en kg (CAP 3.3).
+    pub stomach: f32,
     /// Réserves corporelles des loups (0–1, CAP 3.3).
     pub condition: f32,
     /// Louveteaux de l'année, compris dans `population`.
@@ -849,6 +848,7 @@ impl Pack {
             species,
             quarry: None,
             meat: 0.0,
+            stomach: 0.0,
             condition: 1.0,
             young: 0.0,
             bearing: 0.0,
@@ -1005,14 +1005,22 @@ pub const WOLF_RATION_KG_DAY: f32 = 4.5;
 /// signal de saison de sa maille. Renvoie le nombre de loups qui partent
 /// (dispersion).
 pub fn pack_tick(pack: &mut Pack, meat_kg: f32, share: f32, spring: Spring) -> f32 {
-    // La viande : ce que la meute a tué, mangé jusqu'à la ration, le reste se perd.
+    // La carcasse : ce que la meute a tué ; les corbeaux en prennent leur part.
     pack.meat += meat_kg;
-    let want = pack.population * WOLF_RATION_KG_DAY * DT_DAYS;
-    let eaten = want.min(pack.meat);
-    pack.meat -= eaten;
-    pack.meat *= (-DT_DAYS / MEAT_PERSISTENCE_DAYS).exp();
+    pack.meat = (pack.meat - RAVEN_KG_DAY * DT_DAYS).max(0.0);
+    // Les loups s'en remplissent l'estomac, puis le digèrent au rythme de la
+    // ration : c'est la digestion, pas un plafond, qui règle l'apport.
+    if pack.population > 0.0 {
+        let room = (WOLF_STOMACH_KG - pack.stomach).max(0.0) * pack.population;
+        let take = room.min(pack.meat);
+        pack.meat -= take;
+        pack.stomach += take / pack.population;
+    }
+    let ration_tick = WOLF_RATION_KG_DAY * DT_DAYS;
+    let digested = pack.stomach.min(ration_tick);
+    pack.stomach -= digested;
     // Seuls les loups qui ont un territoire mangent (C3).
-    let food = if want > 0.0 { eaten / want * share } else { 0.0 };
+    let food = digested / ration_tick * share;
     // Les réserves, linéaires dans la ration comme celles des troupeaux.
     // Vides en `PACK_RESERVE_DAYS` sans rien manger : m × rate = 1 / T.
     let rate = 1.0 / (PACK_UPKEEP * PACK_RESERVE_DAYS);
@@ -1056,11 +1064,18 @@ pub fn pack_tick(pack: &mut Pack, meat_kg: f32, share: f32, spring: Spring) -> f
     dispersers
 }
 
-/// Proies qu'une meute de `population` prédateurs prélève en un tick, au plus
-/// le plafond de chasse en masse divisé par la masse comestible de la proie
-/// (`prey_kg`), bornée par le gibier réellement présent.
-pub fn pack_kills(population: f32, prey_available: f32, prey_kg: f32) -> f32 {
-    (WOLF_MAX_KILL_KG_DAY * population * DT_DAYS / prey_kg.max(1.0)).min(prey_available.max(0.0))
+/// Probabilité qu'une attaque de la meute tue sa proie (CAP 3.3) : elle croît
+/// avec le nombre de loups jusqu'à un plateau propre à la proie (MacNulty et
+/// al. 2012, Yellowstone : wapiti ~2 % pour un loup seul, ~20 % dès 4 ; bison
+/// 3-10 %, plateau vers 13). Cerf : le wapiti ; renne et gazelle : la même
+/// valeur, faute de source (choix) ; aurochs : le bison, un loup seul à 1/10
+/// du plateau (choix).
+pub fn attack_success(pack: f32, prey: Species) -> f32 {
+    let (lone, best, plateau) = match prey {
+        Species::Aurochs => (0.006, 0.06, 13.0),
+        _ => (0.02, 0.20, 4.0),
+    };
+    lone + (best - lone) * ((pack - 1.0) / (plateau - 1.0)).clamp(0.0, 1.0)
 }
 
 /// Vecteur unitaire fuyant `threat`. Si la menace est pile dessus, on part
@@ -1676,7 +1691,7 @@ pub const DENSITY_EDGES: [f32; 8] =
 /// besoin de rien ici) :
 ///
 /// - **réponse fonctionnelle** : prises par prédateur et par jour, rangées par
-///   classe de densité locale de proies. `pack_kills` ne fait pas apparaître la
+///   classe de densité locale de proies. `attack_success` ne fait pas apparaître la
 ///   densité, mais le rayon de chasse et l'écrêtage par le troupeau visé
 ///   peuvent en introduire une dépendance *de fait* — c'est précisément ce
 ///   qu'on ne veut pas déduire.
@@ -2026,7 +2041,9 @@ pub fn update_packs(
     range: &mut Rangeland,
     climate: &Climate,
     time: SimTime,
+    seed: WorldSeed,
 ) -> (Vec<Kill>, Vec<hecs::Entity>, Vec<PackFission>) {
+    let tick_seed = seed.derive(salt::PREDATION) ^ splitmix64(time.tick);
     let day = time.tick / cairn_core::TICKS_PER_DAY;
     let first_tick = time.tick % cairn_core::TICKS_PER_DAY == 0;
     let mut kills = Vec::new();
@@ -2043,7 +2060,7 @@ pub fn update_packs(
         .map(|(_, (p, pos))| ((pos.x, pos.y), p.population))
         .collect();
 
-    for (entity, (pack, pos)) in fauna.query_mut::<(&mut Pack, &mut Position)>() {
+    for (entity, (id, pack, pos)) in fauna.query_mut::<(&FaunaId, &mut Pack, &mut Position)>() {
         // — Les meutes restent en simulation FINE, toujours.
         //
         //   Une interaction fondée sur des rencontres ne survit pas au
@@ -2072,10 +2089,10 @@ pub fn update_packs(
         // — La proie choisie d'abord : on la garde tant qu'elle vit et qu'elle
         //   reste à portée d'obstination. C'est ce qui permet d'épuiser un
         //   gibier plus rapide que soi. —
-        // — Ne chasse que la meute qui a faim (CAP 3.3) : sous deux jours de
-        //   ration de viande. Un loup repu ne chasse pas. —
+        // — Ne chasse que la meute qui a faim (CAP 3.3) : l'estomac vide et
+        //   la carcasse finie. Un loup qui digère ne chasse pas. —
         let mut meat_kg = 0.0f32;
-        if pack.meat < pack.population * WOLF_RATION_KG_DAY * PACK_HUNT_BELOW_DAYS {
+        if pack.stomach <= 0.0 && pack.meat <= 0.0 {
             let held = pack.quarry.and_then(|q| {
                 herds.iter().find(|h| h.entity == q).and_then(|h| {
                     let d2 = (pos.x - h.pos.0).powi(2) + (pos.y - h.pos.1).powi(2);
@@ -2112,10 +2129,15 @@ pub fn update_packs(
                     //
                     //   Mesuré sans cette borne : les meutes en LOD tuaient 30 à
                     //   38 % de plus par prédateur qu'en simulation fine.
-                    let taken = pack_kills(pack.population, herd.population, herd.species.edible_kcal() / 1_200.0);
-                    pack.last_kills = taken;
-                    meat_kg += taken * herd.species.edible_kcal() / 1_200.0;
-                    kills.push(Kill { herd: herd.entity, head: taken });
+                    // Une attaque : elle réussit ou elle échoue, et une
+                    // réussite tue une bête entière (CAP 3.3).
+                    let mut rng = Pcg32::new(tick_seed, id.0);
+                    if rng.next_f32() < attack_success(pack.population, herd.species) {
+                        let taken = herd.population.min(1.0);
+                        pack.last_kills = taken;
+                        meat_kg += taken * herd.species.edible_kcal() / 1_200.0;
+                        kills.push(Kill { herd: herd.entity, head: taken });
+                    }
                 } else {
                     // Poursuite : la meute suit les troupeaux, donc elle suit
                     // aussi leurs migrations — sans qu'on l'ait écrit.
@@ -2726,26 +2748,37 @@ mod tests {
         );
     }
 
-    /// CAP 3.3 : une meute qui tue au taux d'un loup réel — 18 cerfs (60 kg
-    /// comestibles) par loup et par an, apportés au fil des jours — se maintient
-    /// trois ans (au moins 60 % de son effectif de départ). Avant 3.3, il
-    /// fallait 17,3 prises par an pour seulement ne pas fondre.
+    /// CAP 3.3 : une meute qui trouve un cerf (60 kg comestibles) chaque fois
+    /// qu'elle a faim — estomac vide, carcasse finie — se maintient trois ans
+    /// (au moins 60 % de son effectif de départ). Avant 3.3, la croissance
+    /// `0,42 × prises − 0,020` exigeait 17,3 prises par loup et par an pour
+    /// seulement ne pas fondre ; depuis la chasse par les besoins, le nombre de
+    /// prises sort de la faim et ne se pose plus (première version du test :
+    /// 18 cerfs par loup et par an apportés au fil des heures, que les corbeaux
+    /// mangent en entier).
     #[test]
-    fn une_meute_qui_tue_au_taux_reel_se_maintient() {
+    fn une_meute_qui_trouve_une_proie_quand_elle_a_faim_se_maintient() {
         let mut pack = Pack::new(5.0, Species::Wolf);
+        let mut prises = 0;
         for day in 0..3 * 360u64 {
             for h in 0..24 {
                 let spring = if day % 360 == 0 && h == 0 { Spring::GreenUp } else { Spring::None };
-                let meat = pack.population * 18.0 * 60.0 / 360.0 / 24.0;
+                let meat = if pack.stomach <= 0.0 && pack.meat <= 0.0 {
+                    prises += 1;
+                    60.0
+                } else {
+                    0.0
+                };
                 pack_tick(&mut pack, meat, 1.0, spring);
             }
         }
-        assert!(pack.population >= 3.0, "à 18 prises par loup et par an, la meute tombe à {:.2} loups en 3 ans", pack.population);
+        assert!(
+            pack.population >= 3.0,
+            "un cerf à chaque faim ({prises} en 3 ans) : la meute tombe à {:.2} loups",
+            pack.population
+        );
     }
 
-    /// CAP 3.3 : une meute sans proie vit sur ses réserves avant de mourir de
-    /// faim : après 20 jours sans viande, elle garde au moins 90 % de ses loups.
-    /// Avant 3.3, elle fondait de moitié en 35 jours dès le premier jour.
     #[test]
     fn une_meute_sans_proie_vit_d_abord_sur_ses_reserves() {
         let mut pack = Pack::new(8.0, Species::Wolf);
@@ -2832,6 +2865,73 @@ mod tests {
         assert!(meutes >= 2, "une meute nourrie doit essaimer dans l'année qui suit sa portée, on en compte {meutes}");
     }
 
+    /// Une meute et un troupeau de cerfs au contact (200 m), sur une terre du
+    /// foyer de référence : le banc d'essai des tests de chasse (CAP 3.3).
+    fn hunt_scene() -> (Sim, hecs::Entity, Vec<HerdView>) {
+        let mut sim = Sim::new(WorldSeed(42), 64);
+        let h = crate::scenario::find_home(&mut sim, crate::scenario::reference_seed_point());
+        let pos = (h.0 as f64 + 0.5, h.1 as f64 + 0.5);
+        sim.spawn_herd_species(pos.0 + 100.0, pos.1, 40.0, Species::Deer);
+        let herd = sim.fauna.query::<(&Herd, &Position)>().iter().map(|(e, _)| e).next().unwrap();
+        let view = HerdView { entity: herd, pos: (pos.0 + 100.0, pos.1), population: 40.0, species: Species::Deer, tameness: 0.0 };
+        let pack = sim.fauna.spawn((FaunaId(9_999), Position { x: pos.0, y: pos.1 }, Pack::new(5.0, Species::Wolf)));
+        (sim, pack, vec![view])
+    }
+
+    fn hunt_once(sim: &mut Sim, herds: &[HerdView]) -> Vec<Kill> {
+        let time = sim.time;
+        let seed = sim.world.seed();
+        let (kills, _, _) = update_packs(
+            &mut sim.fauna,
+            &sim.world,
+            herds,
+            &mut sim.fauna_stats,
+            &mut sim.rangeland,
+            &sim.climate,
+            time,
+            seed,
+        );
+        sim.time.tick += 1;
+        kills
+    }
+
+    /// CAP 3.3 : une meute qui a l'estomac plein ne chasse pas, même sans
+    /// carcasse en réserve — elle digère.
+    #[test]
+    fn une_meute_a_l_estomac_plein_ne_chasse_pas() {
+        let (mut sim, pack, herds) = hunt_scene();
+        sim.fauna.get::<&mut Pack>(pack).unwrap().stomach = 10.0;
+        let kills = hunt_once(&mut sim, &herds);
+        assert!(kills.is_empty(), "estomac plein, la meute a tué {:?}", kills.iter().map(|k| k.head).collect::<Vec<_>>());
+    }
+
+    /// CAP 3.3 : une prise est une bête entière, pas une fraction de troupeau à
+    /// chaque heure de contact. Une meute affamée au contact pendant deux jours
+    /// tue au moins une bête, et chaque prise vaut une tête.
+    #[test]
+    fn une_prise_est_une_bete_entiere() {
+        let (mut sim, _, herds) = hunt_scene();
+        let mut all = Vec::new();
+        for _ in 0..48 {
+            all.extend(hunt_once(&mut sim, &herds).into_iter().map(|k| k.head));
+        }
+        assert!(!all.is_empty() && all.iter().all(|&h| h == 1.0), "prises sur deux jours de contact : {all:?}");
+    }
+
+    /// CAP 3.3 : les corbeaux prennent ~14 kg par jour sur une carcasse
+    /// (Kaczensky et al. 2005, Yukon) : sur deux jours, une carcasse de 60 kg
+    /// que personne ne mange perd 24 à 32 kg.
+    #[test]
+    fn les_corbeaux_prennent_leur_part_d_une_carcasse() {
+        let mut pack = Pack::new(0.0, Species::Wolf);
+        pack.meat = 60.0;
+        for _ in 0..48 {
+            pack_tick(&mut pack, 0.0, 1.0, Spring::None);
+        }
+        let perdu = 60.0 - pack.meat;
+        assert!((24.0..=32.0).contains(&perdu), "une carcasse de 60 kg a perdu {perdu:.1} kg en deux jours");
+    }
+
     /// CAP 3.3 : une meute qui poursuit sa proie contourne l'eau. Mesuré
     /// (seed 1337, forêt, jour 216) : trois meutes arrêtées sur une rive, à
     /// 11 km de la proie la plus proche, parce que chaque pas en ligne droite
@@ -2863,28 +2963,6 @@ mod tests {
             (pos.x - x).hypot(pos.y - y) > 0.5 * step,
             "la meute n'a pas bougé : l'eau droit devant l'arrête"
         );
-    }
-
-    /// CAP 3.3 : le plafond de chasse d'un loup est une **masse** — le plateau
-    /// de Messier, 3,36 orignaux par loup et par 100 jours, ~6,7 kg de viande
-    /// par jour —, pas un nombre de têtes : au contact d'une harde de cerfs
-    /// (60 kg comestibles), une meute de 5 tire en un tick au moins 90 % de
-    /// 5 × 6,7 / 24 kg. Avant : 0,05 tête par loup et par jour, 3 kg de cerf.
-    #[test]
-    fn le_plafond_de_chasse_d_un_loup_est_une_masse() {
-        let kg = pack_kills(5.0, 1000.0, 60.0) * 60.0;
-        let attendu = 5.0 * 6.7 / 24.0;
-        assert!(kg >= 0.9 * attendu, "5 loups au contact de cerfs tirent {kg:.2} kg en un tick, plateau {attendu:.2}");
-    }
-
-    #[test]
-    fn les_prises_sont_bornees_par_le_gibier_present() {
-        // On ne tue pas plus de bêtes qu'il n'y en a : sinon l'effectif
-        // passerait négatif et la meute se nourrirait de fantômes.
-        // 100 prédateurs peuvent prendre 0,21 bête par tick (C1) : il n'y en a
-        // que 0,1.
-        assert_eq!(pack_kills(100.0, 0.1, 60.0), 0.1);
-        assert!(pack_kills(2.0, 1000.0, 60.0) < 1.0);
     }
 
     #[test]

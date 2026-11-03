@@ -1499,6 +1499,7 @@ impl Sim {
                 &mut self.rangeland,
                 &self.climate,
                 time,
+                self.world.seed(),
             );
         self.end("4a meutes", _ph);
         let _ph = phase(); // 4b prises

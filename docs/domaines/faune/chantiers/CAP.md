@@ -913,6 +913,30 @@ proie-prédateur n'est pas amorti : le loup tue à son plafond quand la proie ab
 la chasse par les besoins doit trancher : une meute repue ne chasse pas, une attaque réussit ou
 échoue, une proie entière rassasie pour des jours.
 
+### 3.3 — la chasse par les besoins (2026-11-03)
+
+Changement : plus aucun plafond de prises. **Estomac** de 10 kg par loup (un repas, sourcé),
+digéré au rythme de la ration (4,5 kg/j) ; la meute **ne chasse que l'estomac vide et la carcasse
+finie** ; une **attaque** par heure de contact, réussie avec la probabilité de la proie et de la
+taille de la meute (`attack_success` : wapiti 2 % seul → 20 % dès 4 loups ; bison 3-10 %, plateau
+vers 13 ; renne et gazelle comme le cerf, choix) ; une réussite tue **une bête entière** ; les
+**corbeaux** prennent 14 kg par jour sur la carcasse (Kaczensky). Retirés : `WOLF_MAX_KILL_KG_DAY`,
+`pack_kills`, la chasse sous deux jours de viande, la viande qui se perd en 5 jours.
+
+Tests rouges vus échouer : `une_meute_a_l_estomac_plein_ne_chasse_pas` (elle tuait 0,023 tête) ;
+`une_prise_est_une_bete_entiere` (48 prises de 0,021-0,023 tête) ;
+`les_corbeaux_prennent_leur_part_d_une_carcasse` (19,8 kg perdus en deux jours, attendu 24-32).
+`une_meute_qui_tue_au_taux_reel_se_maintient` réécrit (`…trouve_une_proie_quand_elle_a_faim…`) :
+sa viande livrée au compte-gouttes était mangée en entier par les corbeaux.
+
+Prédictions (`cap_nature`, sans humains, 12 cases, 10 ans), écrites avant :
+- le taux de prise **émerge** entre 15 et 35 cerfs (ou rennes) par loup et par an ;
+- loups vivants à l'an 10 sur au moins 6 cases sur 12 (incertitude assumée : le couple n'est
+  toujours pas amorti par autre chose que la satiété) ;
+- gibier éteint sur aucune case ; là où les loups vivent, gibier du carré abaissé de 10 à 60 %
+  par rapport au témoin sans loups (`d0e6e3e`).
+Réfutée si le gibier s'éteint sur une case ou si les loups s'éteignent partout.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de

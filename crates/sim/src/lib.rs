@@ -141,4 +141,6 @@ pub(crate) mod salt {
     pub const DISEASE: u64 = 1021;
     /// Maladie : contagion de la nuit entre dormeurs proches.
     pub const CONTAGION: u64 = 1022;
+    /// Prédation : une attaque de meute réussit-elle (CAP 3.3) ?
+    pub const PREDATION: u64 = 1023;
 }
