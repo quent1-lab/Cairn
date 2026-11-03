@@ -901,6 +901,18 @@ entière**, la meute mange au rythme de son estomac (~9 kg par loup et par repas
 perd ; le taux de prise **émerge** et se compare au réel (15-25 /loup/an, Messier). Puis, si cela
 tient, **appliquer le même principe au gibier** (besoins et dépenses, aucune limite posée).
 
+### 3.3 — mesure après (a) et (c) (binaire `062eb06`, `out/cap/j33b/`) : réfutée encore
+
+Sans humains, 10 ans, 12 cases : **loups éteints sur 12 à l'an 10**, mais par deux voies :
+- **surchasse** là où ils tiennent longtemps (forêt 42 et 1337, taïga 1337) : 36-38 prises par
+  loup et par an (réel 15-25), le gibier du carré s'effondre (forêt 1337 : 7,3 → 1,5 têtes/km² à
+  l'an 5 ; **taïga 1337 : gibier éteint**, 0 tête dans tout le monde à l'an 10), puis les loups ;
+- **famine précoce** ailleurs : 5-16 prises par loup et par an.
+Gibier à l'an 10 contre le témoin sans loups : de −100 % à +87 %, sans sens. Le cycle
+proie-prédateur n'est pas amorti : le loup tue à son plafond quand la proie abonde. C'est ce que
+la chasse par les besoins doit trancher : une meute repue ne chasse pas, une attaque réussit ou
+échoue, une proie entière rassasie pour des jours.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de
