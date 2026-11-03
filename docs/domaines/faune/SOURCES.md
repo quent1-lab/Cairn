@@ -107,3 +107,10 @@ par (moi, sous-agent `sourceur`) · lu en entier ou de seconde main.
 - Repas : jusqu'à ~10 kg par loup · [Pinedale](https://pinedalewyoming.com/news/2011/01/Wolfweightdependsonl.htm) ; prises d'hiver à Yellowstone 6,1-17,1 kg de wapiti par loup et par jour selon l'hiver (NPS, même page)
 - Corbeaux : jusqu'à 40 % d'une carcasse pour une paire, 17 % pour une grande meute ; ~18 kg/j volés (Vucetich et al. 2004, Anim. Behav. 67:1117, PDF illisible) ; 18,5 corbeaux par carcasse, 14,1 kg/j retirés ; une petite meute perd jusqu'à 75 % (Kaczensky et al. 2005, Yukon) ; un corbeau ~0,9 kg/j · [isleroyalewolf.org](https://www.isleroyalewolf.org/ravens) (lu)
 - Non trouvé : succès par attaque sur le caribou ; durée de digestion ; nombre de poursuites par jour.
+
+## Loup : perception, déplacements, coût, conflits (CAP 3.3, 2026-11-03, `sourceur`, de seconde main)
+- Détection : un orignal senti à ~0,4 km sous le vent (10 loups, Malone Island, 4 mars 1959) ; la plupart des orignaux détectés à moins de ~275 m au vent · Mech 1966, *The Wolves of Isle Royale* (NPS Fauna Series 7, page bloquée) ; **« 2,4 km » cité ailleurs pour la même anecdote** (Wikipedia) : incohérence non tranchée
+- Distance par jour : ~50 km/j en déplacement effectif (Isle Royale, hiver 1958-61, Mech 1966) ; trot ~8 km/h ; 18 km/j en moyenne (Alaska, GPS et accéléromètres) ; 15,4 km/j (Scandinavie, moins l'hiver) ; 40 km/j aller-retour à la tanière (Ellesmere, élevage des petits)
+- Coût du transport : 0,88 kcal/kg/km (mâles ~44 kg), 0,95 (femelles ~37 kg), 1,1 (juvéniles ~25 kg) · Tucker 1975 (citation secondaire) ; dépense quotidienne ~22 MJ pour 18 km (Alaska)
+- Territoire : 953 km² (meute Fishtrap, Minnesota, 2005) ; ~10 jours pour en faire le tour (source non identifiée) ; 4-6 sites de rendez-vous l'été
+- Conflits : malnutrition et luttes entre loups font à parts égales 58 % des morts d'adultes (Superior National Forest 1968-76, Mech 1977, J. Mammal.) ; 41 adultes tués par d'autres loups 1968-2014 ; pic en février ; Yellowstone (Cubaynes et al. 2014, 280 loups, 13 ans) : l'agression densité-dépendante régule la survie adulte (pourcentage non trouvé)
