@@ -1097,6 +1097,24 @@ fn try_move(world: &World, pos: &mut Position, dir: (f64, f64), step: f64) {
     }
 }
 
+/// Un pas de poursuite (CAP 3.3) : droit vers la proie si la terre le permet,
+/// sinon en biais — 45°, puis 90°, puis 135° de chaque côté, toujours dans le
+/// même ordre — pour longer la rive au lieu de s'y arrêter. Un loup contourne
+/// un lac ; sans cela, une meute dont la proie était de l'autre côté d'une eau
+/// restait sur la rive jusqu'à mourir de faim (seed 1337, forêt).
+pub(crate) fn pursue(worldgen: &cairn_worldgen::WorldGen, pos: &mut Position, dir: (f64, f64), step: f64) {
+    for turn in [0.0f64, 45.0, -45.0, 90.0, -90.0, 135.0, -135.0] {
+        let (s, c) = turn.to_radians().sin_cos();
+        let d = (dir.0 * c - dir.1 * s, dir.0 * s + dir.1 * c);
+        let next = (pos.x + d.0 * step, pos.y + d.1 * step);
+        if worldgen.elevation(next.0.floor() as i64, next.1.floor() as i64) > 0.0 {
+            pos.x = next.0;
+            pos.y = next.1;
+            return;
+        }
+    }
+}
+
 /// La tuile la plus fournie en biomasse à portée de brout, et sa biomasse.
 /// Échantillonnage en croix (8 directions + sur place) : 9 lectures par
 /// troupeau et par tick, pas un balayage.
@@ -2102,7 +2120,7 @@ pub fn update_packs(
                     // Poursuite : la meute suit les troupeaux, donc elle suit
                     // aussi leurs migrations — sans qu'on l'ait écrit.
                     let dir = ((herd.pos.0 - pos.x) / dist, (herd.pos.1 - pos.y) / dist);
-                    try_move(world, pos, dir, PACK_STEP_TILES.min(dist));
+                    pursue(world.worldgen(), pos, dir, PACK_STEP_TILES.min(dist));
                 }
             }
         }
@@ -2812,6 +2830,39 @@ mod tests {
         }
         let meutes = sim.fauna.query::<&Pack>().iter().count();
         assert!(meutes >= 2, "une meute nourrie doit essaimer dans l'année qui suit sa portée, on en compte {meutes}");
+    }
+
+    /// CAP 3.3 : une meute qui poursuit sa proie contourne l'eau. Mesuré
+    /// (seed 1337, forêt, jour 216) : trois meutes arrêtées sur une rive, à
+    /// 11 km de la proie la plus proche, parce que chaque pas en ligne droite
+    /// tombait dans l'eau et était refusé ; elles y sont mortes de faim. Ici,
+    /// une meute sur la terre, l'eau droit devant et de la terre en biais,
+    /// doit avancer.
+    #[test]
+    fn une_meute_contourne_l_eau_qui_la_separe_de_sa_proie() {
+        let sim = Sim::new(WorldSeed(42), 64);
+        let wg = sim.world.worldgen();
+        let step = PACK_STEP_TILES;
+        let land = |x: f64, y: f64| wg.elevation(x.floor() as i64, y.floor() as i64) > 0.0;
+        let origin = crate::scenario::reference_seed_point();
+        let d = std::f64::consts::FRAC_1_SQRT_2 * step;
+        let mut found = None;
+        'search: for dy in 0..2000i64 {
+            for dx in 0..2000i64 {
+                let (x, y) = ((origin.0 + dx * 7) as f64 + 0.5, (origin.1 + dy * 7) as f64 + 0.5);
+                if land(x, y) && !land(x + step, y) && (land(x + d, y + d) || land(x + d, y - d)) {
+                    found = Some((x, y));
+                    break 'search;
+                }
+            }
+        }
+        let (x, y) = found.expect("une rive");
+        let mut pos = Position { x, y };
+        pursue(wg, &mut pos, (1.0, 0.0), step);
+        assert!(
+            (pos.x - x).hypot(pos.y - y) > 0.5 * step,
+            "la meute n'a pas bougé : l'eau droit devant l'arrête"
+        );
     }
 
     /// CAP 3.3 : le plafond de chasse d'un loup est une **masse** — le plateau
