@@ -141,9 +141,21 @@ const DISPERSAL_ADULTS: f32 = 0.08;
 // domaine est le plus proche, et une meute ne chasse que les siens. La taille
 // d'un domaine et la densité de loups en sortent (règle 10).
 
-/// Rayon d'un territoire de loup (~200 km², dans la fourchette réelle de 100 à
-/// 1 000 km²) : sert aux instruments (loups voisins).
+/// Rayon du domaine où erre une meute qui ne sent rien (~200 km², dans la
+/// fourchette réelle de 100 à 1 000 km² ; Minnesota 78-953 km²). Comme le
+/// domaine vital des troupeaux, c'est une fidélité au site, pas une densité :
+/// le partage entre meutes, lui, se fait par la proximité des centres.
 pub const PREDATOR_TERRITORY_TILES: f64 = km_to_tiles(8.0);
+
+/// Portée à laquelle une meute sent ou voit une proie (1b) : un orignal senti à
+/// ~0,4 km sous le vent, la plupart détectés à moins de ~275 m (Mech 1966,
+/// Isle Royale ; « 2,4 km » cité ailleurs pour la même observation : non
+/// tranché, la valeur précise est retenue).
+const PACK_SMELL_TILES: f64 = km_to_tiles(0.4);
+
+/// Pas d'errance d'une meute sans proie en vue, par tick : ~18 km par jour
+/// (Alaska, GPS ; 15,4 km/j en Scandinavie). Plus lent que la poursuite.
+const PACK_ROAM_STEP_TILES: f64 = km_to_tiles(0.75);
 
 // — Capacité de charge : le domaine vital (chantier de dérive, étape 4) —
 //
@@ -798,6 +810,8 @@ pub struct Pack {
     /// Centre du domaine de la meute, là où elle s'est installée (posé au
     /// premier tour ; CAP 3.3).
     pub home: Option<(f64, f64)>,
+    /// Cap de son errance quand elle ne sent aucune proie (radians).
+    pub heading: f32,
     /// Réserves corporelles des loups (0–1, CAP 3.3).
     pub condition: f32,
     /// Louveteaux de l'année, compris dans `population`.
@@ -819,6 +833,7 @@ impl Pack {
             meat: 0.0,
             stomach: 0.0,
             home: None,
+            heading: 0.0,
             condition: 1.0,
             young: 0.0,
             bearing: 0.0,
@@ -2086,13 +2101,30 @@ pub fn update_packs(
                 let mut best: Option<(f64, &HerdView)> = None;
                 for h in herds.iter().filter(|h| owns(entity, home, h.pos)) {
                     let d2 = (pos.x - h.pos.0).powi(2) + (pos.y - h.pos.1).powi(2);
-                    if best.is_none_or(|(bd, _)| d2 < bd) {
+                    // On ne prend pour proie que ce qu'on sent ou voit (1b).
+                    if d2 <= PACK_SMELL_TILES * PACK_SMELL_TILES && best.is_none_or(|(bd, _)| d2 < bd) {
                         best = Some((d2, h));
                     }
                 }
                 best
             });
             pack.quarry = nearest.map(|(_, h)| h.entity);
+            if nearest.is_none() {
+                // — Rien en vue : la meute erre dans son domaine (1b), au pas
+                //   de voyage, un cap qui dérive au hasard ; trop loin de son
+                //   centre, elle y revient. C'est cette errance, et non une
+                //   vue sur tout le pays, qui fait ses rencontres : elles
+                //   deviennent rares quand le gibier l'est. —
+                let mut rng = Pcg32::new(tick_seed, id.0 ^ 0x5EED_0F_A11);
+                let (hx, hy) = (home.0 - pos.x, home.1 - pos.y);
+                pack.heading = if hx.hypot(hy) > PREDATOR_TERRITORY_TILES {
+                    hy.atan2(hx) as f32
+                } else {
+                    pack.heading + (rng.next_f32() - 0.5) * std::f32::consts::FRAC_PI_3
+                };
+                let dir = (f64::from(pack.heading.cos()), f64::from(pack.heading.sin()));
+                pursue(world.worldgen(), pos, dir, PACK_ROAM_STEP_TILES);
+            }
             if let Some((d2, herd)) = nearest {
                 let dist = d2.sqrt();
                 if dist <= PACK_HUNT_RADIUS_TILES {
@@ -2869,6 +2901,40 @@ mod tests {
         hunt_once(&mut sim, &herds);
         let quarry = sim.fauna.get::<&Pack>(a).unwrap().quarry;
         assert!(quarry.is_none(), "la meute a pris pour proie un troupeau du domaine voisin");
+    }
+
+    /// CAP 3.3, 1b : une meute ne sent pas un troupeau à 5 km. Elle ne perçoit
+    /// ses proies qu'à portée d'odorat et de vue (~0,4 km sous le vent, Mech
+    /// 1966) ; avant, elle voyait le troupeau le plus proche où qu'il soit.
+    #[test]
+    fn une_meute_ne_sent_pas_un_troupeau_a_cinq_kilometres() {
+        let (mut sim, a, mut herds) = hunt_scene();
+        let pa = sim.fauna.get::<&Position>(a).map(|p| (p.x, p.y)).unwrap();
+        let loin = (pa.0 + km_to_tiles(5.0), pa.1);
+        herds[0].pos = loin;
+        sim.fauna.get::<&mut Position>(herds[0].entity).map(|mut p| { p.x = loin.0; p.y = loin.1; }).unwrap();
+        hunt_once(&mut sim, &herds);
+        assert!(sim.fauna.get::<&Pack>(a).unwrap().quarry.is_none(), "la meute a pris pour proie un troupeau à 5 km");
+    }
+
+    /// CAP 3.3, 1b : sans proie en vue, une meute affamée erre dans son
+    /// domaine (~8 km de rayon) ; elle ne part pas en ligne droite vers une
+    /// harde qu'elle ne peut pas sentir à 20 km. Sur deux jours, elle reste à
+    /// moins de 9 km de son centre.
+    #[test]
+    fn une_meute_affamee_erre_dans_son_domaine() {
+        let (mut sim, a, mut herds) = hunt_scene();
+        let pa = sim.fauna.get::<&Position>(a).map(|p| (p.x, p.y)).unwrap();
+        let loin = (pa.0 + km_to_tiles(20.0), pa.1);
+        herds[0].pos = loin;
+        sim.fauna.get::<&mut Position>(herds[0].entity).map(|mut p| { p.x = loin.0; p.y = loin.1; }).unwrap();
+        let mut max_km = 0.0f64;
+        for _ in 0..48 {
+            hunt_once(&mut sim, &herds);
+            let p = sim.fauna.get::<&Position>(a).map(|p| (p.x, p.y)).unwrap();
+            max_km = max_km.max(cairn_core::tiles_to_km((p.0 - pa.0).hypot(p.1 - pa.1)));
+        }
+        assert!(max_km <= 9.0, "la meute s'est éloignée de {max_km:.1} km de son centre en deux jours");
     }
 
     /// CAP 3.3, contre-lecture : des meutes voisines mangent toute la viande

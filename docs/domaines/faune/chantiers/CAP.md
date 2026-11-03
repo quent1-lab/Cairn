@@ -1018,6 +1018,19 @@ prenait pour proie un troupeau au cœur du domaine voisin, à 12 km) ;
 0,996 après un jour). Retiré avec son sujet : `sans_territoire_une_meute_s_affame`. Instrument :
 la colonne `pack_share` de `cap_nature` vaut désormais 1 (plus de part).
 
+### 3.3 — 1b, la perception et l'errance (2026-11-03)
+
+Changement : une meute ne prend pour proie qu'un troupeau de son domaine **à portée d'odorat**
+(0,4 km, Mech 1966 ; « 2,4 km » cité ailleurs pour la même observation, non tranché) ; sinon
+elle **erre** à ~18 km/j (0,75 km par tick ; Alaska 18 km/j, Scandinavie 15,4), un cap qui dérive
+au hasard, ramenée vers son centre au-delà de 8 km. La proie déjà prise se suit toujours jusqu'à
+6 km (la piste). Tests rouges vus échouer : `une_meute_ne_sent_pas_un_troupeau_a_cinq_kilometres` ;
+`une_meute_affamee_erre_dans_son_domaine` (20 km en deux jours vers une harde qu'elle ne pouvait
+pas sentir). **Coût du déplacement non ajouté** : l'errance à 18 km/j est le régime moyen réel,
+que la ration de 4,5 kg/j comprend déjà (Tucker : ~0,9 kcal/kg/km, ~650 kcal pour 18 km, ~10 %
+de la ration) ; seule la poursuite (36 km/j) coûterait davantage — à reconsidérer si la mesure
+le montre.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de
