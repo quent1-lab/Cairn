@@ -97,3 +97,13 @@ par (moi, sous-agent `sourceur`) · lu en entier ou de seconde main.
 - Territoires : 78-153 km² (Minnesota, hiver), 100-350 (Europe centrale), 259-1 676 (Scandinavie)
 - Lion des cavernes : rien ; lion actuel : une proie tous les 2,4-4,4 jours, succès de chasse 21 % (réserves sud-africaines, non vérifié)
 - Non trouvé : durée de jeûne létale ; part de la famine dans la mortalité des loups ; formule territoire = f(biomasse).
+
+## Loup : réussite des attaques, manipulation, repas, charognards (CAP 3.3, 2026-11-03, `sourceur`, de seconde main ; PDF primaires illisibles)
+- Succès de chasse sur le wapiti : 21 % (Yellowstone, Mech, Smith & MacNulty, *Wolves on the Hunt*) ; 26 à 15 % selon la sévérité de l'hiver 1997-98 · [NPS](https://www.nps.gov/yell/learn/ys-24-1-understanding-the-limits-to-wolf-hunting-ability.htm) ; un loup seul : ~2 % sur un wapiti adulte
+- Orignal (Isle Royale, Mech 1966) : < 8 % de succès une fois la poursuite engagée ; une meute de 15 tuait un orignal tous les 3 jours · [NPS history](https://www.nps.gov/parkhistory/online_books/science/11/chap3.htm)
+- Bison (Yellowstone, MacNulty et al. 2012, Behav. Ecol. 23:75) : 3 à 10 % ; plafond de succès vers 13 loups (4 pour le wapiti)
+- Toutes proies : 5 à 28 % selon l'espèce (Wikipedia, sans source primaire)
+- Manipulation : orignal ~5 j (1-11), caribou 1,7 j, mouflon 0,9 j (étude non identifiée) ; carcasse de wapiti consommée en ~12 j (3-41), cerf de Virginie 5,5 j
+- Repas : jusqu'à ~10 kg par loup · [Pinedale](https://pinedalewyoming.com/news/2011/01/Wolfweightdependsonl.htm) ; prises d'hiver à Yellowstone 6,1-17,1 kg de wapiti par loup et par jour selon l'hiver (NPS, même page)
+- Corbeaux : jusqu'à 40 % d'une carcasse pour une paire, 17 % pour une grande meute ; ~18 kg/j volés (Vucetich et al. 2004, Anim. Behav. 67:1117, PDF illisible) ; 18,5 corbeaux par carcasse, 14,1 kg/j retirés ; une petite meute perd jusqu'à 75 % (Kaczensky et al. 2005, Yukon) ; un corbeau ~0,9 kg/j · [isleroyalewolf.org](https://www.isleroyalewolf.org/ravens) (lu)
+- Non trouvé : succès par attaque sur le caribou ; durée de digestion ; nombre de poursuites par jour.
