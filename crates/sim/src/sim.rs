@@ -428,6 +428,12 @@ pub struct Sim {
     /// Le bilan des têtes de gibier depuis la dernière lecture (CHA-5,
     /// observation seule : le banc le lit et le remet à zéro).
     pub fauna_flows: crate::fauna::FaunaFlows,
+    /// **Scène de banc seulement** (CAP 3.3) : un disque (centre, rayon en
+    /// tuiles) dont la faune sauvage ne sort pas — troupeaux, meutes et
+    /// dispersants y sont ramenés au bord. `None` par défaut : la simulation
+    /// normale n'a pas de boîte. Sert à mesurer la nature sans humains sur une
+    /// surface fixe, sans que le gibier s'étale vers un monde vide.
+    pub fauna_box: Option<((f64, f64), f64)>,
     /// CHA-5, observation seule : la naissance de chaque troupeau (tick,
     /// origine : 0 placé, 1 immigré, 2 fission) et chaque abandon, que le banc
     /// lit et vide.
@@ -574,6 +580,7 @@ impl Sim {
             rangeland: Default::default(),
             allow_fauna_immigration: true,
             fauna_flows: Default::default(),
+            fauna_box: None,
             herd_births: BTreeMap::new(),
             abandons: Vec::new(),
             next_agent_id: 0,
@@ -1588,6 +1595,25 @@ impl Sim {
         for (x, y, daughter) in fissions {
             let id = self.spawn_herd_from(x, y, daughter);
             self.herd_births.insert(id.0, (time.tick, 2));
+        }
+        // La boîte des bancs (CAP 3.3) : rien de sauvage n'en sort.
+        if let Some((c, r)) = self.fauna_box {
+            let clamp = |p: &mut Position| {
+                let (dx, dy) = (p.x - c.0, p.y - c.1);
+                let d = dx.hypot(dy);
+                if d > r {
+                    p.x = c.0 + dx / d * r;
+                    p.y = c.1 + dy / d * r;
+                }
+            };
+            for (_, (h, p)) in self.fauna.query_mut::<(&Herd, &mut Position)>() {
+                if h.anchor.is_none() {
+                    clamp(p);
+                }
+            }
+            for (_, (_, p)) in self.fauna.query_mut::<(&Pack, &mut Position)>() {
+                clamp(p);
+            }
         }
         // Les troupeaux laissent leur piste (CHA-2).
         fauna::lay_trails(&self.fauna, &mut self.herd_trails, time.tick);
