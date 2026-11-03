@@ -1031,6 +1031,35 @@ que la ration de 4,5 kg/j comprend déjà (Tucker : ~0,9 kcal/kg/km, ~650 kcal p
 de la ration) ; seule la poursuite (36 km/j) coûterait davantage — à reconsidérer si la mesure
 le montre.
 
+### 3.3 — défaut (b) corrigé et grande scène (2026-11-03)
+
+- **(b)** : test rouge `des_dispersants_sans_couple_restent_dans_la_meute` (3 adultes et 2
+  yearlings : 1,74 dispersant, effacé sous un loup) ; les jeunes ne partent qu'à deux au moins
+  (un couple pour fonder) et en laissant au moins deux loups.
+- **Grande scène** (`cap_nature … 16 boite [sansloups]`, contre-lecture point 4) : carré de
+  16 × 16 mailles (1 024 km²), **boîte** d'aire égale dont la faune ne sort pas
+  (`Sim::fauna_box`), une meute par ~200 km² (5 meutes de 5), gibier de départ 11 /km².
+  Chronométrage (seed 42, forêt, avant (b)) : ~5 min par an de jeu à 250-320 troupeaux ; loups
+  7 → 2 en deux ans — famine de l'été 1 (34 loups avec les louveteaux, réserves 0,43) puis meutes
+  fractionnaires.
+
+### Longue run (2026-11-03 → vendredi 7 h, accord de l'utilisateur)
+
+Régime : grande scène, sans humains, départ jour 135, **40 ans** ; forêt et taïga × seeds 42, 7,
+1337, 2024 avec loups ; témoin sans loups, forêt × seeds 42 et 1337. Binaire figé
+`out/bin/cap33d/`. Jugée sur la persistance et la forme du cycle, pas sur une année
+(règle 8 : minimum et médiane par décennie, amplitude d'un cycle à l'autre).
+
+Prédictions (écrites avant) :
+- loups vivants à l'an 40 sur au moins 4 runs sur 8 ;
+- gibier jamais éteint ; là où les loups vivent, médiane de la dernière décennie entre 20 et
+  70 % de celle du témoin sans loups (Białowieża : cerf 12,7 avec loups contre 10-35 sans) ;
+- prises par loup et par an entre 15 et 30 en médiane ;
+- densité de loups à l'équilibre entre 0,01 et 0,06 /km² (réel : jusqu'à 0,054).
+Réfutée si les loups s'éteignent sur plus de 6 runs ou si le gibier s'éteint sur une run.
+**Si réfutée** : décision de l'utilisateur (2026-11-03) — on consigne, et on refait un tour
+d'analyse et de modification dans une nouvelle session.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de

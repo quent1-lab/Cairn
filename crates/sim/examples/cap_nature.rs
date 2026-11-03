@@ -15,7 +15,7 @@
 //!
 //! Lecture seule : rien de ce qu'il relève ne touche la trajectoire.
 //!
-//! Usage : `cargo run --release -p cairn-sim --example cap_nature -- [seeds] [biomes] [années] [out.csv]`
+//! Usage : `cargo run --release -p cairn-sim --example cap_nature -- [seeds] [biomes] [années] [out.csv] [côté en mailles] [boite] [sansloups]`
 //! (seeds et biomes séparés par des virgules ; biomes parmi
 //! foret,taiga,toundra,prairie,steppe,savane).
 
@@ -27,7 +27,8 @@ use cairn_sim::fauna::{self, Herd, Pack};
 use cairn_sim::{Position, Sim, scenario};
 use cairn_worldgen::Biome;
 
-/// Mailles de pâturage par côté du carré de recensement.
+/// Mailles de pâturage par côté du carré de recensement (par défaut ; le
+/// 5ᵉ argument le change).
 const SIDE_ZONES: i64 = 6;
 /// Pas d'échantillonnage, en jours : la croissance du modèle se compte en
 /// semaines (doublement en 69 jours au plus).
@@ -48,7 +49,7 @@ fn biome_of(name: &str) -> Biome {
 
 /// Coin (en mailles) d'un carré où le biome couvre ≥ 75 % des centres de
 /// maille, le plus près du point de référence (balayage par anneaux de 4 km).
-fn find_square(sim: &Sim, biome: Biome) -> Option<(i64, i64)> {
+fn find_square(sim: &Sim, biome: Biome, side_zones: i64) -> Option<(i64, i64)> {
     let side = fauna::RANGE_ZONE_TILES;
     let origin = scenario::reference_seed_point();
     let z0 = fauna::range_zone((origin.0 as f64, origin.1 as f64));
@@ -61,8 +62,8 @@ fn find_square(sim: &Sim, biome: Biome) -> Option<(i64, i64)> {
                 }
                 let corner = (z0.0 + dx, z0.1 + dy);
                 let mut hit = 0;
-                for j in 0..SIDE_ZONES {
-                    for i in 0..SIDE_ZONES {
+                for j in 0..side_zones {
+                    for i in 0..side_zones {
                         let x = (corner.0 + i) as f64 * side + side / 2.0;
                         let y = (corner.1 + j) as f64 * side + side / 2.0;
                         if sim.world.worldgen().biome(x as i64, y as i64) == biome {
@@ -70,7 +71,7 @@ fn find_square(sim: &Sim, biome: Biome) -> Option<(i64, i64)> {
                         }
                     }
                 }
-                if hit * 4 >= SIDE_ZONES * SIDE_ZONES * 3 {
+                if hit * 4 >= side_zones * side_zones * 3 {
                     return Some(corner);
                 }
             }
@@ -95,6 +96,13 @@ fn main() {
         .collect();
     let years: u64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(3);
     let out = args.next().unwrap_or_else(|| "out/cap/cap_nature.csv".into());
+    // Grande scène (contre-lecture de CAP 3.3) : côté du carré en mailles, et
+    // une boîte d'aire égale au carré dont la faune ne sort pas ; une meute
+    // par ~200 km² (un territoire réel) au lieu de quatre meutes à 4 km.
+    let side_zones: i64 = args.next().and_then(|s| s.parse().ok()).unwrap_or(SIDE_ZONES);
+    let boxed = args.next().is_some_and(|s| s == "boite");
+    // Témoin sans prédateurs (7ᵉ argument « sansloups »).
+    let wolves = !args.next().is_some_and(|s| s == "sansloups");
     if let Some(dir) = std::path::Path::new(&out).parent() {
         std::fs::create_dir_all(dir).unwrap();
     }
@@ -112,14 +120,14 @@ fn main() {
             let mut sim = Sim::new(WorldSeed(seed), scenario::REFERENCE_CAPACITY);
             scenario::start_on_day(&mut sim, START_DAY);
             sim.allow_fauna_immigration = false;
-            let Some(corner) = find_square(&sim, biome) else {
+            let Some(corner) = find_square(&sim, biome, side_zones) else {
                 println!("seed {seed} {name} : aucun carré trouvé");
                 continue;
             };
             let side = fauna::RANGE_ZONE_TILES;
             let x0 = corner.0 as f64 * side;
             let y0 = corner.1 as f64 * side;
-            let span = SIDE_ZONES as f64 * side;
+            let span = side_zones as f64 * side;
             let center = (x0 + span / 2.0, y0 + span / 2.0);
 
             // Placement : un troupeau tous les 1,5 km.
@@ -136,20 +144,40 @@ fn main() {
                 }
                 gy += pas;
             }
-            for i in 0..4i64 {
-                let angle = i as f64 * 1.57;
-                let (x, y) = (center.0 + angle.cos() * km_to_tiles(4.0), center.1 + angle.sin() * km_to_tiles(4.0));
-                if sim.world.tile(x as i64, y as i64).is_walkable() {
-                    sim.spawn_pack(x, y, fauna::PACK_START);
+            if boxed {
+                // Disque d'aire égale au carré.
+                sim.fauna_box = Some((center, span / std::f64::consts::PI.sqrt()));
+            }
+            if !wolves {
+                // Témoin : aucune meute.
+            } else if side_zones == SIDE_ZONES && !boxed {
+                for i in 0..4i64 {
+                    let angle = i as f64 * 1.57;
+                    let (x, y) = (center.0 + angle.cos() * km_to_tiles(4.0), center.1 + angle.sin() * km_to_tiles(4.0));
+                    if sim.world.tile(x as i64, y as i64).is_walkable() {
+                        sim.spawn_pack(x, y, fauna::PACK_START);
+                    }
+                }
+            } else {
+                // Une meute par ~200 km², en spirale de tournesol dans le carré.
+                let km2 = (side_zones * side_zones * 4) as f64;
+                let n = (km2 / 200.0).round().max(1.0) as usize;
+                for k in 0..n {
+                    let r = 0.45 * span * ((k as f64 + 0.5) / n as f64).sqrt();
+                    let a = k as f64 * 2.399_963;
+                    let (x, y) = (center.0 + a.cos() * r, center.1 + a.sin() * r);
+                    if sim.world.tile(x as i64, y as i64).is_walkable() {
+                        sim.spawn_pack(x, y, fauna::PACK_START);
+                    }
                 }
             }
             // Production des mailles du carré (kg/jour) : pure du worldgen.
-            let zones: Vec<(i64, i64)> = (0..SIDE_ZONES)
-                .flat_map(|j| (0..SIDE_ZONES).map(move |i| (corner.0 + i, corner.1 + j)))
+            let zones: Vec<(i64, i64)> = (0..side_zones)
+                .flat_map(|j| (0..side_zones).map(move |i| (corner.0 + i, corner.1 + j)))
                 .collect();
             let production: f32 = zones.iter().map(|&z| sim.rangeland.production(sim.world.worldgen(), z)).sum();
             let in_square = |p: (f64, f64)| p.0 >= x0 && p.0 < x0 + span && p.1 >= y0 && p.1 < y0 + span;
-            let area_km2 = (SIDE_ZONES * SIDE_ZONES * 4) as f32;
+            let area_km2 = (side_zones * side_zones * 4) as f32;
             let started = std::time::Instant::now();
             let mut year_rows: Vec<(f32, f32, f32)> = Vec::new();
             sim.fauna_flows = Default::default();

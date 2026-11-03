@@ -1025,8 +1025,14 @@ pub fn pack_tick(pack: &mut Pack, meat_kg: f32, spring: Spring) -> f32 {
     };
     if season {
         pack.since_birth_season = 0;
-        // Les louveteaux de l'an passé ont un an : la plupart partent.
-        dispersers = DISPERSAL_YEARLINGS * young + DISPERSAL_ADULTS * adults;
+        // Les louveteaux de l'an passé ont un an : la plupart partent — à
+        // condition d'être au moins un couple pour fonder, et d'en laisser un
+        // derrière eux ; sinon ils restent (défaut (b) : partis par fractions
+        // de loup, ils étaient effacés sous `PACK_MIN`).
+        let leaving = DISPERSAL_YEARLINGS * young + DISPERSAL_ADULTS * adults;
+        if leaving >= 2.0 && adults + young - leaving >= 2.0 {
+            dispersers = leaving;
+        }
         adults += young - dispersers;
         young = 0.0;
         // Une portée, s'il reste un couple.
@@ -2789,6 +2795,19 @@ mod tests {
             pack_tick(&mut pack, 0.0, Spring::None);
         }
         assert!(pack.population >= 7.2, "après 20 jours sans proie, {:.2} loups sur 8", pack.population);
+    }
+
+    /// CAP 3.3, défaut (b) : une meute nouvelle exige un couple. Au
+    /// reverdissement, 3 adultes et 2 yearlings : 75 % des yearlings et 8 %
+    /// des adultes feraient 1,74 dispersant — pas de quoi fonder, et ce qui part
+    /// sous un loup était effacé. Ils restent ; la meute garde ses 5 loups.
+    #[test]
+    fn des_dispersants_sans_couple_restent_dans_la_meute() {
+        let mut pack = Pack::new(5.0, Species::Wolf);
+        pack.young = 2.0;
+        pack.stomach = 10.0;
+        let partis = pack_tick(&mut pack, 0.0, Spring::GreenUp);
+        assert!(partis == 0.0 && pack.population > 4.99, "{partis:.2} loups partis, {:.2} restent", pack.population);
     }
 
     /// CAP 3.3 : une portée par an, puis les jeunes d'un an partent. Nourrie à
