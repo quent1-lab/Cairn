@@ -784,6 +784,24 @@ prédateurs, contre 10-35 réels sans prédateurs ; aurochs 35-70 /km² contre b
 Yellowstone) est porté par ce qui n'est pas mesurable aujourd'hui, et, pour les ongulés de moins
 de 150 kg, par les prédateurs absents (Sinclair 2003) : c'est l'étape 3.3.
 
+## 3.3 — les prédateurs : lecture (2026-11-03)
+
+Règles (`fauna.rs`, étape 1, Vie) : prises 0,05 par loup et par jour au contact d'un troupeau
+(≤ 500 m), une prise par rencontre sauf proie à bout de souffle ; croissance `0,42 × prises −
+0,020 × effectif` par jour, logistique sous le territoire (K ≈ 10 dans un disque de 8 km) ;
+mort sous 1 prédateur ; aucune saison, aucune réserve, aucune dispersion ; immigration (garde
+de coût) à 0,5-2 km d'un troupeau au hasard.
+
+**Mesuré** (`out/cap/j32/`, sans humains ni immigration, 12 cases) : les loups tuent **12,9 à
+17,9 ongulés par loup et par an**, dans la fourchette réelle (15-25, `../SOURCES.md`). Ils
+s'éteignent pourtant sur 9 cases sur 12 (derniers loups aux jours 270 à 1 905). Le modèle exige
+0,020 ÷ 0,42 = 0,048 prise par jour, soit **17,3 par loup et par an, pour seulement se
+maintenir** : les trois cases où ils survivent (seed 1337) tuent 17,8-17,9 /an, les autres 13-17.
+Le défaut n'est donc pas la chasse — la rencontre spatiale produit un taux réel — mais la
+**conversion démographique** : la « mortalité » de 0,020 /j (7,3 /an, une meute sans proie
+fondant de moitié en 35 jours) tient lieu de famine, sans réserves, et un loup réel vit d'un
+taux de prise ordinaire, pas de son maximum. Ni saison des naissances, ni dispersion des jeunes.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de
