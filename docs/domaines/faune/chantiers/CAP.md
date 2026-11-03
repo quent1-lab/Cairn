@@ -937,6 +937,34 @@ Prédictions (`cap_nature`, sans humains, 12 cases, 10 ans), écrites avant :
   par rapport au témoin sans loups (`d0e6e3e`).
 Réfutée si le gibier s'éteint sur une case ou si les loups s'éteignent partout.
 
+### 3.3 — mesure de la chasse par les besoins (binaire `0307ea1`, `out/cap/j33c/`) : réfutée
+
+| case | carré an 1/3/5/10 (têtes/km²) | témoin sans loups an 10 | loups à l'an 10 (derniers au jour) | prises /loup/an |
+|---|---|---|---|---|
+| forêt 42 | 9,3 / 7,2 / 3,6 / **0** (gibier éteint dans le monde au jour ~3 240) | 85,9 | 0 (3 005) | 29,5 |
+| forêt 7 | 8,6 / 13,3 / 22,7 / 37,7 | 39,1 | 7-19 | 10,8 |
+| forêt 1337 | 8,1 / 7,8 / 8,9 / 14,0 | 46,1 | 0 (2 885) | 27,8 |
+| forêt 2024 | 9,1 / 11,7 / 19,4 / 48,2 | 59,8 | 0 (1 420) | 17,4 |
+| taïga 42 | 5,3 / 6,6 / 8,8 / 23,9 | 32,4 | 0 (1 555) | 21,7 |
+| taïga 7 | 6,5 / 6,2 / 9,5 / 18,1 | 24,4 | 0 (1 345) | 11,8 |
+| taïga 1337 | 6,5 / 5,1 / 2,9 / 10,0 | 14,4 | 0 (1 400) | 35,0 |
+| taïga 2024 | 5,2 / 9,1 / 14,6 / 30,0 | 25,2 | 0 (540) | 19,2 |
+| prairie 42 | 8,5 / 9,8 / 13,1 / 19,9 | 18,2 | 3-7 | 6,0 |
+| prairie 7 | 8,7 / 9,6 / 12,7 / 33,9 | 50,2 | 0 (825) | 14,3 |
+| prairie 1337 | 9,7 / 10,7 / 12,7 / 23,4 | 19,0 | 9-25 | 6,8 |
+| prairie 2024 | 8,6 / 10,9 / 13,0 / 23,8 | 23,8 | 0 (410) | 4,7 |
+
+- Taux de prise émergent 15-35 : **tenu sur 7 cases**, 4,7-14 sur les autres (aurochs : 6-7, une
+  bête de 350 kg nourrit longtemps).
+- Loups vivants à l'an 10 sur ≥ 6 cases : **réfuté** (3/12) ; mais ils vivent désormais 1 à
+  8 ans de plus qu'avant.
+- Aucun gibier éteint : **réfuté** (forêt 42 : cerfs éteints dans tout le monde).
+- Lecture : le couple n'est pas amorti. Candidat lu dans le code dès l'étape 1 : la meute
+  choisit le troupeau **le plus proche, où qu'il soit** (`update_packs`), et le poursuit sans
+  limite de distance : son effort de recherche ne dépend pas de la densité de proies, le taux
+  de rencontre non plus, et elle traque la dernière harde du monde. Troisième réfutation de
+  suite : contre-lecture avant toute correction.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de
