@@ -802,6 +802,37 @@ Le défaut n'est donc pas la chasse — la rencontre spatiale produit un taux r�
 fondant de moitié en 35 jours) tient lieu de famine, sans réserves, et un loup réel vit d'un
 taux de prise ordinaire, pas de son maximum. Ni saison des naissances, ni dispersion des jeunes.
 
+## 3.3 — conception proposée (2026-11-03, à valider par l'utilisateur)
+
+La chasse spatiale reste telle quelle (elle donne 13-18 prises par loup et par an, le taux
+réel) ; on remplace la **conversion démographique** par la même vie que les troupeaux :
+
+1. **Viande sur pied** : une meute garde la viande de ses prises (masse comestible de l'espèce,
+   cerf 60 kg), qui se perd en quelques jours (charognards, τ = 5 j, **choix**) ; chaque loup en
+   mange jusqu'à sa ration de 4,5 kg/j (wolf.org). **Elle ne chasse que si ses réserves de viande
+   tombent sous deux jours de ration** (choix : un loup repu ne chasse pas).
+2. **Réserves** des loups, même forme linéaire que les troupeaux, part d'entretien
+   **≈ 0,6 = 2,7 / 4,5 kg** (seuil de reproduction réussie 2,3-3,2 kg/j sur 4,5 — la même valeur
+   que celle des herbivores, ici sourcée) ; durée de jeûne qui les vide : **30 jours, choix**
+   (aucune durée sourcée ; « plusieurs jours » sans dommage).
+3. **Deux classes**, adultes et louveteaux ; **une portée par meute et par an** au reverdissement
+   de sa maille, 4,8 petits × réserves (Yellowstone) ; mortalité de fond adultes 0,22 /an (survie
+   0,78), louveteaux 0,30 /an (choix ; 40-60 % au total la première année, la faim faisant le
+   reste) ; faim sous 20 % (adultes) et 50 % (petits) comme les troupeaux.
+4. **Dispersion à la place de la fission** : au reverdissement, les yearlings deviennent adultes
+   et 75 % d'entre eux partent (8 % des adultes), en groupe, fonder une meute à 16-40 km (choix :
+   le réel va à 80-160 km, mais le monde simulé autour des humains est plus petit) ; là où le
+   territoire est plein (K ≈ 10 dans un disque de 8 km, 0,05 /km² — Yellowstone 0,054), ils
+   n'ont pas accès aux proies et meurent de faim. Plus de mort d'une meute « sans proie en 35
+   jours » : elle s'affame à travers ses réserves.
+5. Supprimés : `PRED_CONV`, `PRED_DEATH_PER_DAY`, la fission à 8. Gardés : territoire, prises
+   au contact, immigration (garde de coût, inchangée).
+
+Prédictions à écrire avant le code (banc `cap_nature` sans humains, 10 ans, 4 seeds × forêt,
+taïga, prairie) : prédateurs vivants à l'an 10 sur ≥ 10 cases sur 12 ; 15-25 prises par loup et
+par an ; densité ≤ 0,05 /km² ; gibier du carré abaissé de 10 à 40 % par rapport au témoin
+`d0e6e3e` (cerf et renne ; aurochs moins).
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de

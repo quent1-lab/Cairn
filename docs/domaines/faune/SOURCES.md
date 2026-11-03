@@ -84,3 +84,16 @@ par (moi, sous-agent `sourceur`) · lu en entier ou de seconde main.
 - Toundra arctique canadienne : ~13 % de la PPN consommée par les herbivores (source non identifiée, faible)
 - Forêts d'Europe : 23,6 ongulés/km² en moyenne multi-études ; effets sur la forêt dès 115 kg/km² (régénération) · [UEA](https://ueaeprints.uea.ac.uk/89073/1/s10342_022_01452_w.pdf) (PDF illisible, non confirmé)
 - Non trouvé : production de brout en g/m²/an (forêt tempérée, boréale) ; part de la PPN mangée par les grands mammifères en forêt ; biomasse d'ongulés en kg/km² avec et sans prédateurs sur un même biome ; McNaughton et al. 1989 (Nature 341:142, la table par biome) inaccessible.
+
+## Loup : chasse, besoins, démographie, dispersion (CAP 3.3, 2026-11-03, `sourceur`, presque tout de seconde main)
+- Réponse fonctionnelle (orignal) : plateau 3,36 orignaux/loup/100 j ; dépendance à la densité jusqu'à 0,65 orignal/km² · Messier 1994 (27 études ; résumé)
+- Besoins : moyenne ~4,5 kg/loup/j ; seuil de reproduction réussie 2,3-3,2 kg/j ; minimum de survie ~1,1 kg/j ; les loups jeûnent plusieurs jours puis mangent 9 kg et plus d'un coup · [wolf.org](https://www.wolf.org/wolf-info/biology-and-behavior/) (page lue) ; hiver, Yukon : 3,2-7,9 kg/loup/j, moyenne 3,49 · [Yukon 2023](https://yukon.ca/sites/yukon.ca/files/env/southern_lakes_wolf_program_-_diet_composition_et_kill_rates_2023.pdf) (non lu en entier)
+- Survie annuelle des adultes : 0,78 (50 ans, Superior National Forest) ; 0,67 et 0,61 ailleurs (Minnesota, Colorado)
+- Portée : 4-6 en moyenne (1-11), 4,8 à Yellowstone ; une portée par meute et par an (seconde portée ~2 % des meutes-ans, Idaho)
+- Louveteaux : 40-60 % de mortalité la première année (71 % et 18 % cités) ; lien à la nourriture affirmé, non chiffré
+- Première reproduction ≥ 2 ans, souvent 3 (femelles, Scandinavie) ; meutes de 4-8 (Grands Lacs), jusqu'à 16-30
+- Dispersion : surtout à 11-12 mois ; dispersent chaque année 75 % des yearlings, 16 % des louveteaux, 8 % des adultes (Minnesota) ; 80-160 km couramment, record 1 092 km ; 5-20 % de la population en dispersion à tout instant
+- Densité : loups/1 000 km² proportionnels à l'indice de biomasse d'ongulés (Fuller 1989 ; Fuller, Mech & Cochrane 2003, n = 32, r² = 0,64) ; Yellowstone ~54/1 000 km²
+- Territoires : 78-153 km² (Minnesota, hiver), 100-350 (Europe centrale), 259-1 676 (Scandinavie)
+- Lion des cavernes : rien ; lion actuel : une proie tous les 2,4-4,4 jours, succès de chasse 21 % (réserves sud-africaines, non vérifié)
+- Non trouvé : durée de jeûne létale ; part de la famine dans la mortalité des loups ; formule territoire = f(biomasse).
