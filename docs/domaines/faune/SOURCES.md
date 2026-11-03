@@ -75,3 +75,12 @@ par (moi, sous-agent `sourceur`) · lu en entier ou de seconde main.
 - Renne, faons : +0,36-0,41 kg/j du 4 juin au 8 juillet · Seward (Alaska) 1984-1999, n = 9 749 · [Rangifer](https://septentrio.uit.no/index.php/rangifer/article/view/1517)
 - Cerf de Virginie : −22 % de masse de février à mai, +45 % de mai à octobre · DelGiudice et al. 1992, Minnesota · [USGS](https://pubs.usgs.gov/publication/5222896)
 - Non trouvé : rapport entretien ÷ ingestion volontaire dans des unités communes ; ingestion du bison.
+
+## Fourrage utilisable et consommation par biome (CAP étape 4, 2026-11-03, `sourceur`)
+- Prairie tempérée, Yellowstone : 45 % de l'ANPP consommé en moyenne par wapiti et bison (prairie et prairie-arbuste) · [Rangelands Gateway](https://rangelandsgateway.org/dlio/3350) (synthèse, étude source non identifiée)
+- Prairie tempérée, Yellowstone, 25 prairies (1988-89, 1999-2001, 2012-14) : biomasse retirée pendant la saison de croissance 0 à 265,7 g/m², moyennes de site corrélées à l'ANPP · Frank & Fridley 2025, Ecology · [PMC12277870](https://pmc.ncbi.nlm.nih.gov/articles/PMC12277870/) (lu via extraction)
+- Isle Royale, orignal : 0,01 à 20,6 kg/ha/an de végétation retirée selon les parcelles · [USGS](https://pubs.usgs.gov/publication/70265999) (page bloquée, de seconde main)
+- Lichen des rennes : croissance linéaire 4,7-5,4 mm/an (17 études, 6 pays) ; pas de conversion en g/m² · [Rangifer](https://septentrio.uit.no/index.php/rangifer/article/view/4636)
+- Toundra arctique canadienne : ~13 % de la PPN consommée par les herbivores (source non identifiée, faible)
+- Forêts d'Europe : 23,6 ongulés/km² en moyenne multi-études ; effets sur la forêt dès 115 kg/km² (régénération) · [UEA](https://ueaeprints.uea.ac.uk/89073/1/s10342_022_01452_w.pdf) (PDF illisible, non confirmé)
+- Non trouvé : production de brout en g/m²/an (forêt tempérée, boréale) ; part de la PPN mangée par les grands mammifères en forêt ; biomasse d'ongulés en kg/km² avec et sans prédateurs sur un même biome ; McNaughton et al. 1989 (Nature 341:142, la table par biome) inaccessible.

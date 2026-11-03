@@ -770,6 +770,20 @@ seul, et la qualité du fourrage est hors de CAP.
 Les 4 scènes froides et 2 tempérées sur 4 sont dans le périmètre de CAP ; la scène tempérée 42
 (entière) et 1337 (pour moitié) poussent toute l'année — hors périmètre jusqu'à **POU**.
 
+### (b) Étape 4, la végétation mangeable : pas de correction faute de source (2026-11-03)
+
+Deux recherches (`../SOURCES.md`, sections CHA-5 et « étape 4 ») : rien de solide ni de propre
+à un biome pour la forêt tempérée, la taïga ou la toundra (production de brout et de lichen en
+g/m²/an, part de la PPN mangée par les grands mammifères). Seul chiffre lu : en prairie de
+Yellowstone, wapiti et bison mangent ~45 % de l'ANPP (0-266 g/m² retirés selon la prairie) —
+le modèle donne 30 % de la PPN aux herbivores de prairie : **pas d'écart démontré** là où l'on
+sait mesurer. Changer les fractions de forêt ou de taïga sans chiffre serait calibrer vers une
+densité (règle 10). **Décision : les fractions restent telles quelles, marquées non sourcées**
+(`fauna::accessible_forage_g_m2_yr`). L'écart de niveau qui reste (cerf 40-90 /km² en forêt sans
+prédateurs, contre 10-35 réels sans prédateurs ; aurochs 35-70 /km² contre bison 0,3-0,5 à
+Yellowstone) est porté par ce qui n'est pas mesurable aujourd'hui, et, pour les ongulés de moins
+de 150 kg, par les prédateurs absents (Sinclair 2003) : c'est l'étape 3.3.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de
