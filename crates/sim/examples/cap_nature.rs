@@ -102,7 +102,7 @@ fn main() {
     writeln!(
         csv,
         "seed,biome,day,season,heads,herds,predators,packs,sq_heads,sq_density,sq_load,sq_satiation,\
-         occ_zones,occ_density,growth,predation,dissolved,pack_condition,pack_meat_days,pack_young"
+         occ_zones,occ_density,growth,predation,dissolved,pack_condition,pack_meat_days,pack_young,pack_share,pack_local"
     )
     .unwrap();
 
@@ -186,6 +186,23 @@ fn main() {
                     p_meat += p.meat;
                     p_young += p.young;
                 }
+                // Part des loups qui mangent (territoire, C3) et loups à 8 km, vus
+                // de chaque meute, moyennés à proportion des loups (contre-lecture 3.3).
+                let packs_pos: Vec<((f64, f64), f32)> =
+                    sim.fauna.query::<(&Pack, &Position)>().iter().map(|(_, (p, q))| ((q.x, q.y), p.population)).collect();
+                let r2 = fauna::PREDATOR_TERRITORY_TILES * fauna::PREDATOR_TERRITORY_TILES;
+                let (mut share_w, mut local_w) = (0.0f32, 0.0f32);
+                for &(p0, n0) in &packs_pos {
+                    let local: f32 = packs_pos
+                        .iter()
+                        .filter(|(p, _)| (p.0 - p0.0).powi(2) + (p.1 - p0.1).powi(2) <= r2)
+                        .map(|(_, n)| n)
+                        .sum();
+                    share_w += fauna::territory(local).0 * n0;
+                    local_w += local * n0;
+                }
+                let pack_share = if predators > 0.0 { share_w / predators } else { 0.0 };
+                let pack_local = if predators > 0.0 { local_w / predators } else { 0.0 };
                 // Réserves moyennes des loups, viande en jours de ration, louveteaux (CAP 3.3).
                 let pack_condition = if predators > 0.0 { p_cond / predators } else { 0.0 };
                 let pack_meat_days = if predators > 0.0 { p_meat / (predators * fauna::WOLF_RATION_KG_DAY) } else { 0.0 };
@@ -201,7 +218,7 @@ fn main() {
                 writeln!(
                     csv,
                     "{seed},{name},{},{season},{heads:.0},{herds},{predators:.1},{packs},{sq_heads:.0},{sq_density:.2},\
-                     {sq_load:.3},{sq_satiation:.3},{},{occ_density:.2},{:.1},{:.1},{:.1},{pack_condition:.3},{pack_meat_days:.2},{p_young:.2}",
+                     {sq_load:.3},{sq_satiation:.3},{},{occ_density:.2},{:.1},{:.1},{:.1},{pack_condition:.3},{pack_meat_days:.2},{p_young:.2},{pack_share:.3},{pack_local:.1}",
                     day + 1,
                     occ.len(),
                     f.growth,

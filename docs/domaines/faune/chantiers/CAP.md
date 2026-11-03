@@ -965,6 +965,47 @@ Réfutée si le gibier s'éteint sur une case ou si les loups s'éteignent parto
   de rencontre non plus, et elle traque la dernière harde du monde. Troisième réfutation de
   suite : contre-lecture avant toute correction.
 
+## Débat (2026-11-03, contre-lecture de 3.3 après trois réfutations)
+
+1. **Autre cause de la mort des loups : `territory()` est un plafond posé** (0,05 loup/km², K ≈ 10
+   dans 8 km) qui multiplie ce que la meute mange ; le banc pose 20 loups à moins de 8 km les uns
+   des autres (part 0,5 < entretien 0,6) et les meutes se regroupent sur le même troupeau : elles
+   tuent à plein et ne profitent que de la moitié — surchasse et famine ensemble. Contraire à la
+   règle 10 (ajout du 2026-11-03). → **Retenu** : mesurer `share` (en cours) ; si confirmé, le
+   territoire deviendra des rencontres et des combats entre meutes.
+2. Le candidat « proie la plus proche, où qu'elle soit » est juste mais incomplet : poursuite à
+   36 km/j, attaque à chaque heure d'une proie à bout de souffle (~1 chance sur 2 en 3 h) — le
+   rythme des prises est fixé par l'estomac, pas par la densité : réponse fonctionnelle plate.
+   → **Retenu** : tracer prises par loup et par jour contre densité de proies à 8 km.
+3. Les proies sans loups ne plafonnent pas à 10 ans (forêt 42 : 86 /km²) — paradoxe de
+   l'enrichissement possible. → **Retenu** : témoin sans loups à 30 ans.
+4. Le banc ne juge pas la bonne chose : 144 km², moins qu'un territoire, 20 loups (0,14 /km²,
+   ~3 fois le plafond réel), 10 ans, moins qu'une période de cycle. → **Retenu** : une scène
+   ≥ 1 000 km² à densité réelle de loups, 30-50 ans, avant de juger la persistance.
+5. Portes tout ou rien qui finissent le travail (`HERD_MIN`, `PACK_MIN`, « 2 adultes » sur 1,4 loup
+   continu). → **Retenu** : compter les extinctions par ces seuils ; défaut (b) toujours ouvert.
+6. Là où les loups survivent, ils tuent peu (aurochs difficile) — pas forcément l'amortissement.
+   → **Retenu** dans la mesure de la réponse fonctionnelle par espèce.
+7. Dispersion sans hasard (même côté). → **Retenu** : histogramme des arrivées.
+- Mécanismes réels absents, posables sans plafond : perception physique (à sourcer), coût du
+  déplacement en réserves, réussite selon la condition de la proie, territoire par rencontres et
+  combats. **Ordre** : instrumenter (aucune correction), territoire, perception et coût du
+  déplacement, rejuger sur la grande scène.
+
+### Mesure du point 1 du débat : la part des loups qui mangent (2026-11-03)
+
+`cap_nature` instrumenté (`pack_share`, `pack_local` : part moyenne qui mange et loups à 8 km,
+pondérées par les loups), 2 ans, relevé tous les 60 jours (loups / part / loups à 8 km / réserves) :
+- forêt 42 : part **0,56-0,64** la moitié du temps (jours 60, 180, 240, 420, 540, 600), réserves
+  0,39-0,67 ; « loups à 8 km » = tous les loups du monde : **les meutes sont empilées** ;
+- taïga 2024 : part 0,63-0,80 aux jours 240, 300, 480, réserves 0,26-0,64, loups éteints au
+  jour 540 ;
+- forêt 1337 : part 0,56-0,92 la première année, 1 ensuite (une seule meute restante).
+**Confirmé** : la part qui mange tombe sous l'entretien (0,6) quand les meutes se regroupent sur
+le même troupeau, et les loups maigrissent l'estomac plein. Le plafond `territory()` fait une
+partie de la famine ; il ne dit rien d'un territoire réel (défendu, exclusif), il ne fait que
+retirer de la nourriture à des meutes empilées.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de
