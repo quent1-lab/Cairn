@@ -198,7 +198,7 @@ fn main() {
                         .filter(|(p, _)| (p.0 - p0.0).powi(2) + (p.1 - p0.1).powi(2) <= r2)
                         .map(|(_, n)| n)
                         .sum();
-                    share_w += fauna::territory(local).0 * n0;
+                    share_w += n0;
                     local_w += local * n0;
                 }
                 let pack_share = if predators > 0.0 { share_w / predators } else { 0.0 };

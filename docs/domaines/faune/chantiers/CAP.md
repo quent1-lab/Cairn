@@ -1006,6 +1006,18 @@ le même troupeau, et les loups maigrissent l'estomac plein. Le plafond `territo
 partie de la famine ; il ne dit rien d'un territoire réel (défendu, exclusif), il ne fait que
 retirer de la nourriture à des meutes empilées.
 
+### 3.3 — 1a, le territoire exclusif (2026-11-03)
+
+Changement : chaque meute a un **domaine** (centre posé là où elle s'installe, dispersants
+compris) ; un troupeau appartient à la meute dont le centre est le plus proche (partage du
+pays, sans rayon ni densité posés) ; une meute ne prend pour proie que les troupeaux de son
+domaine. **Supprimés** : `territory()`, `PREDATOR_MAX_DENSITY_KM2` (0,05 loup/km²), la part qui
+mange. Tests rouges vus échouer : `une_meute_ne_chasse_pas_sur_le_domaine_d_une_autre` (elle
+prenait pour proie un troupeau au cœur du domaine voisin, à 12 km) ;
+`des_meutes_voisines_mangent_toute_leur_viande` (quatre meutes repues au même endroit : réserves
+0,996 après un jour). Retiré avec son sujet : `sans_territoire_une_meute_s_affame`. Instrument :
+la colonne `pack_share` de `cap_nature` vaut désormais 1 (plus de part).
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de

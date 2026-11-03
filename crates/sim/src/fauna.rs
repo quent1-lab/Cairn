@@ -131,53 +131,19 @@ const WOLF_LITTER: f32 = 4.8;
 const DISPERSAL_YEARLINGS: f32 = 0.75;
 const DISPERSAL_ADULTS: f32 = 0.08;
 
-// — Le territoire des prédateurs (chantier de dérive, C3) —
+// — Le territoire des prédateurs (CAP 3.3, contre-lecture) —
 //
-// Rien ne bornait le prédateur sinon sa proie : même au rythme d'un loup (C1),
-// il montait à 1,5-2 par km² — cinquante à cent fois la densité réelle — et le
-// cycle proie-prédateur, ralenti mais non amorti, éteignait le gibier sur 2
-// seeds sur 4 à l'an 4. Un prédateur réel défend un territoire : c'est ce qui
-// borne sa densité indépendamment de sa proie, et ce qui amortit le couple.
+// Il bornait la densité de loups par un plafond posé (0,05 /km², ~10 loups dans
+// un disque de 8 km) qui retirait aux loups « en trop » la part de leur
+// nourriture : des meutes regroupées sur le même troupeau maigrissaient
+// l'estomac plein (part mesurée 0,56-0,8, sous l'entretien 0,6). Le territoire
+// est désormais **exclusif** : un troupeau appartient à la meute dont le
+// domaine est le plus proche, et une meute ne chasse que les siens. La taille
+// d'un domaine et la densité de loups en sortent (règle 10).
 
-/// Rayon d'un territoire de prédateur : ~200 km², dans la fourchette réelle
-/// d'une meute de loups (100 à 1 000 km²).
+/// Rayon d'un territoire de loup (~200 km², dans la fourchette réelle de 100 à
+/// 1 000 km²) : sert aux instruments (loups voisins).
 pub const PREDATOR_TERRITORY_TILES: f64 = km_to_tiles(8.0);
-
-/// Densité maximale de prédateurs, par km² : l'ordre de grandeur des plus
-/// fortes densités de loups observées, là où la proie abonde.
-const PREDATOR_MAX_DENSITY_KM2: f32 = 0.05;
-
-/// Prédateurs qu'un territoire peut porter : densité maximale × aire du disque
-/// (≈ 10). Aucune capacité inventée — deux grandeurs réelles.
-fn predators_per_territory() -> f32 {
-    let r_km = (PREDATOR_TERRITORY_TILES * cairn_core::TILE_METERS / 1000.0) as f32;
-    PREDATOR_MAX_DENSITY_KM2 * std::f32::consts::PI * r_km * r_km
-}
-
-/// Ce que le territoire fait à une meute, selon les prédateurs à moins de
-/// `PREDATOR_TERRITORY_TILES` (elle comprise). Renvoie (part qui mange, place
-/// laissée) :
-///
-/// - **sous la capacité**, tous mangent, et la croissance nette d'une meute
-///   bien nourrie est multipliée par la place laissée (1 − P/K) — la forme
-///   logistique, qui l'amène à ce que le territoire porte ;
-/// - **au-delà**, seule la part K/P a un territoire, donc accès à la proie ; le
-///   surplus décline au rythme de la famine. Un prédateur sans territoire est
-///   un prédateur sans proie — aucune constante de plus.
-///
-/// Deux formes essayées d'abord, et mesurées fausses : freiner le seul
-/// **recrutement** (la marge d'un loup, 0,001/j face à une famine de 0,02/j,
-/// passait sous la famine — équilibre à 0,5 prédateur par territoire au lieu
-/// de 10) ; et une logistique pure au-delà de la capacité (le surplus ne
-/// refluait qu'au rythme de la croissance d'un loup : ~560 jours de 80 à 20).
-pub fn territory(local_predators: f32) -> (f32, f32) {
-    let k = predators_per_territory();
-    if local_predators <= k {
-        (1.0, 1.0 - local_predators / k)
-    } else {
-        (k / local_predators, 0.0)
-    }
-}
 
 // — Capacité de charge : le domaine vital (chantier de dérive, étape 4) —
 //
@@ -829,6 +795,9 @@ pub struct Pack {
     pub meat: f32,
     /// Contenu de l'estomac d'un loup, en kg (CAP 3.3).
     pub stomach: f32,
+    /// Centre du domaine de la meute, là où elle s'est installée (posé au
+    /// premier tour ; CAP 3.3).
+    pub home: Option<(f64, f64)>,
     /// Réserves corporelles des loups (0–1, CAP 3.3).
     pub condition: f32,
     /// Louveteaux de l'année, compris dans `population`.
@@ -849,6 +818,7 @@ impl Pack {
             quarry: None,
             meat: 0.0,
             stomach: 0.0,
+            home: None,
             condition: 1.0,
             young: 0.0,
             bearing: 0.0,
@@ -1004,7 +974,7 @@ pub const WOLF_RATION_KG_DAY: f32 = 4.5;
 /// prises ce tick, `share` la part des loups qui ont un territoire, `spring` le
 /// signal de saison de sa maille. Renvoie le nombre de loups qui partent
 /// (dispersion).
-pub fn pack_tick(pack: &mut Pack, meat_kg: f32, share: f32, spring: Spring) -> f32 {
+pub fn pack_tick(pack: &mut Pack, meat_kg: f32, spring: Spring) -> f32 {
     // La carcasse : ce que la meute a tué ; les corbeaux en prennent leur part.
     pack.meat += meat_kg;
     pack.meat = (pack.meat - RAVEN_KG_DAY * DT_DAYS).max(0.0);
@@ -1019,8 +989,7 @@ pub fn pack_tick(pack: &mut Pack, meat_kg: f32, share: f32, spring: Spring) -> f
     let ration_tick = WOLF_RATION_KG_DAY * DT_DAYS;
     let digested = pack.stomach.min(ration_tick);
     pack.stomach -= digested;
-    // Seuls les loups qui ont un territoire mangent (C3).
-    let food = digested / ration_tick * share;
+    let food = digested / ration_tick;
     // Les réserves, linéaires dans la ration comme celles des troupeaux.
     // Vides en `PACK_RESERVE_DAYS` sans rien manger : m × rate = 1 / T.
     let rate = 1.0 / (PACK_UPKEEP * PACK_RESERVE_DAYS);
@@ -2051,14 +2020,23 @@ pub fn update_packs(
     let mut fissions = Vec::new();
     stats.herds_alive(herds);
 
-    // Les meutes telles qu'au début du tour : chacune juge son territoire sur
-    // la même photo, quel que soit l'ordre d'itération.
-    let territory2 = PREDATOR_TERRITORY_TILES * PREDATOR_TERRITORY_TILES;
-    let packs_now: Vec<((f64, f64), f32)> = fauna
-        .query::<(&Pack, &Position)>()
+    // Les domaines tels qu'au début du tour : chaque meute juge à qui
+    // appartient un troupeau sur la même photo, quel que soit l'ordre
+    // d'itération. Une meute nouvelle s'installe là où elle est.
+    for (_, (pack, pos)) in fauna.query_mut::<(&mut Pack, &Position)>() {
+        pack.home.get_or_insert((pos.x, pos.y));
+    }
+    let homes: Vec<(hecs::Entity, (f64, f64))> = fauna
+        .query::<&Pack>()
         .iter()
-        .map(|(_, (p, pos))| ((pos.x, pos.y), p.population))
+        .map(|(e, p)| (e, p.home.unwrap_or((0.0, 0.0))))
         .collect();
+    // Le troupeau `h` est-il sur le domaine de la meute `me` (plus proche de
+    // son centre que de tout autre) ?
+    let owns = |me: hecs::Entity, home: (f64, f64), h: (f64, f64)| -> bool {
+        let d2 = (home.0 - h.0).powi(2) + (home.1 - h.1).powi(2);
+        homes.iter().all(|&(e, o)| e == me || (o.0 - h.0).powi(2) + (o.1 - h.1).powi(2) >= d2)
+    };
 
     for (entity, (id, pack, pos)) in fauna.query_mut::<(&FaunaId, &mut Pack, &mut Position)>() {
         // — Les meutes restent en simulation FINE, toujours.
@@ -2093,8 +2071,9 @@ pub fn update_packs(
         //   la carcasse finie. Un loup qui digère ne chasse pas. —
         let mut meat_kg = 0.0f32;
         if pack.stomach <= 0.0 && pack.meat <= 0.0 {
+            let home = pack.home.unwrap_or((pos.x, pos.y));
             let held = pack.quarry.and_then(|q| {
-                herds.iter().find(|h| h.entity == q).and_then(|h| {
+                herds.iter().find(|h| h.entity == q && owns(entity, home, h.pos)).and_then(|h| {
                     let d2 = (pos.x - h.pos.0).powi(2) + (pos.y - h.pos.1).powi(2);
                     (d2 <= PACK_GIVE_UP_TILES * PACK_GIVE_UP_TILES).then_some((d2, h))
                 })
@@ -2105,7 +2084,7 @@ pub fn update_packs(
             // déterministe.
             let nearest = held.or_else(|| {
                 let mut best: Option<(f64, &HerdView)> = None;
-                for h in herds {
+                for h in herds.iter().filter(|h| owns(entity, home, h.pos)) {
                     let d2 = (pos.x - h.pos.0).powi(2) + (pos.y - h.pos.1).powi(2);
                     if best.is_none_or(|(bd, _)| d2 < bd) {
                         best = Some((d2, h));
@@ -2153,21 +2132,13 @@ pub fn update_packs(
         // ensemble. Sans la feature, cette ligne n'existe pas.
         stats.encounter(pos, herds, pack.population, pack.last_kills);
 
-        // Le territoire (C3) : les prédateurs à moins de 8 km, elle comprise,
-        // sur la photo du début du tour.
-        let local: f32 = packs_now
-            .iter()
-            .filter(|(p, _)| (p.0 - pos.x).powi(2) + (p.1 - pos.y).powi(2) <= territory2)
-            .map(|(_, n)| n)
-            .sum();
-        let (share, _room) = territory(local);
         // La saison de sa maille : le reverdissement ne se lit qu'au premier
         // tick du jour.
         let spring = match range.spring(world.worldgen(), climate, range_zone((pos.x, pos.y)), day) {
             Spring::GreenUp if !first_tick => Spring::None,
             s => s,
         };
-        let dispersers = pack_tick(pack, meat_kg, share, spring);
+        let dispersers = pack_tick(pack, meat_kg, spring);
         if pack.population < PACK_MIN {
             doomed.push(entity);
         }
@@ -2769,7 +2740,7 @@ mod tests {
                 } else {
                     0.0
                 };
-                pack_tick(&mut pack, meat, 1.0, spring);
+                pack_tick(&mut pack, meat, spring);
             }
         }
         assert!(
@@ -2783,7 +2754,7 @@ mod tests {
     fn une_meute_sans_proie_vit_d_abord_sur_ses_reserves() {
         let mut pack = Pack::new(8.0, Species::Wolf);
         for _ in 0..20 * 24 {
-            pack_tick(&mut pack, 0.0, 1.0, Spring::None);
+            pack_tick(&mut pack, 0.0, Spring::None);
         }
         assert!(pack.population >= 7.2, "après 20 jours sans proie, {:.2} loups sur 8", pack.population);
     }
@@ -2799,7 +2770,7 @@ mod tests {
             for h in 0..24 {
                 let spring = if (day == 0 || day == 360) && h == 0 { Spring::GreenUp } else { Spring::None };
                 let meat = pack.population * WOLF_RATION_KG_DAY / 24.0;
-                partis += pack_tick(&mut pack, meat, 1.0, spring);
+                partis += pack_tick(&mut pack, meat, spring);
             }
         }
         assert!((2.5..=5.0).contains(&partis), "{partis:.2} loups dispersés au second reverdissement (attendu ~0,75 × 4 petits survivants + 0,08 × 5)");
@@ -2809,7 +2780,7 @@ mod tests {
     fn une_meute_sans_proie_s_eteint() {
         let mut pack = Pack::new(8.0, Species::Wolf);
         for _ in 0..24 * 360 {
-            pack_tick(&mut pack, 0.0, 1.0, Spring::None);
+            pack_tick(&mut pack, 0.0, Spring::None);
         }
         assert!(pack.population < PACK_MIN, "une meute sans gibier un an durant doit disparaître : {:.2}", pack.population);
     }
@@ -2824,30 +2795,13 @@ mod tests {
             for h in 0..24 {
                 let spring = if day == 0 && h == 0 { Spring::GreenUp } else { Spring::None };
                 let meat = pack.population * WOLF_RATION_KG_DAY / 24.0;
-                pack_tick(&mut pack, meat, 1.0, spring);
+                pack_tick(&mut pack, meat, spring);
             }
         }
         let facteur = pack.population / 5.0;
         assert!((1.2..=2.0).contains(&facteur), "nourrie un an, la meute a été multipliée par {facteur:.2}");
     }
 
-    /// CAP 3.3 (C3) : les loups sans territoire n'ont pas accès aux proies.
-    /// Une meute dont la moitié seulement a un territoire mange la moitié de
-    /// sa ration, sous l'entretien (0,6) : ses réserves baissent.
-    #[test]
-    fn sans_territoire_une_meute_s_affame() {
-        let mut pack = Pack::new(5.0, Species::Wolf);
-        for _ in 0..24 * 10 {
-            let meat = pack.population * WOLF_RATION_KG_DAY / 24.0;
-            pack_tick(&mut pack, meat, 0.5, Spring::None);
-        }
-        assert!(pack.condition < 0.95, "à moitié de territoire, réserves {:.3} après 10 jours", pack.condition);
-    }
-
-    /// CAP 3.3 : une meute nourrie essaime au printemps qui suit sa première
-    /// portée — ses jeunes d'un an partent fonder une meute ailleurs (garde
-    /// de la couverture : sans essaimage, le nombre de meutes ne suivait pas
-    /// la proie).
     #[test]
     fn une_meute_nourrie_essaime_l_annee_suivante() {
         let mut sim = Sim::new(WorldSeed(42), 256);
@@ -2895,6 +2849,49 @@ mod tests {
         kills
     }
 
+    /// CAP 3.3, contre-lecture : une meute ne chasse pas sur le domaine d'une
+    /// autre. Le pays se partage entre les domaines : un troupeau appartient à
+    /// la meute dont le domaine est le plus proche. Une meute affamée dont le
+    /// seul troupeau visible est au cœur du domaine voisin, à 12 km, ne le
+    /// prend pas pour proie.
+    #[test]
+    fn une_meute_ne_chasse_pas_sur_le_domaine_d_une_autre() {
+        let (mut sim, a, mut herds) = hunt_scene();
+        let pa = sim.fauna.get::<&Position>(a).map(|p| (p.x, p.y)).unwrap();
+        let far = (pa.0 + km_to_tiles(12.0), pa.1);
+        let mut b = Pack::new(5.0, Species::Wolf);
+        b.home = Some(far);
+        b.stomach = 10.0;
+        sim.fauna.spawn((FaunaId(9_998), Position { x: far.0, y: far.1 }, b));
+        sim.fauna.get::<&mut Pack>(a).unwrap().home = Some(pa);
+        herds[0].pos = (far.0 + 100.0, far.1);
+        sim.fauna.get::<&mut Position>(herds[0].entity).map(|mut p| { p.x = far.0 + 100.0; p.y = far.1; }).unwrap();
+        hunt_once(&mut sim, &herds);
+        let quarry = sim.fauna.get::<&Pack>(a).unwrap().quarry;
+        assert!(quarry.is_none(), "la meute a pris pour proie un troupeau du domaine voisin");
+    }
+
+    /// CAP 3.3, contre-lecture : des meutes voisines mangent toute la viande
+    /// qu'elles ont. Le plafond de territoire (0,05 loup/km²) retirait la moitié
+    /// de leur nourriture à quatre meutes regroupées : elles maigrissaient
+    /// l'estomac plein (mesuré : part 0,56-0,8, sous l'entretien).
+    #[test]
+    fn des_meutes_voisines_mangent_toute_leur_viande() {
+        let (mut sim, a, herds) = hunt_scene();
+        let pa = sim.fauna.get::<&Position>(a).map(|p| (p.x, p.y)).unwrap();
+        sim.fauna.get::<&mut Pack>(a).unwrap().stomach = 10.0;
+        for k in 0..3u64 {
+            let mut p = Pack::new(5.0, Species::Wolf);
+            p.stomach = 10.0;
+            sim.fauna.spawn((FaunaId(9_990 + k), Position { x: pa.0, y: pa.1 }, p));
+        }
+        for _ in 0..24 {
+            hunt_once(&mut sim, &herds);
+        }
+        let c = sim.fauna.get::<&Pack>(a).unwrap().condition;
+        assert!(c >= 0.999, "quatre meutes repues au même endroit : réserves {c:.3} après un jour");
+    }
+
     /// CAP 3.3 : une meute qui a l'estomac plein ne chasse pas, même sans
     /// carcasse en réserve — elle digère.
     #[test]
@@ -2926,7 +2923,7 @@ mod tests {
         let mut pack = Pack::new(0.0, Species::Wolf);
         pack.meat = 60.0;
         for _ in 0..48 {
-            pack_tick(&mut pack, 0.0, 1.0, Spring::None);
+            pack_tick(&mut pack, 0.0, Spring::None);
         }
         let perdu = 60.0 - pack.meat;
         assert!((24.0..=32.0).contains(&perdu), "une carcasse de 60 kg a perdu {perdu:.1} kg en deux jours");
