@@ -94,10 +94,14 @@ pub const HERD_UPKEEP: f32 = HERD_REFILL_DAYS / (HERD_RESERVE_DAYS + HERD_REFILL
 
 pub const PACK_START: f32 = 5.0;
 pub const PACK_MIN: f32 = 1.0;
-/// Proies tuées par prédateur et par jour, quand le gibier est à portée :
-/// ~15 à 25 ongulés par loup et par an. L'ancienne valeur (0,18, soit 65 par
-/// an) faisait croître une meute de ~8 % par jour.
-const PRED_KILL_PER_DAY: f32 = 0.05;
+/// Plafond de chasse d'un loup, en kg de viande par jour, quand le gibier est à
+/// portée (CAP 3.3) : le plateau de la réponse fonctionnelle, 3,36 orignaux par
+/// loup et par 100 jours (Messier 1994, 27 études), × ~200 kg comestibles par
+/// orignal (choix : la moitié d'une masse vivante de ~400 kg). Il remplace
+/// 0,05 **tête** par loup et par jour (18 par an, le taux ordinaire et non le
+/// plafond), qui ne donnait que 3 kg de cerf par jour — sous l'entretien d'un
+/// loup — et éteignait les meutes de forêt et de taïga (`CAP.md`, 3.3).
+const WOLF_MAX_KILL_KG_DAY: f32 = 6.7;
 // La démographie des meutes (CAP 3.3) : la même vie que les troupeaux —
 // réserves, une portée par an, jeunes qui meurent de faim les premiers — plus
 // la viande de leurs prises et la dispersion des jeunes. Elle remplace une
@@ -1052,10 +1056,11 @@ pub fn pack_tick(pack: &mut Pack, meat_kg: f32, share: f32, spring: Spring) -> f
     dispersers
 }
 
-/// Proies qu'une meute de `population` prédateurs prélève en un tick, bornée
-/// par le gibier réellement présent.
-pub fn pack_kills(population: f32, prey_available: f32) -> f32 {
-    (PRED_KILL_PER_DAY * population * DT_DAYS).min(prey_available.max(0.0))
+/// Proies qu'une meute de `population` prédateurs prélève en un tick, au plus
+/// le plafond de chasse en masse divisé par la masse comestible de la proie
+/// (`prey_kg`), bornée par le gibier réellement présent.
+pub fn pack_kills(population: f32, prey_available: f32, prey_kg: f32) -> f32 {
+    (WOLF_MAX_KILL_KG_DAY * population * DT_DAYS / prey_kg.max(1.0)).min(prey_available.max(0.0))
 }
 
 /// Vecteur unitaire fuyant `threat`. Si la menace est pile dessus, on part
@@ -2089,7 +2094,7 @@ pub fn update_packs(
                     //
                     //   Mesuré sans cette borne : les meutes en LOD tuaient 30 à
                     //   38 % de plus par prédateur qu'en simulation fine.
-                    let taken = pack_kills(pack.population, herd.population);
+                    let taken = pack_kills(pack.population, herd.population, herd.species.edible_kcal() / 1_200.0);
                     pack.last_kills = taken;
                     meat_kg += taken * herd.species.edible_kcal() / 1_200.0;
                     kills.push(Kill { herd: herd.entity, head: taken });
@@ -2809,14 +2814,26 @@ mod tests {
         assert!(meutes >= 2, "une meute nourrie doit essaimer dans l'année qui suit sa portée, on en compte {meutes}");
     }
 
+    /// CAP 3.3 : le plafond de chasse d'un loup est une **masse** — le plateau
+    /// de Messier, 3,36 orignaux par loup et par 100 jours, ~6,7 kg de viande
+    /// par jour —, pas un nombre de têtes : au contact d'une harde de cerfs
+    /// (60 kg comestibles), une meute de 5 tire en un tick au moins 90 % de
+    /// 5 × 6,7 / 24 kg. Avant : 0,05 tête par loup et par jour, 3 kg de cerf.
+    #[test]
+    fn le_plafond_de_chasse_d_un_loup_est_une_masse() {
+        let kg = pack_kills(5.0, 1000.0, 60.0) * 60.0;
+        let attendu = 5.0 * 6.7 / 24.0;
+        assert!(kg >= 0.9 * attendu, "5 loups au contact de cerfs tirent {kg:.2} kg en un tick, plateau {attendu:.2}");
+    }
+
     #[test]
     fn les_prises_sont_bornees_par_le_gibier_present() {
         // On ne tue pas plus de bêtes qu'il n'y en a : sinon l'effectif
         // passerait négatif et la meute se nourrirait de fantômes.
         // 100 prédateurs peuvent prendre 0,21 bête par tick (C1) : il n'y en a
         // que 0,1.
-        assert_eq!(pack_kills(100.0, 0.1), 0.1);
-        assert!(pack_kills(2.0, 1000.0) < 1.0);
+        assert_eq!(pack_kills(100.0, 0.1, 60.0), 0.1);
+        assert!(pack_kills(2.0, 1000.0, 60.0) < 1.0);
     }
 
     #[test]
