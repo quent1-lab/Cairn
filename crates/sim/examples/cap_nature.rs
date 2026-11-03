@@ -102,7 +102,7 @@ fn main() {
     writeln!(
         csv,
         "seed,biome,day,season,heads,herds,predators,packs,sq_heads,sq_density,sq_load,sq_satiation,\
-         occ_zones,occ_density,growth,predation,dissolved"
+         occ_zones,occ_density,growth,predation,dissolved,pack_condition,pack_meat_days,pack_young"
     )
     .unwrap();
 
@@ -178,10 +178,17 @@ fn main() {
                     }
                 }
                 let (mut predators, mut packs) = (0.0f32, 0usize);
+                let (mut p_cond, mut p_meat, mut p_young) = (0.0f32, 0.0f32, 0.0f32);
                 for (_, p) in sim.fauna.query::<&Pack>().iter() {
                     predators += p.population;
                     packs += 1;
+                    p_cond += p.condition * p.population;
+                    p_meat += p.meat;
+                    p_young += p.young;
                 }
+                // Réserves moyennes des loups, viande en jours de ration, louveteaux (CAP 3.3).
+                let pack_condition = if predators > 0.0 { p_cond / predators } else { 0.0 };
+                let pack_meat_days = if predators > 0.0 { p_meat / (predators * fauna::WOLF_RATION_KG_DAY) } else { 0.0 };
                 let season = sim
                     .climate
                     .season(center.1 as i64, sim.time)
@@ -194,7 +201,7 @@ fn main() {
                 writeln!(
                     csv,
                     "{seed},{name},{},{season},{heads:.0},{herds},{predators:.1},{packs},{sq_heads:.0},{sq_density:.2},\
-                     {sq_load:.3},{sq_satiation:.3},{},{occ_density:.2},{:.1},{:.1},{:.1}",
+                     {sq_load:.3},{sq_satiation:.3},{},{occ_density:.2},{:.1},{:.1},{:.1},{pack_condition:.3},{pack_meat_days:.2},{p_young:.2}",
                     day + 1,
                     occ.len(),
                     f.growth,

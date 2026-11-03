@@ -853,6 +853,28 @@ Retirés avec leur sujet (croissance `0,42 × prises − 0,020`, fission à 8) :
 le foyer de référence : à l'origine, la maille ne pousse jamais, n'ouvre pas de saison, et la
 meute n'y met jamais bas). Suite complète : 305 verts, les deux rouges connus.
 
+### 3.3 — mesure (binaire `7b5dd3f`, `out/cap/j33/`) : prédiction réfutée
+
+Sans humains, 10 ans, 12 cases : **loups éteints sur 12 cases sur 12** (avant 3.3 : 9 sur 12) ;
+prises 6-16 par loup et par an ; gibier du carré à l'an 10 de −13 à +85 % du témoin `d0e6e3e`
+(sans sens). Les quatre prédictions tombent.
+
+Trace (`cap_nature` instrumenté : réserves des loups, viande en jours de ration, louveteaux ;
+seed 1337, 2 ans) — deux causes distinctes :
+1. **Forêt** : viande toujours à 0, réserves 0,07-0,4, meutes éteintes au jour ~200. Le cap de
+   prises est compté **en têtes** (0,05 par loup et par jour) : sur un cerf de 60 kg comestibles,
+   au plus 3 kg par loup et par jour, sous l'entretien (2,7) dès que le contact n'est pas
+   permanent. Le plateau réel est en **masse** (Messier : 3,36 orignaux par loup et par 100 j,
+   ~6-7 kg/j). Le voisin signalé à l'implémentation est la cause.
+2. **Prairie** : réserves pleines, deux jours de viande en stock (la meute repue ne chasse
+   plus) — mais **aucune portée la deuxième année** : la mortalité de la première année (famine
+   des 80 premiers jours, avant la première prise) et la dispersion ont laissé ~1,4 adulte par
+   meute, sous le couple exigé ; et les dispersants partent par fractions de moins d'un loup,
+   effacées sous `PACK_MIN`. Une population continue de « 1,4 loup » ne se reproduit pas.
+
+Corrections, une à la fois : (a) le cap de prises en masse ; (b) la dispersion d'un groupe
+trop petit pour fonder (les fractions effacées).
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de
