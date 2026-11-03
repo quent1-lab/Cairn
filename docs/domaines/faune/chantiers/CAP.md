@@ -889,6 +889,18 @@ trop petit pour fonder (les fractions effacées).
   pleines), cerfs du carré 7 → 5 têtes/km² et en baisse.
 - (b) la dispersion par fractions reste à traiter si le banc la montre encore.
 
+**Question de l'utilisateur et décision (2026-11-03)** : « poser la limite en têtes ou en masse,
+c'est scripté ou pas ? Si on se base sur ses besoins et ses dépenses, il décidera de lui-même. »
+Réponse : le plateau de Messier est un taux **mesuré sur le terrain**, déjà fait de recherche,
+poursuite, échecs, mise à mort et digestion ; le poser par-dessus une recherche et une poursuite
+simulées impose un résultat que le modèle devrait produire (demi-calibration), et la prise par
+**fraction** de troupeau à chaque heure de contact est un artefact. **Décision** : après le banc
+en cours, remplacer le plafond par le mécanisme — la meute chasse quand elle a faim (déjà), une
+attaque réussit ou échoue (taux de succès réel par proie, à sourcer), une réussite tue une **bête
+entière**, la meute mange au rythme de son estomac (~9 kg par loup et par repas), le reste se
+perd ; le taux de prise **émerge** et se compare au réel (15-25 /loup/an, Messier). Puis, si cela
+tient, **appliquer le même principe au gibier** (besoins et dépenses, aucune limite posée).
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de
