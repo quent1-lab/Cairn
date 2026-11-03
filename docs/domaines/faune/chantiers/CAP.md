@@ -743,6 +743,21 @@ Réfutée si une densité dépasse 2 fois la capacité, ou si le gibier s'étein
   sur pied au lieu d'une année ; à ouvrir dans son domaine.
 - Suite complète avant ces deux corrections (`e747c14`) : 301 verts, deux rouges connus.
 
+## Périmètre de CAP (décision de l'utilisateur, 2026-11-02)
+
+« On finit CAP tout en préparant le terrain pour les autres chantiers. » La pluie n'a pas de
+saison (**PLU**) et la pousse ne lit que la température (**POU**) : CAP ne juge et ne règle
+**rien** dans les biomes où l'eau fait la saison maigre (savane, steppe, déserts) ni dans les
+mailles qui poussent toute l'année ; aucune constante n'y compensera l'absence de saison sèche.
+CAP se valide là où la température fait la saison : taïga, toundra, forêts et prairies à hiver.
+Suite : (a) vérifier si la scène tempérée de référence est dans une maille sans saison ;
+(b) la part de végétation mangeable (étape 4), jugée sur ces biomes ; (c) les prédateurs (3.3) ;
+clôture. **Hypophagie d'hiver écartée** : l'ingestion volontaire baisse de 34-37 % l'hiver (cerf,
+renne), mais l'entretien aussi, de ~22 % (cerf de Virginie, 97 contre 125 kcal/kg^0,75/j) ; sans
+qualité du fourrage (plus pauvre l'hiver), les deux ensemble feraient **gagner** des réserves à
+un cerf qui trouve sa ration d'hiver, quand le réel en perd ~20 % : le mécanisme ne tient pas
+seul, et la qualité du fourrage est hors de CAP.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de
