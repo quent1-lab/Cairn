@@ -96,25 +96,39 @@ pub const PACK_START: f32 = 5.0;
 pub const PACK_MIN: f32 = 1.0;
 /// Proies tuées par prédateur et par jour, quand le gibier est à portée :
 /// ~15 à 25 ongulés par loup et par an. L'ancienne valeur (0,18, soit 65 par
-/// an) faisait croître une meute de ~8 % par jour — voir `PRED_CONV`.
+/// an) faisait croître une meute de ~8 % par jour.
 const PRED_KILL_PER_DAY: f32 = 0.05;
-/// Prédateurs entretenus par proie tuée (rendement trophique). Réglé pour que
-/// la croissance **maximale** d'une meute nourrie à volonté,
-/// `PRED_CONV × PRED_KILL_PER_DAY − PRED_DEATH_PER_DAY` ≈ 0,001/j, soit
-/// ~0,4 par an, celle d'une population de loups réelle.
-///
-/// Chantier de dérive, C1 : avec 0,55 × 0,18, cette croissance valait
-/// 0,079/j — huit fois celle du gibier, soixante fois celle d'un loup. Une
-/// fois le gibier borné par sa pâture (étape 4), il ne distançait plus des
-/// prédateurs montés à un ou deux milliers sur une centaine de km², et
-/// s'éteignait sur 3 runs sur 8.
-const PRED_CONV: f32 = 0.42;
-/// Mortalité des prédateurs, par jour. Elle tient lieu de **famine** plus que
-/// de mortalité de fond : une meute sans proie fond de moitié en ~35 jours.
-/// Corollaire du calibrage : une meute ne se maintient qu'à ≥ 0,048 prise par
-/// jour, soit presque toute sa capacité de chasse — un prédateur ne tient que
-/// là où le gibier abonde.
-const PRED_DEATH_PER_DAY: f32 = 0.020;
+// La démographie des meutes (CAP 3.3) : la même vie que les troupeaux —
+// réserves, une portée par an, jeunes qui meurent de faim les premiers — plus
+// la viande de leurs prises et la dispersion des jeunes. Elle remplace une
+// croissance `0,42 × prises − 0,020 × effectif` qui exigeait 17,3 prises par
+// loup et par an pour seulement se maintenir, quand un loup réel en vit de
+// 15 à 25 (mesuré : 13-18 prises par loup et par an, et les loups s'éteignaient
+// sur 9 cases sur 12, `CAP.md`).
+
+/// Jours de jeûne qui vident les réserves d'un loup. Choix : les sources ne
+/// disent que « plusieurs jours » sans dommage.
+const PACK_RESERVE_DAYS: f32 = 30.0;
+/// Part d'entretien de la ration d'un loup : 2,7 kg sur 4,5 (seuil de
+/// reproduction réussie 2,3-3,2 kg/j, wolf.org) ; d'où des réserves remplies en
+/// 45 jours à ration entière.
+const PACK_UPKEEP: f32 = 0.6;
+/// Durée de vie de la viande d'une prise (charognards, pourriture). Choix.
+const MEAT_PERSISTENCE_DAYS: f32 = 5.0;
+/// Une meute ne chasse que si sa viande tombe sous ce nombre de jours de
+/// ration. Choix : un loup repu ne chasse pas.
+const PACK_HUNT_BELOW_DAYS: f32 = 2.0;
+/// Mortalité de fond annuelle : adultes (survie 0,78, Superior National
+/// Forest), louveteaux (choix ; 40-60 % meurent la première année, la faim
+/// faisant le reste).
+const WOLF_ADULT_DEATH: f32 = 0.22;
+const WOLF_PUP_DEATH: f32 = 0.30;
+/// Petits par portée, une portée par meute et par an (Yellowstone, 4,8).
+const WOLF_LITTER: f32 = 4.8;
+/// Part des yearlings et des adultes qui quittent la meute chaque année
+/// (Minnesota : 75 % et 8 %).
+const DISPERSAL_YEARLINGS: f32 = 0.75;
+const DISPERSAL_ADULTS: f32 = 0.08;
 
 // — Le territoire des prédateurs (chantier de dérive, C3) —
 //
@@ -810,11 +824,33 @@ pub struct Pack {
     /// totale restait entre 0 et 10 proies/jour pendant que le gibier passait
     /// de 59 à 4 650 têtes.
     pub quarry: Option<hecs::Entity>,
+    /// Viande de ses prises qui reste à manger, en kg (CAP 3.3).
+    pub meat: f32,
+    /// Réserves corporelles des loups (0–1, CAP 3.3).
+    pub condition: f32,
+    /// Louveteaux de l'année, compris dans `population`.
+    pub young: f32,
+    /// Naissances à venir dans la saison en cours, et ticks qui restent.
+    pub bearing: f32,
+    pub bearing_ticks: u16,
+    /// Ticks depuis l'ouverture de la dernière saison des naissances (saturé).
+    pub since_birth_season: u32,
 }
 
 impl Pack {
     pub fn new(population: f32, species: Species) -> Self {
-        Self { population, last_kills: 0.0, species, quarry: None }
+        Self {
+            population,
+            last_kills: 0.0,
+            species,
+            quarry: None,
+            meat: 0.0,
+            condition: 1.0,
+            young: 0.0,
+            bearing: 0.0,
+            bearing_ticks: 0,
+            since_birth_season: u32::MAX,
+        }
     }
 }
 
@@ -825,29 +861,6 @@ impl Pack {
 /// rejoindra pas.
 const PACK_GIVE_UP_TILES: f64 = km_to_tiles(6.0);
 
-/// Au-delà de cet effectif, la meute se scinde — la symétrie longtemps
-/// manquante de [`HERD_FISSION`].
-///
-/// **Une meute est un point dans l'espace.** Sa capacité à chasser ne dépend
-/// pas seulement de son effectif mais de l'endroit où elle se trouve : elle ne
-/// tue que ce qui entre dans son rayon de chasse. Tant que les meutes ne se
-/// scindaient pas, leur **nombre** ne croissait que par immigration, à taux
-/// constant — quand les troupeaux, eux, se multiplient par fission, donc
-/// géométriquement.
-///
-/// Mesuré sur un run de 8,4 années de jeu : jamais plus de **19 meutes** sur
-/// 603 relevés, pour jusqu'à **1 483 troupeaux** — soit 4,8 troupeaux par meute
-/// au départ et 28,6 à l'arrivée. Chaque meute vidait son voisinage puis
-/// jeûnait pendant que la proie prospérait partout ailleurs. Aucun réglage du
-/// taux de prises ne pouvait corriger ça : c'était une question de couverture,
-/// pas d'efficacité.
-///
-/// Le seuil est bas devant celui des troupeaux (90) parce qu'une meute est
-/// naturellement petite : 8, la taille d'une meute de loups réelle, qui
-/// essaime ses jeunes au-delà. Il doit rester **sous** ce qu'un territoire
-/// porte (~10, C3) : à 24 comme avant, une meute ne l'atteignait plus jamais et
-/// la fission disparaissait en silence.
-pub const PACK_FISSION: f32 = 8.0;
 
 /// Instantané d'un troupeau, pris avant les systèmes : c'est ce que lisent
 /// les chasseurs humains, les meutes et les autres troupeaux. Travailler sur
@@ -979,18 +992,64 @@ pub fn herd_life_tick(herd: &mut Herd, food: f32, spring: Spring) -> LifeFlows {
     flows
 }
 
-/// Un tick de démographie de meute : elle croît de ses prises, décline sans.
-/// C'est l'équation prédateur de Lotka-Volterra — un prédateur sans proie
-/// s'éteint — avec le territoire (C3) : quand la meute se nourrit assez pour
-/// croître, sa croissance nette est multipliée par `room`
-/// ([`territory`]) ; quand elle ne se nourrit pas assez, la famine agit
-/// seule.
-pub fn pack_population_step(population: f32, kills: f32, room: f32) -> f32 {
-    let growth = PRED_CONV * kills;
-    let decay = PRED_DEATH_PER_DAY * population * DT_DAYS;
-    let net = growth - decay;
-    let net = if net > 0.0 { net * room } else { net };
-    (population + net).max(0.0)
+
+/// Ration d'un loup, kg de viande par jour (moyenne, wolf.org).
+pub const WOLF_RATION_KG_DAY: f32 = 4.5;
+
+/// Un tick de vie d'une meute (CAP 3.3) : `meat_kg` de viande gagnée par ses
+/// prises ce tick, `share` la part des loups qui ont un territoire, `spring` le
+/// signal de saison de sa maille. Renvoie le nombre de loups qui partent
+/// (dispersion).
+pub fn pack_tick(pack: &mut Pack, meat_kg: f32, share: f32, spring: Spring) -> f32 {
+    // La viande : ce que la meute a tué, mangé jusqu'à la ration, le reste se perd.
+    pack.meat += meat_kg;
+    let want = pack.population * WOLF_RATION_KG_DAY * DT_DAYS;
+    let eaten = want.min(pack.meat);
+    pack.meat -= eaten;
+    pack.meat *= (-DT_DAYS / MEAT_PERSISTENCE_DAYS).exp();
+    // Seuls les loups qui ont un territoire mangent (C3).
+    let food = if want > 0.0 { eaten / want * share } else { 0.0 };
+    // Les réserves, linéaires dans la ration comme celles des troupeaux.
+    // Vides en `PACK_RESERVE_DAYS` sans rien manger : m × rate = 1 / T.
+    let rate = 1.0 / (PACK_UPKEEP * PACK_RESERVE_DAYS);
+    pack.condition = (pack.condition + (food - PACK_UPKEEP) * rate * DT_DAYS).clamp(0.0, 1.0);
+    let c = pack.condition;
+
+    let year = cairn_core::DAYS_PER_YEAR as f32;
+    let tpd = cairn_core::TICKS_PER_DAY as u32;
+    pack.since_birth_season = pack.since_birth_season.saturating_add(1);
+    let mut young = pack.young.clamp(0.0, pack.population);
+    let mut adults = pack.population - young;
+    let mut dispersers = 0.0;
+    let season = match spring {
+        Spring::GreenUp => pack.since_birth_season >= BIRTH_INTERVAL_DAYS * tpd,
+        // Sans saison : une portée par an tout de même.
+        Spring::Continuous => pack.since_birth_season >= cairn_core::DAYS_PER_YEAR as u32 * tpd,
+        Spring::None => false,
+    };
+    if season {
+        pack.since_birth_season = 0;
+        // Les louveteaux de l'an passé ont un an : la plupart partent.
+        dispersers = DISPERSAL_YEARLINGS * young + DISPERSAL_ADULTS * adults;
+        adults += young - dispersers;
+        young = 0.0;
+        // Une portée, s'il reste un couple.
+        if adults >= 2.0 {
+            pack.bearing = WOLF_LITTER * c;
+            pack.bearing_ticks = BIRTH_WINDOW_DAYS * cairn_core::TICKS_PER_DAY as u16;
+        }
+    }
+    if pack.bearing_ticks > 0 {
+        let born = pack.bearing / f32::from(pack.bearing_ticks);
+        young += born;
+        pack.bearing -= born;
+        pack.bearing_ticks -= 1;
+    }
+    adults -= adults * (WOLF_ADULT_DEATH / year + starvation(c, HERD_STARVING_CONDITION)) * DT_DAYS;
+    young -= young * (WOLF_PUP_DEATH / year + starvation(c, YOUNG_STARVING_CONDITION)) * DT_DAYS;
+    pack.young = young.max(0.0);
+    pack.population = adults.max(0.0) + pack.young;
+    dispersers
 }
 
 /// Proies qu'une meute de `population` prédateurs prélève en un tick, bornée
@@ -1941,7 +2000,12 @@ pub fn update_packs(
     world: &World,
     herds: &[HerdView],
     stats: &mut FaunaStats,
+    range: &mut Rangeland,
+    climate: &Climate,
+    time: SimTime,
 ) -> (Vec<Kill>, Vec<hecs::Entity>, Vec<PackFission>) {
+    let day = time.tick / cairn_core::TICKS_PER_DAY;
+    let first_tick = time.tick % cairn_core::TICKS_PER_DAY == 0;
     let mut kills = Vec::new();
     let mut doomed = Vec::new();
     let mut fissions = Vec::new();
@@ -1985,50 +2049,56 @@ pub fn update_packs(
         // — La proie choisie d'abord : on la garde tant qu'elle vit et qu'elle
         //   reste à portée d'obstination. C'est ce qui permet d'épuiser un
         //   gibier plus rapide que soi. —
-        let held = pack.quarry.and_then(|q| {
-            herds.iter().find(|h| h.entity == q).and_then(|h| {
-                let d2 = (pos.x - h.pos.0).powi(2) + (pos.y - h.pos.1).powi(2);
-                (d2 <= PACK_GIVE_UP_TILES * PACK_GIVE_UP_TILES).then_some((d2, h))
-            })
-        });
+        // — Ne chasse que la meute qui a faim (CAP 3.3) : sous deux jours de
+        //   ration de viande. Un loup repu ne chasse pas. —
+        let mut meat_kg = 0.0f32;
+        if pack.meat < pack.population * WOLF_RATION_KG_DAY * PACK_HUNT_BELOW_DAYS {
+            let held = pack.quarry.and_then(|q| {
+                herds.iter().find(|h| h.entity == q).and_then(|h| {
+                    let d2 = (pos.x - h.pos.0).powi(2) + (pos.y - h.pos.1).powi(2);
+                    (d2 <= PACK_GIVE_UP_TILES * PACK_GIVE_UP_TILES).then_some((d2, h))
+                })
+            });
 
-        // Sinon seulement, le gibier le plus proche : départage par distance
-        // puis ordre de la liste (construite dans l'ordre d'itération) →
-        // déterministe.
-        let nearest = held.or_else(|| {
-            let mut best: Option<(f64, &HerdView)> = None;
-            for h in herds {
-                let d2 = (pos.x - h.pos.0).powi(2) + (pos.y - h.pos.1).powi(2);
-                if best.is_none_or(|(bd, _)| d2 < bd) {
-                    best = Some((d2, h));
+            // Sinon seulement, le gibier le plus proche : départage par distance
+            // puis ordre de la liste (construite dans l'ordre d'itération) →
+            // déterministe.
+            let nearest = held.or_else(|| {
+                let mut best: Option<(f64, &HerdView)> = None;
+                for h in herds {
+                    let d2 = (pos.x - h.pos.0).powi(2) + (pos.y - h.pos.1).powi(2);
+                    if best.is_none_or(|(bd, _)| d2 < bd) {
+                        best = Some((d2, h));
+                    }
                 }
-            }
-            best
-        });
-        pack.quarry = nearest.map(|(_, h)| h.entity);
-        if let Some((d2, herd)) = nearest {
-            let dist = d2.sqrt();
-            if dist <= PACK_HUNT_RADIUS_TILES {
-                // — Combien de temps le contact dure-t-il vraiment ?
-                //
-                //   Multiplier les prises par `steps` supposerait la meute
-                //   collée à sa proie toute la fenêtre. C'est faux : dès la
-                //   première attaque le troupeau détale de 2 km, hors du rayon
-                //   de chasse (500 m). Une rencontre ne vaut donc qu'**un
-                //   tick** — sauf si le troupeau est à bout de souffle, et
-                //   c'est là, et seulement là, qu'il se fait prendre
-                //   plusieurs fois de suite.
-                //
-                //   Mesuré sans cette borne : les meutes en LOD tuaient 30 à
-                //   38 % de plus par prédateur qu'en simulation fine.
-                let taken = pack_kills(pack.population, herd.population);
-                pack.last_kills = taken;
-                kills.push(Kill { herd: herd.entity, head: taken });
-            } else {
-                // Poursuite : la meute suit les troupeaux, donc elle suit
-                // aussi leurs migrations — sans qu'on l'ait écrit.
-                let dir = ((herd.pos.0 - pos.x) / dist, (herd.pos.1 - pos.y) / dist);
-                try_move(world, pos, dir, PACK_STEP_TILES.min(dist));
+                best
+            });
+            pack.quarry = nearest.map(|(_, h)| h.entity);
+            if let Some((d2, herd)) = nearest {
+                let dist = d2.sqrt();
+                if dist <= PACK_HUNT_RADIUS_TILES {
+                    // — Combien de temps le contact dure-t-il vraiment ?
+                    //
+                    //   Multiplier les prises par `steps` supposerait la meute
+                    //   collée à sa proie toute la fenêtre. C'est faux : dès la
+                    //   première attaque le troupeau détale de 2 km, hors du rayon
+                    //   de chasse (500 m). Une rencontre ne vaut donc qu'**un
+                    //   tick** — sauf si le troupeau est à bout de souffle, et
+                    //   c'est là, et seulement là, qu'il se fait prendre
+                    //   plusieurs fois de suite.
+                    //
+                    //   Mesuré sans cette borne : les meutes en LOD tuaient 30 à
+                    //   38 % de plus par prédateur qu'en simulation fine.
+                    let taken = pack_kills(pack.population, herd.population);
+                    pack.last_kills = taken;
+                    meat_kg += taken * herd.species.edible_kcal() / 1_200.0;
+                    kills.push(Kill { herd: herd.entity, head: taken });
+                } else {
+                    // Poursuite : la meute suit les troupeaux, donc elle suit
+                    // aussi leurs migrations — sans qu'on l'ait écrit.
+                    let dir = ((herd.pos.0 - pos.x) / dist, (herd.pos.1 - pos.y) / dist);
+                    try_move(world, pos, dir, PACK_STEP_TILES.min(dist));
+                }
             }
         }
 
@@ -2045,28 +2115,33 @@ pub fn update_packs(
             .filter(|(p, _)| (p.0 - pos.x).powi(2) + (p.1 - pos.y).powi(2) <= territory2)
             .map(|(_, n)| n)
             .sum();
-        let (share, room) = territory(local);
-        pack.population = pack_population_step(pack.population, pack.last_kills * share, room);
+        let (share, _room) = territory(local);
+        // La saison de sa maille : le reverdissement ne se lit qu'au premier
+        // tick du jour.
+        let spring = match range.spring(world.worldgen(), climate, range_zone((pos.x, pos.y)), day) {
+            Spring::GreenUp if !first_tick => Spring::None,
+            s => s,
+        };
+        let dispersers = pack_tick(pack, meat_kg, share, spring);
         if pack.population < PACK_MIN {
             doomed.push(entity);
-        } else if pack.population > PACK_FISSION {
-            // Trop nombreuse pour un seul territoire : la moitié part chasser
-            // ailleurs. C'est le pendant exact de la fission des troupeaux, et
-            // ce qui permet enfin au **nombre** de meutes de suivre la
-            // population de prédateurs — donc à la prédation de couvrir un
-            // territoire qui s'étend.
-            pack.population *= 0.5;
-            // Direction dérivée de la position, sans RNG : `update_packs` n'en
-            // tire aucun, et en introduire un ici décalerait tous les flux
-            // aléatoires en aval (le déterminisme bit-à-bit est une garde du
-            // projet). L'angle varie assez d'une meute à l'autre pour que les
-            // filles ne partent pas toutes dans le même sens.
+        }
+        if dispersers >= PACK_MIN {
+            // — La dispersion (CAP 3.3), qui remplace la fission à 8 : les
+            //   jeunes partent fonder une meute à 16-40 km (le réel va à
+            //   80-160 km ; le monde simulé autour des humains est plus petit).
+            //   Là où le territoire est plein, ils n'auront pas de proies.
+            //   Direction et distance dérivées de la position, sans RNG :
+            //   `update_packs` n'en tire aucun, et en introduire un décalerait
+            //   les flux aléatoires en aval. —
             let angle = (pos.x * 0.7 + pos.y * 1.3).rem_euclid(std::f64::consts::TAU);
-            let d = km_to_tiles(2.0);
+            let frac = (pos.x * 0.37 + pos.y * 0.61).rem_euclid(1.0);
+            let d = km_to_tiles(16.0 + 24.0 * frac);
             fissions.push(PackFission {
                 pos: (pos.x + angle.cos() * d, pos.y + angle.sin() * d),
-                population: pack.population,
+                population: dispersers,
                 species: pack.species,
+                condition: pack.condition,
             });
         }
     }
@@ -2079,6 +2154,8 @@ pub struct PackFission {
     pub pos: (f64, f64),
     pub population: f32,
     pub species: Species,
+    /// Les réserves des dispersants, celles de leur meute.
+    pub condition: f32,
 }
 
 /// Applique les prises (prédation + chasse humaine) aux troupeaux. L'ordre du
@@ -2626,90 +2703,110 @@ mod tests {
         );
     }
 
+    /// CAP 3.3 : une meute qui tue au taux d'un loup réel — 18 cerfs (60 kg
+    /// comestibles) par loup et par an, apportés au fil des jours — se maintient
+    /// trois ans (au moins 60 % de son effectif de départ). Avant 3.3, il
+    /// fallait 17,3 prises par an pour seulement ne pas fondre.
     #[test]
-    fn une_meute_sans_proie_s_eteint() {
-        let mut pop = 8.0;
-        let mut jours = 0;
-        while pop >= PACK_MIN && jours < 24 * 365 {
-            pop = pack_population_step(pop, 0.0, 1.0);
-            jours += 1;
+    fn une_meute_qui_tue_au_taux_reel_se_maintient() {
+        let mut pack = Pack::new(5.0, Species::Wolf);
+        for day in 0..3 * 360u64 {
+            for h in 0..24 {
+                let spring = if day % 360 == 0 && h == 0 { Spring::GreenUp } else { Spring::None };
+                let meat = pack.population * 18.0 * 60.0 / 360.0 / 24.0;
+                pack_tick(&mut pack, meat, 1.0, spring);
+            }
         }
-        assert!(pop < PACK_MIN, "une meute sans gibier doit disparaître");
+        assert!(pack.population >= 3.0, "à 18 prises par loup et par an, la meute tombe à {:.2} loups en 3 ans", pack.population);
+    }
+
+    /// CAP 3.3 : une meute sans proie vit sur ses réserves avant de mourir de
+    /// faim : après 20 jours sans viande, elle garde au moins 90 % de ses loups.
+    /// Avant 3.3, elle fondait de moitié en 35 jours dès le premier jour.
+    #[test]
+    fn une_meute_sans_proie_vit_d_abord_sur_ses_reserves() {
+        let mut pack = Pack::new(8.0, Species::Wolf);
+        for _ in 0..20 * 24 {
+            pack_tick(&mut pack, 0.0, 1.0, Spring::None);
+        }
+        assert!(pack.population >= 7.2, "après 20 jours sans proie, {:.2} loups sur 8", pack.population);
+    }
+
+    /// CAP 3.3 : une portée par an, puis les jeunes d'un an partent. Nourrie à
+    /// sa ration, une meute de 5 adultes met bas au reverdissement ; au
+    /// suivant, ~75 % des yearlings et ~8 % des adultes la quittent (Minnesota).
+    #[test]
+    fn les_jeunes_d_un_an_se_dispersent_au_reverdissement() {
+        let mut pack = Pack::new(5.0, Species::Wolf);
+        let mut partis = 0.0;
+        for day in 0..=360u64 {
+            for h in 0..24 {
+                let spring = if (day == 0 || day == 360) && h == 0 { Spring::GreenUp } else { Spring::None };
+                let meat = pack.population * WOLF_RATION_KG_DAY / 24.0;
+                partis += pack_tick(&mut pack, meat, 1.0, spring);
+            }
+        }
+        assert!((2.5..=5.0).contains(&partis), "{partis:.2} loups dispersés au second reverdissement (attendu ~0,75 × 4 petits survivants + 0,08 × 5)");
     }
 
     #[test]
-    fn une_meute_qui_prospere_finit_par_se_scinder() {
-        // La garde du correctif de couverture : sans fission, le NOMBRE de
-        // meutes ne croissait que par immigration — jamais plus de 19 sur 8,4
-        // années de jeu, face à 1 483 troupeaux. Une meute est un point dans
-        // l'espace ; sa taille ne remplace pas sa position.
-        let mut sim = Sim::new(WorldSeed(42), 256);
-        sim.allow_fauna_immigration = false; // sinon on ne saurait pas d'où vient la 2ᵉ
-        let home = (0.0, 0.0);
-        sim.spawn_pack(home.0, home.1, PACK_FISSION - 0.03);
-        // Du gibier sous son nez, pour qu'elle franchisse le seuil : nourrie à
-        // sa faim, seule sur son territoire, la meute croît de ~0,1 %/jour
-        // (C1) freiné par la place qui reste (C3) — ~0,002 prédateur par jour
-        // à 7,97, soit le seuil en une quinzaine de jours.
-        sim.spawn_herd(home.0 + 1.0, home.1, 400.0);
-        assert_eq!(sim.fauna.query::<&Pack>().iter().count(), 1);
+    fn une_meute_sans_proie_s_eteint() {
+        let mut pack = Pack::new(8.0, Species::Wolf);
+        for _ in 0..24 * 360 {
+            pack_tick(&mut pack, 0.0, 1.0, Spring::None);
+        }
+        assert!(pack.population < PACK_MIN, "une meute sans gibier un an durant doit disparaître : {:.2}", pack.population);
+    }
 
-        for _ in 0..24 * 30 {
+    /// Chantier de dérive, C1, repris par CAP 3.3 : nourrie à sa ration un an,
+    /// une meute ne croît pas plus vite qu'une population de loups (×1,35 à
+    /// ×1,65 ; plafond ×2).
+    #[test]
+    fn une_meute_ne_croit_pas_plus_vite_qu_un_loup() {
+        let mut pack = Pack::new(5.0, Species::Wolf);
+        for day in 0..360u64 {
+            for h in 0..24 {
+                let spring = if day == 0 && h == 0 { Spring::GreenUp } else { Spring::None };
+                let meat = pack.population * WOLF_RATION_KG_DAY / 24.0;
+                pack_tick(&mut pack, meat, 1.0, spring);
+            }
+        }
+        let facteur = pack.population / 5.0;
+        assert!((1.2..=2.0).contains(&facteur), "nourrie un an, la meute a été multipliée par {facteur:.2}");
+    }
+
+    /// CAP 3.3 (C3) : les loups sans territoire n'ont pas accès aux proies.
+    /// Une meute dont la moitié seulement a un territoire mange la moitié de
+    /// sa ration, sous l'entretien (0,6) : ses réserves baissent.
+    #[test]
+    fn sans_territoire_une_meute_s_affame() {
+        let mut pack = Pack::new(5.0, Species::Wolf);
+        for _ in 0..24 * 10 {
+            let meat = pack.population * WOLF_RATION_KG_DAY / 24.0;
+            pack_tick(&mut pack, meat, 0.5, Spring::None);
+        }
+        assert!(pack.condition < 0.95, "à moitié de territoire, réserves {:.3} après 10 jours", pack.condition);
+    }
+
+    /// CAP 3.3 : une meute nourrie essaime au printemps qui suit sa première
+    /// portée — ses jeunes d'un an partent fonder une meute ailleurs (garde
+    /// de la couverture : sans essaimage, le nombre de meutes ne suivait pas
+    /// la proie).
+    #[test]
+    fn une_meute_nourrie_essaime_l_annee_suivante() {
+        let mut sim = Sim::new(WorldSeed(42), 256);
+        sim.allow_fauna_immigration = false;
+        // Sur une terre qui pousse (le foyer de référence), pas à l'origine :
+        // une maille qui ne pousse jamais n'ouvre pas de saison des naissances.
+        let h = crate::scenario::find_home(&mut sim, crate::scenario::reference_seed_point());
+        let home = (h.0 as f64 + 0.5, h.1 as f64 + 0.5);
+        sim.spawn_pack(home.0, home.1, 5.0);
+        sim.spawn_herd(home.0 + 1.0, home.1, 2000.0);
+        for _ in 0..24 * 400 {
             sim.step();
         }
         let meutes = sim.fauna.query::<&Pack>().iter().count();
-        assert!(meutes >= 2, "une meute nourrie doit se scinder, on en compte {meutes}");
-    }
-
-    #[test]
-    fn une_meute_bien_nourrie_croit() {
-        let mut pop = 5.0;
-        for _ in 0..24 * 60 {
-            let kills = pack_kills(pop, 1000.0); // gibier abondant
-            pop = pack_population_step(pop, kills, 1.0);
-        }
-        assert!(pop > 5.0, "avec du gibier à volonté, la meute croît : {pop:.1}");
-    }
-
-    /// Chantier de dérive, C1 : **une meute ne croît pas plus vite qu'une
-    /// population de loups**. Nourrie à volonté pendant un an, une vraie
-    /// population croît d'environ 0,3 à 0,5 par an (×1,35 à ×1,65) ; un plafond
-    /// à ×2 laisse de la marge sans admettre l'ancien calibrage, qui permettait
-    /// 0,079 par jour — ×10¹² en un an, soit un à deux milliers de loups sur une
-    /// centaine de km² mesurés à l'étape 4, contre 1 à 5 dans la nature.
-    #[test]
-    fn une_meute_ne_croit_pas_plus_vite_qu_un_loup() {
-        let mut pop = 5.0;
-        for _ in 0..24 * 360 {
-            let kills = pack_kills(pop, 1.0e6); // gibier à volonté
-            pop = pack_population_step(pop, kills, 1.0);
-        }
-        let facteur = pop / 5.0;
-        assert!(
-            (1.2..=2.0).contains(&facteur),
-            "nourrie à volonté un an, la meute a été multipliée par {facteur:.3e} \
-             (réel : ×1,35 à ×1,65)"
-        );
-    }
-
-    /// C3, l'autre face du territoire : **une meute seule sur son territoire,
-    /// bien nourrie, croît jusqu'à ce qu'il porte** — pas au-delà, mais pas en
-    /// deçà non plus. Le territoire freine la multiplication ; il ne doit pas
-    /// faire passer la marge d'un loup (0,001/j) sous sa famine.
-    #[test]
-    fn une_meute_seule_croit_jusqu_a_ce_que_porte_son_territoire() {
-        let mut pop = 3.0;
-        for _ in 0..24 * 360 * 8 {
-            let kills = pack_kills(pop, 1.0e6);
-            let (share, room) = territory(pop);
-            pop = pack_population_step(pop, kills * share, room);
-        }
-        let k = predators_per_territory();
-        assert!(
-            (0.7 * k..=1.05 * k).contains(&pop),
-            "seule et nourrie à volonté huit ans, la meute compte {pop:.2} prédateurs \
-             pour un territoire qui en porte {k:.1}"
-        );
+        assert!(meutes >= 2, "une meute nourrie doit essaimer dans l'année qui suit sa portée, on en compte {meutes}");
     }
 
     #[test]

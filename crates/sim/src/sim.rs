@@ -1491,7 +1491,15 @@ impl Sim {
         // avant que les troupeaux ne fassent leurs petits : un troupeau
         // décimé ne doit pas engendrer comme s'il était intact.
         let (pred_kills, dead_packs, pack_fissions) =
-            fauna::update_packs(&mut self.fauna, &self.world, &herds, &mut self.fauna_stats);
+            fauna::update_packs(
+                &mut self.fauna,
+                &self.world,
+                &herds,
+                &mut self.fauna_stats,
+                &mut self.rangeland,
+                &self.climate,
+                time,
+            );
         self.end("4a meutes", _ph);
         let _ph = phase(); // 4b prises
         self.fauna_flows.hunted += kills.iter().map(|k| f64::from(k.head)).sum::<f64>();
@@ -1506,8 +1514,14 @@ impl Sim {
         // Les meutes filles naissent après coup : `update_packs` emprunte
         // l'ECS, et `spawn_pack_species` y écrit (même patron que la fission
         // des troupeaux).
+        // Les dispersants (CAP 3.3) partent avec les réserves de leur meute.
         for f in pack_fissions {
-            self.spawn_pack_species(f.pos.0, f.pos.1, f.population, f.species);
+            let id = self.spawn_pack_species(f.pos.0, f.pos.1, f.population, f.species);
+            for (_, (fid, p)) in self.fauna.query_mut::<(&FaunaId, &mut Pack)>() {
+                if *fid == id {
+                    p.condition = f.condition;
+                }
+            }
         }
 
         self.end("4b prises", _ph);

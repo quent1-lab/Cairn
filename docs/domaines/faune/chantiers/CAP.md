@@ -833,6 +833,26 @@ taïga, prairie) : prédateurs vivants à l'an 10 sur ≥ 10 cases sur 12 ; 15-2
 par an ; densité ≤ 0,05 /km² ; gibier du carré abaissé de 10 à 40 % par rapport au témoin
 `d0e6e3e` (cerf et renne ; aurochs moins).
 
+### 3.3 — implémentation (2026-11-03, validée par l'utilisateur)
+
+Tests rouges vus échouer (interface `pack_tick` posée sur l'ancien comportement) :
+`une_meute_qui_tue_au_taux_reel_se_maintient` (18 cerfs par loup et par an : 0,34 loup en
+3 ans) ; `une_meute_sans_proie_vit_d_abord_sur_ses_reserves` (5,36 loups sur 8 après 20 jours) ;
+`les_jeunes_d_un_an_se_dispersent_au_reverdissement` (0 dispersant). Prémisse du premier test
+passée de 15 à 18 cerfs par an en l'écrivant : à 60 kg comestibles, 15 cerfs font 2,5 kg/j,
+sous l'entretien (2,7) — le cap de prises du modèle (0,05 /loup/j, 18 /an) donne au mieux
+3 kg/j de cerf. **Voisin à mesurer** : ce cap est compté en têtes ; le plateau réel (Messier,
+3,36 orignaux/loup/100 j) vaut plutôt ~6 kg/j ; sur une proie de 60 kg, le loup du modèle
+vit à la limite de son entretien.
+
+Retirés avec leur sujet (croissance `0,42 × prises − 0,020`, fission à 8) :
+`une_meute_qui_prospere_finit_par_se_scinder`, `une_meute_bien_nourrie_croit`,
+`une_meute_seule_croit_jusqu_a_ce_que_porte_son_territoire` ; réécrits sur `pack_tick` :
+`une_meute_sans_proie_s_eteint`, `une_meute_ne_croit_pas_plus_vite_qu_un_loup` ; ajoutés :
+`sans_territoire_une_meute_s_affame`, `une_meute_nourrie_essaime_l_annee_suivante` (placé sur
+le foyer de référence : à l'origine, la maille ne pousse jamais, n'ouvre pas de saison, et la
+meute n'y met jamais bas). Suite complète : 305 verts, les deux rouges connus.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de
