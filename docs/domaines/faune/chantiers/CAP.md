@@ -758,6 +758,18 @@ qualité du fourrage (plus pauvre l'hiver), les deux ensemble feraient **gagner*
 un cerf qui trouve sa ration d'hiver, quand le réel en perd ~20 % : le mécanisme ne tient pas
 seul, et la qualité du fourrage est hors de CAP.
 
+### (a) Les scènes de référence et la saison (`cap_scene`, 2026-11-03)
+
+| seed | tempéré : foyer, jours de pousse, mailles sans hiver à 8 km | froid : foyer, jours de pousse |
+|---|---|---|
+| 42 | forêt tempérée, **360**, 49/49 | taïga, 166 |
+| 7 | prairie, 268, 0/49 | prairie, 172 |
+| 1337 | forêt tempérée, **360**, 29/49 (moyenne 257 j) | taïga, 170 |
+| 2024 | prairie, 284, 0/49 | taïga, 154 |
+
+Les 4 scènes froides et 2 tempérées sur 4 sont dans le périmètre de CAP ; la scène tempérée 42
+(entière) et 1337 (pour moitié) poussent toute l'année — hors périmètre jusqu'à **POU**.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de

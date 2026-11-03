@@ -12,6 +12,7 @@ Ouvert au registre le 2026-11-02 depuis CAP (**pas encore travaillé** ; prépar
   1337) ne descendent jamais sous 5 °C et **poussent toute l'année** ; leur gibier se pose à
   1,7 fois la capacité du fourrage (niveau fixé par la part d'entretien, non sourcée). Dans le
   réel, une forêt océanique douce ralentit l'hiver (lumière, durée du jour).
+- Scènes de référence (`cap_scene`, CAP, 2026-11-03) : la scène tempérée de seed 42 pousse 360 jours sur 49/49 mailles à 8 km du foyer ; seed 1337, 29/49 ; les autres scènes ont un hiver (154-284 jours de pousse).
 - La savane pousse toute l'année faute de saison sèche (voir **PLU**).
 
 ## Ce qu'il faudra faire

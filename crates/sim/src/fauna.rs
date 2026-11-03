@@ -362,6 +362,12 @@ impl Rangeland {
         eaten / want
     }
 
+    /// Jours de croissance par an de la maille `zone` (0 à 360), pur du
+    /// worldgen et du climat (instruments).
+    pub fn growing_days(&mut self, worldgen: &cairn_worldgen::WorldGen, climate: &Climate, zone: (i64, i64)) -> u32 {
+        self.pasture(worldgen, climate, zone).growing_days
+    }
+
     /// Ce que la saison dit aux mères de la maille `zone` ce jour-là (CAP 3.2) :
     /// la pousse reprend-elle aujourd'hui, pousse-t-elle toute l'année, ou
     /// rien de cela. Pur du worldgen et du climat.
