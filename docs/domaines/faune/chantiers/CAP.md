@@ -875,6 +875,20 @@ seed 1337, 2 ans) — deux causes distinctes :
 Corrections, une à la fois : (a) le cap de prises en masse ; (b) la dispersion d'un groupe
 trop petit pour fonder (les fractions effacées).
 
+### 3.3 — corrections (2026-11-03)
+
+- **(a) Plafond de chasse en masse** (`0d6b7ca`) : test rouge
+  `le_plafond_de_chasse_d_un_loup_est_une_masse` (5 loups au contact de cerfs : 0,62 kg par
+  tick, plateau 1,40) ; `WOLF_MAX_KILL_KG_DAY` = 6,7 kg (Messier 3,36 orignaux/loup/100 j ×
+  ~200 kg comestibles, masse de l'orignal choisie) remplace 0,05 tête par loup et par jour.
+- **(c) Bug de déplacement trouvé par la trace** (`062eb06`) : après (a), les meutes de forêt
+  (seed 1337) mouraient encore — toutes arrêtées au jour 216 sur une rive (altitude 0), la proie
+  la plus proche à 11 km : chaque pas de poursuite en ligne droite tombait dans l'eau et était
+  refusé. Test rouge `une_meute_contourne_l_eau_qui_la_separe_de_sa_proie` ; la poursuite essaie
+  à 45°, 90°, 135° de chaque côté. Trace sur 3 ans ensuite : loups vivants (7-16, réserves
+  pleines), cerfs du carré 7 → 5 têtes/km² et en baisse.
+- (b) la dispersion par fractions reste à traiter si le banc la montre encore.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de
