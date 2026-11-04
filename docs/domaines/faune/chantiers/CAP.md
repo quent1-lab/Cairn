@@ -1063,6 +1063,45 @@ densité : il attend les combats entre meutes (mécanisme manquant, à traiter).
 **Si réfutée** : décision de l'utilisateur (2026-11-03) — on consigne, et on refait un tour
 d'analyse et de modification dans une nouvelle session.
 
+### Longue run : réfutée, arrêtée (2026-11-04) — à reprendre dans une nouvelle session
+
+**Coût** : la grande scène (1 024 km², boîte) passe à ~70 min par année de jeu quand le gibier
+sans prédateur atteint ~1 500 troupeaux (forêt 42, an 13-15) : 40 ans par run, hors de portée
+d'ici vendredi. Arrêtée au bout de 15 ans (forêt 42, avec et sans loups) ; sept cas lancés sur
+2 ans à la place (`out/cap/longue33/court_*`, binaire `out/bin/cap33d/`, `a79bdf6`).
+
+**Mesure** (loups au jour 30 / 180 / 360 ; dernier jour avec des loups, sur 720) :
+
+| cas | j30 | j180 | j360 | derniers |
+|---|---|---|---|---|
+| forêt 42 (40 ans prévus) | ~25 | 0 | 0 | **185** |
+| forêt 7 | 24,0 | 6,2 | 4,0 | 400 |
+| forêt 1337 | 37,2 | 10,2 | 8,9 | 720 (vivants) |
+| forêt 2024 | 23,6 | 4,5 | 8,4 | 720 (vivants) |
+| taïga 42 | 23,4 | 2,5 | 2,7 | 600 |
+| taïga 7 | 23,4 | 3,9 | 1,4 | 630 |
+| taïga 1337 | 19,6 | 4,5 | 8,8 | 720 (vivants) |
+| taïga 2024 | 23,5 | 4,5 | 0 | 265 |
+
+- **Le premier été affame les loups, sur 8 cas sur 8** : réserves 0,12-0,48 entre les jours 30 et
+  90, effectif divisé par 2 à 6 en trois mois, 5 meutes → 1 ou 2 dès le jour 120 ; ensuite une
+  meute isolée qui s'éteint ou survit à 4-9 loups. En forêt 42, gibier au niveau du témoin sans
+  loups (87 têtes/km² aux ans 10-15, les deux runs).
+- **Prédictions** : loups vivants à l'an 40 sur ≥ 4/8 — **réfutée** (extinction ou meute
+  résiduelle dès l'an 2) ; gibier jamais éteint — tenue ; autres — non jugeables.
+
+**Piste n° 1 pour la reprise (lue dans le code, non mesurée)** : la proie voit le loup avant que
+le loup ne la sente. Les rayons d'alerte des herbivores (`Species::flee_radius` : cerf 0,7 km,
+renne 0,6, gazelle 1,0, aurochs 0,4) dépassent la portée d'odorat retenue pour le loup
+(0,4 km, `PACK_SMELL_TILES`) : un troupeau détale avant d'être perçu, et une meute qui erre ne
+rencontre que des bêtes à bout de souffle. La valeur de 0,4 km vient d'une seule observation
+(Mech 1966) ; « 2,4 km » est cité ailleurs pour la même. Mesure à faire d'abord : la part des
+heures de faim où une proie est à moins de 0,4 km, et les prises par rencontre.
+**Autres pistes** : les combats entre meutes manquent (test rouge `un_territoire_ne_porte…`) ;
+le départ (5 meutes de 5, posées le même jour, sans réserves de viande, en été) est un
+transitoire plus dur que le régime ; aucun arrêt anticipé du banc quand les loups sont éteints
+(le reste de la run ne mesure plus que le témoin) ; le coût de la grande scène (PERF).
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de
