@@ -121,3 +121,13 @@ par (moi, sous-agent `sourceur`) · lu en entier ou de seconde main.
 - Issue des rencontres (orignal, Isle Royale) : 77 « testés », 6 tués (7,8 %) ; 36 tiennent tête (0 tué), 41 fuient (5 tués, 12 %) · Mech 1966. Un loup seul : ~2 % de chances sur un wapiti adulte seul (NPS Yellowstone, secondaire)
 - Poursuites : de quelques mètres à 4-4,8 km (cas individuels, Isle Royale) ; aucune moyenne trouvée
 - Non trouvé : proportions des étapes de la chasse au wapiti (MacNulty et al. 2007, PDF illisible) ; données GPS de la phase de recherche et d'approche (Mech, Smith & MacNulty 2015)
+
+## Taille des groupes d'ongulés (CAP 3.3, cohérence gibier/loup, 2026-11-06, `sourceur`)
+- Cerf élaphe, Białowieża : **2,7 (ET 2,35) au printemps-été, 6,9 (ET 6,84) en automne-hiver** ; ~2 biches pour 1 cerf ; 1 100-1 450 têtes en forêt gérée, 1997-2001 · Kossak 2006, *J. Wildl. Manage.* 70(4):1054 (seconde main) · [BioOne](https://bioone.org/journals/journal-of-wildlife-management/volume-70/issue-4/0022-541X(2006)70%5B1054:GSDORD%5D2.0.CO;2/)
+- Bison d'Europe mâles, Białowieża : 1,83 ± 1,19 avant le rut, 1,27 ± 0,63 en rut ; 62 % solitaires, 32 % ≤ 3, 6 % de 4-9 ; l'hiver, ~35 % des mâles rejoignent de grands rassemblements aux nourrissages · Krasińska & Krasiński 1995, *Acta Theriol.* (seconde main) · [rcin](https://rcin.org.pl/publication/28297)
+- Gazelle de Mongolie : 0,04-0,09 tête/km² ; groupe moyen 5,2 (autre étude : 5,76, max 25, 59 % de 4-7) · Olson et al. 2005, *Oryx* (seconde main)
+- Gazelle de Thomson : 3-36, exceptionnellement 700 (source non académique, à vérifier)
+- Caribou : rassemblements après la mise bas jusqu'à 10 000 têtes (juillet, insectes) · NPS, Joly 2025 (seconde main) ; tailles de bande par saison non trouvées
+- Fission-fusion (chevreuil, Machault, hiver, 2002-2004) : 393 groupes, 4,9 ± 0,1 (1-17) ; **durée de vie médiane d'un groupe : quelques heures** ; 24 % se reforment dans la journée ; probabilité de scission ~ carré de la taille ; attraction entre groupes au-delà de 200 m · Pays et al. 2012 (**lu**) · [PMC](https://pmc.ncbi.nlm.nih.gov/articles/PMC3316705)
+- Effet du loup (Creel & Winnie 2005, Yellowstone) : les hardes ne grossissent que les jours sans loup (qualitatif ; chiffres non obtenus)
+- Non trouvé : nombre de groupes par km² ; taille de groupe du wapiti ou du caribou par saison ; aurochs (éteint)

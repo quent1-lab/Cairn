@@ -1213,6 +1213,13 @@ part. Avant, il demande si le modèle du gibier tient face au modèle du loup. L
    le vent — l'objet de (2).
 4. Densité de têtes : 10-12 /km² au carré à l'an 1, dans l'ordre réel (Białowieża : cerf
    10-35 sans loups) ; pas d'incohérence vue de ce côté.
+- **Sources (2026-11-06, `../SOURCES.md`)** : cerf élaphe 2,7 têtes par groupe l'été, 6,9 l'hiver
+  (Białowieża) ; bison mâle 1,3-1,8 ; gazelle de Mongolie ~5 ; groupes fission-fusion qui vivent
+  quelques heures (chevreuil). Le modèle tient **~60 têtes par troupeau, 10 à 20 fois trop** :
+  à densité de têtes égale (10-12 /km²), le réel compte ~4 groupes de cerfs par km² l'été, le
+  modèle 0,25 — et la meute qui erre en rencontre d'autant moins (déduit, à mesurer). La fusion à
+  portée d'alerte (0,7 km) jusqu'à 90 têtes n'a pas d'équivalent réel : un groupe réel se fait
+  et se défait en heures.
 
 ## Étape 3 — corriger règle par règle
 
