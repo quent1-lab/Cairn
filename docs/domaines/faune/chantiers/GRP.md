@@ -151,3 +151,33 @@ Prédictions, sur la Pi, grande scène (1 024 km², boîte), forêt, jour 135, 1
   changer la nature, seulement sa forme) ;
 - `longue` 42 tempéré 1 an (humains) : gibier à 10 km du foyer dans le même ordre de grandeur
   en têtes que le témoin (×0,5 à ×2) ; prises de la bande non effondrées (≥ 50 % du témoin).
+
+### GRP-1b — mesure (Pi, binaires `out/bin/{main,grp1b}/` sur la Pi, `out/grp1b/`, 2026-11-06)
+
+Grande scène, forêt, jour 135, 1 an. Témoin `main` (`e14072b`) → GRP-1b (`grp1b`) :
+
+| seed | taille des groupes (min/méd/max sur l'an) | acquisitions | prises | loups j90 / j180 / j360 | carré fin (têtes/km²) | durée (Pi) |
+|---|---|---|---|---|---|---|
+| 42 | 57 → 3,0/3,1/3,3 | 27 → 501 | 9 → 67 | 5,1/0/0 → 11/1,9/0 | 14,5 → 13,1 | ~2 → 23 min |
+| 7 | 61 → 2,7/2,9/3,3 | 28 → 394 | 4 → 27 | 1/0/0 → 6,9/0/0 | 14,0 → 12,7 | ~2 → 24 min |
+| 1337 | 57 → 2,9/3,0/3,2 | 36 → 1 441 | 4 → 291 | 4,7/0/0 → 19,8/12,3/10,1 | 11,4 → 10,1 | ~2 → 17 min |
+| 2024 | 60 → 2,7/2,9/3,3 | 36 → 518 | 3 → 35 | 0/0/0 → 8,3/1,8/0 | 13,9 → 11,8 | ~2 → 30 min |
+
+`longue` 42 tempéré 1 an (humains, Pi) : gibier en fin d'an 411 → 471 têtes ; têtes chassées
+dans l'année 381 → 272 (71 %) ; ~250 groupes de ~1,9 têtes autour des humains (contre ~10 de
+~45) ; abandons 10 groupes / 572 têtes → 88 groupes / 119 têtes.
+
+- Taille des groupes entre 2 et 10 sur 4 seeds : **tenue** — 2,7 à 3,3 toute l'année, née de
+  la scission et des rencontres, au niveau du réel d'été (2,7). Personne ne l'a posée : k vient
+  de la durée de vie des groupes de chevreuil.
+- Acquisitions ×5 au moins : **tenue** (×14 à ×40).
+- Densité de têtes à ±25 % : **tenue**, mais **toujours plus bas**, −10 à −15 % sur 4 seeds sur
+  4 — non expliqué (plus de prédation ne suffit pas : 42, 7 et 2024 n'ont plus de loups à j180).
+- `longue` : gibier ×0,5-2 **tenue** (×1,15) ; prises ≥ 50 % **tenue** (71 %).
+- Les loups ne survivent l'an que sur 1337 : reste l'objet de **VEN**.
+
+**Ce que j'ai pu manquer** : (1) la densité 10-15 % plus basse partout — une perte de têtes à
+chercher (deux compteurs : flux `growth/predation/dissolved` contre le recensement) ; (2) autour
+des humains les groupes tombent à ~1,9 tête : la fuite devant les humains les éparpille-t-elle
+(chaque fuite de 2 km sépare) ? (3) aucun mécanisme pour les groupes d'hiver (6,9) ; (4) la
+portée de contact de 200 m vaut pour la forêt, pas pour la steppe ; (5) coût du banc ×10.
