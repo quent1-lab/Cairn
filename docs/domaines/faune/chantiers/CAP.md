@@ -1194,6 +1194,26 @@ Même régime (grande scène, forêt, 4 seeds, 1 an, jour 135). Avant → après
   — **pour une mauvaise raison** (les loups meurent de faim, pas de combats) : à relire après (2).
   Suite : 313 verts, rouges connus surchasse et curieux.
 
+### Le gibier est-il cohérent avec le loup ? (question de l'utilisateur, 2026-11-06, lecture)
+
+Décision de l'utilisateur : la détection par le **vent** pour (2), probablement un chantier à
+part. Avant, il demande si le modèle du gibier tient face au modèle du loup. Lecture du code :
+
+1. **Taille des groupes.** Un troupeau naît à 25 têtes, fusionne avec un voisin de même espèce
+   à portée d'alerte (0,7 km pour le cerf) et se scinde à 90. Mesuré (`out/cap/r1/`, an 1) :
+   ~60 têtes par troupeau, ~0,25 troupeau par km². Le nombre de rencontres d'une meute qui erre
+   suit le nombre de **groupes** par km², pas le nombre de têtes. Des groupes trop gros, à
+   densité de têtes juste, font des rencontres trop rares d'autant. Taille réelle des groupes de
+   cerfs en forêt : non sourcée ici (à demander au `sourceur`).
+2. **La fuite a été réglée pour le chasseur humain.** Galop de 2 km en une heure, puis 3 h
+   « à bout de souffle », figé sur place (`FLEE_COOLDOWN`) : c'est le mécanisme de la chasse à
+   l'épuisement. Le loup tire maintenant une issue par rencontre, poursuite comprise ; l'humain
+   épuise encore la bête par la marche. Deux prédateurs, deux modèles de la même poursuite.
+3. **Vigilance parfaite** : toute meute à 0,7 km est vue, de jour comme de nuit, quel que soit
+   le vent — l'objet de (2).
+4. Densité de têtes : 10-12 /km² au carré à l'an 1, dans l'ordre réel (Białowieża : cerf
+   10-35 sans loups) ; pas d'incohérence vue de ce côté.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de
