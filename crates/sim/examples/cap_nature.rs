@@ -131,8 +131,9 @@ fn main() {
             let span = side_zones as f64 * side;
             let center = (x0 + span / 2.0, y0 + span / 2.0);
 
-            // Placement : un troupeau tous les 1,5 km.
-            let pas = km_to_tiles(1.5);
+            // Placement : un troupeau tous les 1,5 km à 25 têtes ; à densité de
+            // têtes égale quelle que soit la taille de départ (GRP).
+            let pas = km_to_tiles(1.5 * (f64::from(fauna::HERD_START) / 25.0).sqrt());
             let mut gy = y0 + pas / 2.0;
             while gy < y0 + span {
                 let mut gx = x0 + pas / 2.0;
