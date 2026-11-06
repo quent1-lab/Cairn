@@ -104,3 +104,33 @@ Modèle GRP-1 proposé (non validé) : scission avec une probabilité ∝ taille
 de la durée de vie des groupes de chevreuil, Pays et al. 2012), fusion de deux groupes qui se
 croisent à courte portée, `HERD_MIN` 1. Variante GRP-0 : branche locale `grp-mesure`
 (binaires `out/bin/grp0/`, sorties `out/cap/grp0/`, `out/perf/`).
+
+## GRP-1 — décision et conception (2026-11-06)
+
+Décision de l'utilisateur : suivre les recommandations — l'immigration en têtes, PERF arrêté au
+gain du LRU, puis la dynamique des groupes. En deux changements séparés (règle 4).
+
+### GRP-1a — les sites reçoivent des têtes (refactor, neutre)
+
+`fauna::SITE_HEADS` = 25 têtes par site (placement des scènes, immigration), arrivées en groupes
+de `HERD_START` au plus d'une même espèce (`Sim::spawn_heads`). Avec `HERD_START` = 25, un site
+reçoit un groupe de 25 au même lieu, avec le même tirage d'espèce : **identique au bit près**
+attendu (vérifié sur la Pi : `cap_nature` 42 forêt 1 an et `longue` 42 tempéré 1 an, avant et
+après, `out/grp1a/` sur la Pi). L'autolimitation de l'immigration (aucun troupeau à 3 km du site)
+reste une porte en nombre de troupeaux : CHA-5 la remplacera.
+
+### GRP-1b — la dynamique des groupes (conception, à mesurer)
+
+- `HERD_START` 5 (taille d'un groupe à sa formation ; réel 2,7 l'été, 6,9 l'hiver) ;
+  `HERD_MIN` 1 : une bête seule reste un groupe.
+- **Scission** : chaque heure, un groupe de n têtes se scinde avec une probabilité k·n²
+  (Pays et al. 2012 : ∝ carré de la taille) ; les deux parts tirées uniformément (même source).
+  Échelle k : un groupe de ~5 vit « quelques heures » (même source) ; avec 3 h, k ≈ 0,2/25 =
+  0,008 par heure. Le seuil de 90 disparaît.
+- **Fusion** : chaque heure (et non chaque jour : la cadence doit suivre le phénomène, des
+  heures), deux groupes de même espèce à moins de ~200 m se rejoignent (portée de perception
+  en forêt, même source). Plus de plafond de somme. Index spatial pour rester linéaire.
+- La taille des groupes **naît** alors du rapport scission/rencontres (densité-dépendante,
+  comme dans le réel) ; elle se **valide** contre 2,7-6,9 (cerf), elle n'est pas posée.
+- Limites connues : sources de seconde main ou sur le chevreuil ; la saison (groupes d'hiver
+  plus gros) n'a pas de mécanisme ici.
