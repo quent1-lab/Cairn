@@ -39,19 +39,29 @@ const DT_DAYS: f32 = 1.0 / 24.0;
 
 // — Démographie des herbivores —
 
-/// Effectif d'un troupeau à sa création.
-pub const HERD_START: f32 = 25.0;
-/// Sous cet effectif, le troupeau n'est plus viable : il disparaît (les
-/// survivants sont réputés dispersés).
-pub const HERD_MIN: f32 = 4.0;
+/// Effectif d'un groupe à sa formation (GRP-1b) : les groupes de cerfs réels
+/// comptent 2,7 têtes l'été, 6,9 l'hiver (Białowieża). Ce n'est qu'un départ :
+/// la taille naît ensuite des scissions et des rencontres.
+pub const HERD_START: f32 = 5.0;
+/// Sous cet effectif, il ne reste personne : une bête seule est encore un
+/// groupe (GRP-1b ; il était de 4, et effaçait des groupes réels de 1 à 3).
+pub const HERD_MIN: f32 = 1.0;
+/// Scission d'un groupe sauvage (GRP-1b) : par heure, un groupe de n têtes se
+/// scinde avec la probabilité `HERD_SPLIT_PER_HEAD2 · n²` (croissance au carré
+/// de la taille, chevreuil, Pays et al. 2012). Échelle : un groupe de ~5 vit
+/// « quelques heures » (même source) — 3 h donnent 0,2 / 25.
+const HERD_SPLIT_PER_HEAD2: f32 = 0.008;
+/// Portée à laquelle deux groupes de même espèce se voient et se rejoignent
+/// (GRP-1b) : ~200 m, la perception en forêt (même source ; plus loin, en
+/// terrain ouvert, non modélisé). Une scission pose la fille juste au-delà :
+/// les deux parts se perdent de vue.
+pub const GROUP_CONTACT_TILES: f64 = km_to_tiles(0.2);
 /// Têtes qu'un site reçoit, au placement d'une scène comme à l'immigration
 /// (GRP-1a) : l'ancien effectif de départ d'un troupeau, gardé **en têtes**
 /// pour que la taille des groupes ne change pas la densité de gibier. Un site
 /// reçoit des têtes, pas un nombre de troupeaux ; elles arrivent en groupes de
 /// `HERD_START` (`Sim::spawn_heads`).
 pub const SITE_HEADS: f32 = 25.0;
-/// Au-dessus, le troupeau devient ingérable et **fissionne** en deux.
-pub const HERD_FISSION: f32 = 90.0;
 // Natalité et mortalité de fond : propres à chaque espèce depuis CAP 3.2
 // (`Species::vital`). Elles valaient 0,020 et 0,010 par jour pour toutes —
 // r max = 3,6 /an, dix à vingt fois celui d'un ongulé réel.
@@ -1560,21 +1570,27 @@ pub fn update_herds(
         let _ = herd_life_tick(herd, herd.satiation, spring);
         if herd.population < HERD_MIN {
             doomed.push(entity);
-        } else if herd.population > HERD_FISSION {
-            // Trop nombreux : la moitié part fonder un troupeau ailleurs, avec
-            // la moitié des jeunes et des naissances à venir.
-            herd.population *= 0.5;
-            herd.young *= 0.5;
-            herd.bearing *= 0.5;
+        } else if herd.anchor.is_none()
+            && herd.tameness <= 0.0
+            && herd.population >= 2.0
+            && rng.next_f32() < HERD_SPLIT_PER_HEAD2 * herd.population * herd.population
+        {
+            // Scission (GRP-1b) : une part tirée uniformément entre une bête et
+            // toutes sauf une s'en va, avec sa part des jeunes et des
+            // naissances à venir. Le cheptel d'un clan ne se scinde pas.
+            let n = herd.population;
+            let f = (1.0 + rng.next_f32() * (n - 2.0)) / n;
+            let mut daughter = Herd::new(n * f, herd.species);
+            herd.population = n * (1.0 - f);
+            daughter.young = herd.young * f;
+            herd.young *= 1.0 - f;
+            daughter.bearing = herd.bearing * f;
+            herd.bearing *= 1.0 - f;
             stats.herd_fission(id.0);
             let angle = rng.next_f64() * std::f64::consts::TAU;
-            let d = km_to_tiles(1.0);
-            // La fille hérite de l'espèce de la mère (un troupeau de cerfs se
-            // scinde en deux troupeaux de cerfs) et de ses réserves.
-            let mut daughter = Herd::new(herd.population, herd.species);
+            let d = GROUP_CONTACT_TILES + 1.0;
+            // La fille hérite de l'espèce de la mère et de ses réserves.
             daughter.condition = herd.condition;
-            daughter.young = herd.young;
-            daughter.bearing = herd.bearing;
             daughter.bearing_ticks = herd.bearing_ticks;
             daughter.since_birth_season = herd.since_birth_season;
             fissions.push((pos.x + angle.cos() * d, pos.y + angle.sin() * d, daughter));
@@ -1609,10 +1625,11 @@ pub static HERD_PROF: [std::sync::atomic::AtomicU64; 4] = [
 /// troupeau qu'on apprivoise diluerait le travail de l'éleveur.
 pub type MergeView = (u64, (f64, f64), f32, Species, bool);
 
-/// **Fusion des troupeaux** (chantier de dérive, E) — le pendant de la
-/// fission. Deux troupeaux sauvages de même espèce qui **se voient** (distance
-/// ≤ rayon d'alerte de l'espèce) se rejoignent, si leur total reste sous
-/// `HERD_FISSION` — au-delà, la fission le défairait aussitôt.
+/// **Fusion des groupes** (chantier de dérive, E ; GRP-1b) — le pendant de la
+/// scission. Deux groupes sauvages de même espèce qui **se voient** (à moins
+/// de `GROUP_CONTACT_TILES`) se rejoignent, chaque heure ; plus de plafond de
+/// taille, la scission défait les gros groupes. Index par cases de la portée :
+/// le même résultat qu'en comparant toutes les paires, en temps linéaire.
 ///
 /// Pourquoi : sous la densité-dépendance (étape 4), un troupeau ne grossit plus
 /// jusqu'à la fission, et les moitiés issues des fissions passées ne se
@@ -1624,6 +1641,14 @@ pub type MergeView = (u64, (f64, f64), f32, Species, bool);
 /// troupeau et par passe. Renvoie des couples (absorbeur, absorbé), en indices
 /// de `herds` ; l'absorbeur est le plus gros (à égalité, le plus petit id).
 pub fn merge_plan(herds: &[MergeView]) -> Vec<(usize, usize)> {
+    let r = GROUP_CONTACT_TILES;
+    let cell = |p: (f64, f64)| ((p.0 / r).floor() as i64, (p.1 / r).floor() as i64);
+    let mut grid: std::collections::BTreeMap<(i64, i64), Vec<usize>> = std::collections::BTreeMap::new();
+    for (i, h) in herds.iter().enumerate() {
+        if h.4 {
+            grid.entry(cell(h.1)).or_default().push(i);
+        }
+    }
     let mut order: Vec<usize> = (0..herds.len()).collect();
     order.sort_by_key(|&i| herds[i].0);
     let mut taken = vec![false; herds.len()];
@@ -1633,16 +1658,20 @@ pub fn merge_plan(herds: &[MergeView]) -> Vec<(usize, usize)> {
         if taken[i] || !wild_i {
             continue;
         }
-        let r2 = sp_i.flee_radius() * sp_i.flee_radius();
+        let (cx, cy) = cell(pos_i);
+        // Au plus proche, à égalité le plus petit identifiant : un critère qui
+        // ne dépend pas de l'ordre de parcours des cases.
         let mut best: Option<(f64, u64, usize)> = None;
-        for &j in &order {
-            let (id_j, pos_j, pop_j, sp_j, wild_j) = herds[j];
-            if j == i || taken[j] || !wild_j || sp_j != sp_i || pop_i + pop_j > HERD_FISSION {
-                continue;
-            }
-            let d2 = (pos_i.0 - pos_j.0).powi(2) + (pos_i.1 - pos_j.1).powi(2);
-            if d2 <= r2 && best.is_none_or(|(bd, bid, _)| d2 < bd || (d2 == bd && id_j < bid)) {
-                best = Some((d2, id_j, j));
+        for c in [(cx - 1, cy - 1), (cx, cy - 1), (cx + 1, cy - 1), (cx - 1, cy), (cx, cy), (cx + 1, cy), (cx - 1, cy + 1), (cx, cy + 1), (cx + 1, cy + 1)] {
+            for &j in grid.get(&c).map_or(&[][..], |v| v.as_slice()) {
+                let (id_j, pos_j, _, sp_j, _) = herds[j];
+                if j == i || taken[j] || sp_j != sp_i {
+                    continue;
+                }
+                let d2 = (pos_i.0 - pos_j.0).powi(2) + (pos_i.1 - pos_j.1).powi(2);
+                if d2 < r * r && best.is_none_or(|(bd, bid, _)| d2 < bd || (d2 == bd && id_j < bid)) {
+                    best = Some((d2, id_j, j));
+                }
             }
         }
         if let Some((_, id_j, j)) = best {

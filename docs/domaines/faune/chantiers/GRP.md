@@ -134,3 +134,20 @@ reste une porte en nombre de troupeaux : CHA-5 la remplacera.
   comme dans le réel) ; elle se **valide** contre 2,7-6,9 (cerf), elle n'est pas posée.
 - Limites connues : sources de seconde main ou sur le chevreuil ; la saison (groupes d'hiver
   plus gros) n'a pas de mécanisme ici.
+
+### GRP-1b — tests rouges et prédictions (écrites avant le code)
+
+Tests rouges vus échouer : `un_grand_groupe_se_defait_en_quelques_heures` (60 cerfs, un jour :
+1 groupe de 60,1) ; `deux_betes_seules_se_rejoignent_dans_l_heure` (aucun groupe : les deux
+bêtes effacées sous `HERD_MIN` = 4). L'ancien `deux_troupeaux_qui_se_voient_se_rejoignent`
+perd son volet « réunion au-delà du seuil de fission » (le seuil disparaît).
+
+Prédictions, sur la Pi, grande scène (1 024 km², boîte), forêt, jour 135, 1 an, 4 seeds, témoin
+`main` après GRP-1a :
+- taille moyenne des groupes de cerfs **entre 2 et 10** sur toute l'année, sur 4 seeds
+  (réel : 2,7-6,9) ; réfutée hors de [1,5 ; 15] ;
+- acquisitions des meutes ×5 au moins par rapport au témoin (comme GRP-0) ;
+- densité de têtes du carré à l'an 1 à ±25 % du témoin (la taille des groupes ne doit pas
+  changer la nature, seulement sa forme) ;
+- `longue` 42 tempéré 1 an (humains) : gibier à 10 km du foyer dans le même ordre de grandeur
+  en têtes que le témoin (×0,5 à ×2) ; prises de la bande non effondrées (≥ 50 % du témoin).

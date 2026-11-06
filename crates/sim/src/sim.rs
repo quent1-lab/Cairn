@@ -1642,10 +1642,10 @@ impl Sim {
         }
         // Les troupeaux laissent leur piste (CHA-2).
         fauna::lay_trails(&self.fauna, &mut self.herd_trails, time.tick);
-        // La fusion, pendant de la fission (chantier de dérive, E) : une fois
-        // par jour, deux troupeaux sauvages de même espèce qui se voient se
+        // La fusion, pendant de la scission (chantier de dérive, E ; GRP-1b) :
+        // chaque heure, deux groupes sauvages de même espèce qui se voient se
         // rejoignent — voir `fauna::merge_plan`.
-        if time.tick.is_multiple_of(TICKS_PER_DAY) {
+        {
             let views: Vec<(hecs::Entity, fauna::MergeView)> = self
                 .fauna
                 .query::<(&FaunaId, &Herd, &Position)>()
@@ -2948,37 +2948,61 @@ mod tests {
         );
     }
 
-    /// Chantier de dérive, E : **deux troupeaux sauvages qui se voient se
-    /// rejoignent**, tant que le total reste sous la fission. Pendant de la
-    /// fission : sous la densité-dépendance, un troupeau ne grossit plus
-    /// jusqu'à 90 têtes, et les moitiés issues des fissions passées ne se
-    /// rejoignaient jamais — mesuré sur 5 ans : 622 troupeaux de 34 têtes, 4 tps.
-    /// Deux espèces différentes, ou un total qui déclencherait la fission, ne
-    /// fusionnent pas.
+    /// GRP-1b : un grand groupe se défait en quelques heures. Les groupes de
+    /// cerfs réels comptent 2,7 têtes l'été, 6,9 l'hiver, et se scindent avec
+    /// une probabilité qui croît comme le carré de leur taille ; 60 cerfs
+    /// ensemble ne tiennent pas une journée.
+    #[test]
+    fn un_grand_groupe_se_defait_en_quelques_heures() {
+        let (mut sim, home) = scenario_setup(5, 0, 0);
+        let (x, y) = land_near(&mut sim, home, 0.0);
+        sim.spawn_herd_species(x, y, 60.0, fauna::Species::Deer);
+        for _ in 0..TICKS_PER_DAY {
+            sim.step();
+        }
+        let tailles: Vec<f32> = sim.fauna.query::<&Herd>().iter().map(|(_, h)| h.population).collect();
+        let moyenne = tailles.iter().sum::<f32>() / tailles.len() as f32;
+        assert!(moyenne <= 15.0, "60 cerfs après un jour : {} groupes, {moyenne:.1} têtes en moyenne", tailles.len());
+    }
+
+    /// GRP-1b : une bête seule reste un groupe, et deux groupes qui se voient
+    /// à 100 m se rejoignent dans l'heure — pas à minuit seulement.
+    #[test]
+    fn deux_betes_seules_se_rejoignent_dans_l_heure() {
+        let (mut sim, home) = scenario_setup(5, 0, 0);
+        sim.step();
+        let (x, y) = land_near(&mut sim, home, 0.0);
+        sim.spawn_herd_species(x, y, 1.0, fauna::Species::Deer);
+        sim.spawn_herd_species(x + 50.0, y, 1.0, fauna::Species::Deer);
+        sim.step();
+        let tailles: Vec<f32> = sim.fauna.query::<&Herd>().iter().map(|(_, h)| h.population).collect();
+        assert_eq!(tailles.len(), 1, "deux cerfs seuls à 100 m, une heure après : {tailles:?}");
+        assert!(tailles[0] > 1.9, "le groupe réuni compte les deux bêtes : {tailles:?}");
+    }
+
+    /// Chantier de dérive, E ; GRP-1b : **deux groupes sauvages qui se voient
+    /// se rejoignent**, dans l'heure. Deux espèces différentes ne fusionnent
+    /// pas ; deux groupes à 1 km ne se voient pas. Des bêtes seules : elles ne
+    /// peuvent pas se scinder, le test ne voit que la fusion.
     #[test]
     fn deux_troupeaux_qui_se_voient_se_rejoignent() {
         let (mut sim, home) = scenario_setup(5, 0, 0);
+        sim.step();
         let (x, y) = land_near(&mut sim, home, 0.0);
         let sp = fauna::Species::Aurochs;
-        let a = sim.spawn_herd_species(x, y, 30.0, sp);
-        let b = sim.spawn_herd_species(x + 50.0, y, 30.0, sp);
-        // Un troupeau d'une autre espèce, tout près : il reste à part.
-        let c = sim.spawn_herd_species(x, y + 50.0, 30.0, fauna::Species::Deer);
-        // Deux gros troupeaux voisins, loin des premiers : réunis, ils
-        // dépasseraient le seuil de fission — ils restent à part.
-        let d = sim.spawn_herd_species(x + 3000.0, y, 60.0, sp);
-        let e = sim.spawn_herd_species(x + 3050.0, y, 60.0, sp);
-        for _ in 0..TICKS_PER_DAY + 1 {
-            sim.step();
-        }
+        let a = sim.spawn_herd_species(x, y, 1.0, sp);
+        let b = sim.spawn_herd_species(x + 50.0, y, 1.0, sp);
+        // Un groupe d'une autre espèce, tout près : il reste à part.
+        let c = sim.spawn_herd_species(x, y + 50.0, 1.0, fauna::Species::Deer);
+        // Deux groupes à 1 km l'un de l'autre, loin des premiers.
+        let d = sim.spawn_herd_species(x + 3000.0, y, 1.0, sp);
+        let e = sim.spawn_herd_species(x + 3500.0, y, 1.0, sp);
+        sim.step();
         let vivants: Vec<FaunaId> = sim.fauna.query::<(&FaunaId, &Herd)>().iter().map(|(_, (id, _))| *id).collect();
         let presents = [a, b].iter().filter(|id| vivants.contains(id)).count();
-        assert_eq!(presents, 1, "deux troupeaux d'aurochs à 100 m, 60 têtes à eux deux, doivent n'en faire qu'un");
-        assert!(vivants.contains(&c), "un troupeau d'une autre espèce ne fusionne pas");
-        assert!(
-            vivants.contains(&d) && vivants.contains(&e),
-            "deux troupeaux dont la réunion dépasserait la fission restent séparés"
-        );
+        assert_eq!(presents, 1, "deux aurochs à 100 m doivent ne faire qu'un groupe dans l'heure");
+        assert!(vivants.contains(&c), "un groupe d'une autre espèce ne fusionne pas");
+        assert!(vivants.contains(&d) && vivants.contains(&e), "deux groupes à 1 km ne se voient pas");
     }
 
     /// Chantier de dérive, G : **un troupeau qui fuit n'échappe pas au frein de
