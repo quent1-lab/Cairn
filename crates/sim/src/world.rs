@@ -91,6 +91,10 @@ pub struct World {
     chunks: BTreeMap<ChunkCoord, Chunk>,
     /// Tick d'accès le plus récent par chunk, pour le LRU.
     last_access: BTreeMap<ChunkCoord, u64>,
+    /// Le même ordre, trié par tick d'accès : la victime du LRU se lit en
+    /// tête au lieu de balayer tous les résidents à chaque éviction (PERF,
+    /// mesuré sur la grande scène de CAP : ~570 évictions par tick).
+    lru: std::collections::BTreeSet<(u64, ChunkCoord)>,
     /// Chunks modifiés depuis leur génération : **résidents ou non**. Un
     /// chunk sale évincé y reste — sa repousse est en pause, pas guérie —
     /// tant que [`deltas`](Self::deltas) porte son instantané.
@@ -176,6 +180,7 @@ impl World {
             worldgen: WorldGen::with_config(seed, cfg),
             chunks: BTreeMap::new(),
             last_access: BTreeMap::new(),
+            lru: std::collections::BTreeSet::new(),
             dirty: BTreeSet::new(),
             deltas: BTreeMap::new(),
             springs: BTreeMap::new(),
@@ -376,7 +381,10 @@ impl World {
             self.generated += 1;
             self.evict_down_to_capacity(coord);
         }
-        self.last_access.insert(coord, self.clock);
+        if let Some(old) = self.last_access.insert(coord, self.clock) {
+            self.lru.remove(&(old, coord));
+        }
+        self.lru.insert((self.clock, coord));
     }
 
     /// Tuile à la coordonnée de tuile (x, y) — charge le chunk au besoin.
@@ -520,12 +528,8 @@ impl World {
         while self.chunks.len() > self.capacity {
             // Victime = plus petit tick d'accès. Les ex æquo sont départagés
             // par l'ordre du BTreeMap → déterministe.
-            let victim = self
-                .last_access
-                .iter()
-                .filter(|(c, _)| **c != keep)
-                .min_by_key(|(_, t)| **t)
-                .map(|(c, _)| *c);
+            // Plus petit (tick, coordonnée) : le même départage qu'avant.
+            let victim = self.lru.iter().map(|&(_, c)| c).find(|&c| c != keep);
             match victim {
                 Some(c) => self.evict_one(c),
                 None => break,
@@ -551,7 +555,9 @@ impl World {
             }
         }
         self.chunks.remove(&coord);
-        self.last_access.remove(&coord);
+        if let Some(old) = self.last_access.remove(&coord) {
+            self.lru.remove(&(old, coord));
+        }
         self.evicted += 1;
         self.close_life(coord);
     }

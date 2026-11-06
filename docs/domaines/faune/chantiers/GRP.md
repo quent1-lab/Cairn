@@ -67,3 +67,27 @@ ne dit rien de la taille qu'une vraie dynamique fission-fusion produirait, ni de
 Le coût ×10 rend la correction dépendante d'un travail de performance (grille spatiale des
 requêtes de voisinage : `nearest_threat`, `owns`, la recherche de proie, `merge_plan` sont
 linéaires en troupeaux, par meute ou par troupeau).
+
+## Coût de la grande scène (PERF, 2026-11-06)
+
+Profil (`cap_nature` feature `profile`, variante GRP-0, seed 42, 30 jours) : 96 % du tick dans
+`update_herds`, dont 82 % dans `best_pasture` ; **407 000 chunks générés en 720 ticks** (~570
+par tick) : le cache de 16 384 chunks (~1 Go) ne couvre que ~270 km² des 1 024 de la scène,
+et 2 200 troupeaux étalés le font tourner en rond. Le cache ne peut pas grandir (mémoire).
+Dans le scénario réel (`longue` 42 tempéré, 15 min, `out/perf/longue/`), la variante ne coûte
+rien (~10 troupeaux autour des humains, débit 48-79 tps contre 26-41) : **le coût est propre
+au banc**. Mais la même mesure montre que l'immigration compte en troupeaux : à 5 têtes, le
+gibier autour des humains tombe de 300-600 têtes à 2-56 — à traiter dans GRP-1.
+
+Changement (1) : la victime du LRU se lit dans un index trié `(tick, coordonnée)` au lieu d'un
+balayage des 16 384 résidents par éviction. Même départage, donc résultat identique au bit
+près (vérifié en comparant le CSV `cap_nature` 42 forêt 1 an au témoin `out/cap/r1/`).
+Prédiction : le temps de `4d troupeaux` baisse d'au moins 30 % sur 30 jours de GRP-0 ;
+réfutée sous 10 % (la génération du chunk dominerait alors).
+
+Mesure (1) : `CSV` `cap_nature` 42 forêt 1 an **identique** au témoin `r1` (`cmp`) ; tests du
+monde verts. GRP-0, 30 jours, seed 42 : `4d troupeaux` 268 s → **150 s (−44 %)**, chunks générés
+identiques (407 356) — **prédiction tenue** (un second banc tournait en même temps : gain sous-
+estimé). Reste dominant : la génération des chunks (`best_pasture`, 100 s sur 150).
+Ce que j'ai pu manquer : le gain dans le jeu réel n'est pas mesuré (là, presque aucune
+éviction : le cache couvre le périmètre).
