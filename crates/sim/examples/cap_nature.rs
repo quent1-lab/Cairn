@@ -188,6 +188,12 @@ fn main() {
                 for _ in 0..TICKS_PER_DAY {
                     sim.step();
                 }
+                // Profil des phases (feature `profile`), tous les 30 jours.
+                #[cfg(feature = "profile")]
+                if (day + 1) % 30 == 0 {
+                    let h: Vec<u64> = fauna::HERD_PROF.iter().map(|a| a.load(std::sync::atomic::Ordering::Relaxed) / 1_000_000).collect();
+                    eprintln!("jour {} :\n{}troupeaux (ms) : menace {} pâture {} - {} demande {}", day + 1, sim.prof.report(), h[0], h[1], h[2], h[3]);
+                }
                 if (day + 1) % SAMPLE_DAYS != 0 {
                     continue;
                 }
