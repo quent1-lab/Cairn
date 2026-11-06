@@ -1147,6 +1147,53 @@ seeds 42, 7, 1337, 2024. Compteurs `HuntFlows` (meute-ticks de faim, toutes meut
   rencontre qui vaut un troupeau entier. Une meute qui tombe sur une harde vit (1337, 2024) ;
   celle qui n'en trouve pas meurt (42).
 
+### Reprise, correction (1) : une rencontre, une attaque (2026-11-06, choix de l'utilisateur : (1) puis (2))
+
+Lecture : l'attaque se tire **à chaque tick** de contact, et le troupeau essoufflé reste figé
+près de la meute ; la proie suivie le reste tant qu'elle est à moins de 6 km. Or le taux
+d'`attack_success` (wapiti : 2 % seul, 20 % au plateau) est un taux **par rencontre** — la
+poursuite y est comprise (Mech 1966 : 77 testés, 6 tués). Le tirer à chaque heure compte
+une rencontre plusieurs dizaines de fois.
+
+Changement : une rencontre se joue en **une** attaque. Réussie ou non, la meute lâche la
+proie, et elle ne reprend pas pour proie le troupeau qu'elle vient d'attaquer tant qu'il
+reste à portée d'odorat (`Pack::tested`, effacé quand il en sort) : la proie qui a échappé a
+distancé la meute, l'épisode est fini. Aucune durée ni distance posée.
+
+Test rouge : `une_rencontre_ne_vaut_qu_une_attaque` (attaques par acquisition ≤ 1, une meute
+affamée et un troupeau de cerfs, 2 jours de `Sim::step`).
+
+Prédictions (même régime que la mesure ci-dessus, 4 seeds, 1 an) :
+- attaques par acquisition ≤ 1 partout (contre 30 à 190) ;
+- prises par an divisées d'au moins 5 sur 1337 et 2024 ; loups à l'an 1 plus bas qu'avant
+  sur 3 seeds sur 4 au moins — la rareté des rencontres (correction (2)) reste entière ;
+- acquisitions par an : au moins doublées (une meute lâchée cherche à nouveau au lieu de
+  s'accrocher). Réfutée si les prises montent.
+
+### Reprise, correction (1) : mesure (binaire `out/bin/cap33f/`, `out/cap/r1/`)
+
+Même régime (grande scène, forêt, 4 seeds, 1 an, jour 135). Avant → après :
+
+| seed | acquisitions | attaques | prises | attaques/acq. | loups j90 | loups j180 |
+|---|---|---|---|---|---|---|
+| 42 | 8 → 27 | 320 → 27 | 61 → 9 | 40 → 1,0 | 14 → 5,1 | 1,3 → 0 |
+| 7 | 25 → 28 | 833 → 28 | 104 → 4 | 33 → 1,0 | 10,6 → 1,0 | 6,2 → 0 |
+| 1337 | 11 → 36 | 2 079 → 36 | 295 → 4 | 189 → 1,0 | 20,3 → 4,7 | 10,2 → 0 |
+| 2024 | 24 → 36 | 1 180 → 36 | 33 → 3 | 49 → 1,0 | 4,7 → 0 | 4,5 → 0 |
+
+- Attaques par acquisition ≤ 1 : **tenue**. Prises divisées d'au moins 5 sur 1337 et 2024 :
+  **tenue** (÷ 74 et ÷ 11). Loups plus bas : **tenue**, 4 sur 4 — tous éteints avant le jour
+  180. Acquisitions au moins doublées : **réfutée** sur 7 (×1,1) et 2024 (×1,5).
+- Succès par attaque : 3/36 à 9/27 (8-33 %), dans la fourchette réelle par rencontre.
+- **Ce qui reste** : 27 à 36 rencontres par an pour toute la scène, ~7 par meute et par an, quand
+  il en faudrait une douzaine par prise. C'est la correction (2) : la proie repère toute meute à
+  0,7 km avec une certitude parfaite.
+- Tests : `une_meute_nourrie_essaime_l_annee_suivante` rouge, parce que sa scène nourrissait la
+  meute par l'attaque horaire sur un troupeau voisin ; la meute y est désormais nourrie par
+  construction (sa prémisse). `un_territoire_ne_porte_qu_une_poignee_de_predateurs` passe vert
+  — **pour une mauvaise raison** (les loups meurent de faim, pas de combats) : à relire après (2).
+  Suite : 313 verts, rouges connus surchasse et curieux.
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de

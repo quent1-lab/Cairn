@@ -803,6 +803,10 @@ pub struct Pack {
     /// totale restait entre 0 et 10 proies/jour pendant que le gibier passait
     /// de 59 à 4 650 têtes.
     pub quarry: Option<hecs::Entity>,
+    /// Le troupeau qu'elle vient d'attaquer (CAP 3.3, reprise) : l'attaque
+    /// tranche la rencontre, et une proie qui a échappé a distancé la meute.
+    /// Elle ne le reprend pas pour proie tant qu'il reste à portée d'odorat.
+    pub tested: Option<hecs::Entity>,
     /// Viande de ses prises qui reste à manger, en kg (CAP 3.3).
     pub meat: f32,
     /// Contenu de l'estomac d'un loup, en kg (CAP 3.3).
@@ -830,6 +834,7 @@ impl Pack {
             last_kills: 0.0,
             species,
             quarry: None,
+            tested: None,
             meat: 0.0,
             stomach: 0.0,
             home: None,
@@ -2095,6 +2100,12 @@ pub fn update_packs(
         // — Ne chasse que la meute qui a faim (CAP 3.3) : l'estomac vide et
         //   la carcasse finie. Un loup qui digère ne chasse pas. —
         let mut meat_kg = 0.0f32;
+        // La rencontre est finie quand la proie qui a échappé est hors d'odorat.
+        pack.tested = pack.tested.filter(|&t| {
+            herds.iter().any(|h| {
+                h.entity == t && (pos.x - h.pos.0).powi(2) + (pos.y - h.pos.1).powi(2) <= PACK_SMELL_TILES * PACK_SMELL_TILES
+            })
+        });
         if pack.stomach <= 0.0 && pack.meat <= 0.0 {
             let home = pack.home.unwrap_or((pos.x, pos.y));
             let held = pack.quarry.and_then(|q| {
@@ -2109,7 +2120,7 @@ pub fn update_packs(
             // déterministe.
             let nearest = held.or_else(|| {
                 let mut best: Option<(f64, &HerdView)> = None;
-                for h in herds.iter().filter(|h| owns(entity, home, h.pos)) {
+                for h in herds.iter().filter(|h| owns(entity, home, h.pos) && pack.tested != Some(h.entity)) {
                     let d2 = (pos.x - h.pos.0).powi(2) + (pos.y - h.pos.1).powi(2);
                     // On ne prend pour proie que ce qu'on sent ou voit (1b).
                     if d2 <= PACK_SMELL_TILES * PACK_SMELL_TILES && best.is_none_or(|(bd, _)| d2 < bd) {
@@ -2159,6 +2170,12 @@ pub fn update_packs(
                     //   38 % de plus par prédateur qu'en simulation fine.
                     // Une attaque : elle réussit ou elle échoue, et une
                     // réussite tue une bête entière (CAP 3.3).
+                    // Une rencontre, une attaque : le taux de succès est un
+                    // taux par rencontre, la poursuite comprise (Mech 1966 :
+                    // 77 orignaux testés, 6 tués). Le tirer à chaque heure de
+                    // contact comptait une rencontre des dizaines de fois.
+                    pack.quarry = None;
+                    pack.tested = Some(herd.entity);
                     let mut rng = Pcg32::new(tick_seed, id.0);
                     hunt.attacks += 1;
                     if rng.next_f32() < attack_success(pack.population, herd.species) {
@@ -2894,8 +2911,14 @@ mod tests {
         let h = crate::scenario::find_home(&mut sim, crate::scenario::reference_seed_point());
         let home = (h.0 as f64 + 0.5, h.1 as f64 + 0.5);
         sim.spawn_pack(home.0, home.1, 5.0);
-        sim.spawn_herd(home.0 + 1.0, home.1, 2000.0);
+        // Nourrie par construction : une rencontre ne vaut qu'une attaque
+        // (CAP 3.3, reprise), un troupeau voisin ne suffit plus à la nourrir.
         for _ in 0..24 * 400 {
+            for (_, p) in sim.fauna.query_mut::<&mut Pack>() {
+                if p.meat <= 0.0 {
+                    p.meat = p.population * WOLF_RATION_KG_DAY;
+                }
+            }
             sim.step();
         }
         let meutes = sim.fauna.query::<&Pack>().iter().count();
@@ -2967,6 +2990,27 @@ mod tests {
         sim.fauna.get::<&mut Position>(herds[0].entity).map(|mut p| { p.x = loin.0; p.y = loin.1; }).unwrap();
         hunt_once(&mut sim, &herds);
         assert!(sim.fauna.get::<&Pack>(a).unwrap().quarry.is_none(), "la meute a pris pour proie un troupeau à 5 km");
+    }
+
+    /// CAP 3.3, reprise (1) : le succès d'une attaque est un taux **par
+    /// rencontre**, la poursuite comprise. Une meute affamée qui tombe sur un
+    /// troupeau de cerfs ne l'attaque pas à chaque heure : une acquisition, une
+    /// attaque au plus.
+    #[test]
+    fn une_rencontre_ne_vaut_qu_une_attaque() {
+        let (mut sim, pack, _) = hunt_scene();
+        sim.allow_fauna_immigration = false;
+        for _ in 0..48 {
+            if let Ok(mut p) = sim.fauna.get::<&mut Pack>(pack) {
+                p.stomach = 0.0;
+                p.meat = 0.0;
+            }
+            sim.step();
+        }
+        let h = sim.fauna_flows.hunt;
+        let acquired = h.acquired_fresh + h.acquired_winded;
+        assert!(acquired >= 1, "aucune rencontre : la scène ne teste rien");
+        assert!(h.attacks <= acquired, "{} attaques pour {acquired} rencontres", h.attacks);
     }
 
     /// CAP 3.3, 1b : sans proie en vue, une meute affamée erre dans son
