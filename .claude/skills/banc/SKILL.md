@@ -17,6 +17,16 @@ Durées, arguments et pièges détaillés : `docs/COMMANDES.md`. Machine : 2 vCP
   (`ps -eo pid,args | grep …`), jamais `pkill -f`.
 - Ne jamais rebâtir `target/release/examples/<banc>` pendant qu'une file l'utilise.
 
+## Sur la Pi (machine de bancs, `docs/COMMANDES.md`)
+- Les séries et runs longues tournent sur la Pi (`ssh pi`, 4 cœurs, 7,9 Go, ×2,4 plus rapide) ;
+  ici on compile, on teste, on profile.
+- Envoyer : `git push pi <branche>` puis `ssh pi 'cd ~/cairn && git fetch -q && git checkout -q <commit>
+  && source ~/.cargo/env && cargo build --release -p cairn-sim --example <banc>'`, et figer le
+  binaire dans `~/cairn/out/bin/<variante>/` sur la Pi.
+- Lancer détaché sur la Pi (`setsid nohup … &` dans `ssh`), 4 bancs au plus, scopes plafonnées ;
+  attendre ici en tâche de fond un fichier `done` par `ssh pi test -f …` ; rapatrier par `scp`/`rsync`.
+- Témoin et variante sur la **même machine** ; la machine se note avec le commit.
+
 ## Figer un binaire par variante
 Avant toute série, copier les binaires dans `out/bin/<variante>/` :
 ```
