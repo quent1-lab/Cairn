@@ -104,7 +104,7 @@ pub fn populate(sim: &mut Sim, home: (i64, i64), agents: usize, herd_grid: i64) 
             let (x, y) = (home.0 + gx * pas, home.1 + gy * pas);
             let tile = sim.world.tile(x, y);
             if tile.is_walkable() && tile.biomass > 40 {
-                sim.spawn_herd(x as f64, y as f64, fauna::HERD_START);
+                sim.spawn_heads(x as f64, y as f64, fauna::SITE_HEADS);
             }
         }
     }
@@ -196,7 +196,7 @@ pub fn drop_band(sim: &mut Sim, at: (i64, i64), humans: usize, herds: usize) -> 
         );
         let tile = sim.world.tile(x, y);
         if tile.is_walkable() && tile.biomass > 30 {
-            sim.spawn_herd(x as f64, y as f64, fauna::HERD_START);
+            sim.spawn_heads(x as f64, y as f64, fauna::SITE_HEADS);
         }
     }
     // Une meute un peu plus loin.

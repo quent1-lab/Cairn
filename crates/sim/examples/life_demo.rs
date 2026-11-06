@@ -77,7 +77,7 @@ fn main() {
         for gx in -3..=3i64 {
             let (x, y) = (ox + gx * pas, oy + gy * pas);
             if sim.world.tile(x, y).is_walkable() && sim.world.tile(x, y).biomass > 40 {
-                sim.spawn_herd(x as f64, y as f64, fauna::HERD_START);
+                sim.spawn_heads(x as f64, y as f64, fauna::SITE_HEADS);
                 troupeaux += 1;
             }
         }

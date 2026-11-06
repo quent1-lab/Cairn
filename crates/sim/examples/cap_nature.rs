@@ -4,7 +4,7 @@
 //!
 //! Scène : un carré de 12 km (6 × 6 mailles de pâturage) choisi pour que le
 //! biome visé y couvre au moins 75 % des centres de maille, le plus près du
-//! point de référence ; un troupeau de `HERD_START` têtes tous les 1,5 km sur
+//! point de référence ; `SITE_HEADS` têtes tous les 1,5 km sur
 //! toute tuile praticable portant de l'herbe (toundra comprise, contrairement à
 //! `scenario::populate`) ; quatre meutes à 4 km du centre, posées une seule
 //! fois. Le monde reste ouvert : les troupeaux peuvent sortir du carré.
@@ -131,16 +131,15 @@ fn main() {
             let span = side_zones as f64 * side;
             let center = (x0 + span / 2.0, y0 + span / 2.0);
 
-            // Placement : un troupeau tous les 1,5 km à 25 têtes ; à densité de
-            // têtes égale quelle que soit la taille de départ (GRP).
-            let pas = km_to_tiles(1.5 * (f64::from(fauna::HERD_START) / 25.0).sqrt());
+            // Placement : `SITE_HEADS` têtes tous les 1,5 km, en groupes (GRP-1a).
+            let pas = km_to_tiles(1.5);
             let mut gy = y0 + pas / 2.0;
             while gy < y0 + span {
                 let mut gx = x0 + pas / 2.0;
                 while gx < x0 + span {
                     let tile = sim.world.tile(gx as i64, gy as i64);
                     if tile.is_walkable() && tile.biomass > 0 {
-                        sim.spawn_herd(gx, gy, fauna::HERD_START);
+                        sim.spawn_heads(gx, gy, fauna::SITE_HEADS);
                     }
                     gx += pas;
                 }

@@ -224,7 +224,7 @@ fn main() {
                 let (x, y) = (home.0 + dx * step, home.1 + dy * step);
                 let tile = sim.world.tile(x, y);
                 if tile.is_walkable() && tile.biomass > 40 {
-                    sim.spawn_herd(x as f64, y as f64, fauna::HERD_START);
+                    sim.spawn_heads(x as f64, y as f64, fauna::SITE_HEADS);
                     if sim.fauna.query::<&Herd>().iter().count() >= n_herds {
                         break 'dense;
                     }

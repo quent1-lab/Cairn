@@ -44,6 +44,12 @@ pub const HERD_START: f32 = 25.0;
 /// Sous cet effectif, le troupeau n'est plus viable : il disparaît (les
 /// survivants sont réputés dispersés).
 pub const HERD_MIN: f32 = 4.0;
+/// Têtes qu'un site reçoit, au placement d'une scène comme à l'immigration
+/// (GRP-1a) : l'ancien effectif de départ d'un troupeau, gardé **en têtes**
+/// pour que la taille des groupes ne change pas la densité de gibier. Un site
+/// reçoit des têtes, pas un nombre de troupeaux ; elles arrivent en groupes de
+/// `HERD_START` (`Sim::spawn_heads`).
+pub const SITE_HEADS: f32 = 25.0;
 /// Au-dessus, le troupeau devient ingérable et **fissionne** en deux.
 pub const HERD_FISSION: f32 = 90.0;
 // Natalité et mortalité de fond : propres à chaque espèce depuis CAP 3.2

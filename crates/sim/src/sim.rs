@@ -691,10 +691,34 @@ impl Sim {
     /// toundra). Tirage déterministe dérivé de l'identifiant (assigné dans un
     /// ordre déterministe).
     pub fn spawn_herd(&mut self, x: f64, y: f64, population: f32) -> FaunaId {
+        let species = self.herbivore_here(x, y);
+        self.spawn_herd_species(x, y, population, species)
+    }
+
+    /// L'espèce d'herbivore d'un lieu, tirée selon le biome sur l'identifiant
+    /// du prochain troupeau.
+    fn herbivore_here(&mut self, x: f64, y: f64) -> fauna::Species {
         let biome = self.world.tile(x.floor() as i64, y.floor() as i64).biome;
         let mut rng = Pcg32::new(self.world.seed().derive(salt::FAUNA), self.next_fauna_id);
-        let species = fauna::Species::herbivore_for_biome(biome, &mut rng);
-        self.spawn_herd_species(x, y, population, species)
+        fauna::Species::herbivore_for_biome(biome, &mut rng)
+    }
+
+    /// Fait arriver `heads` têtes en un lieu (placement d'une scène,
+    /// immigration ; GRP-1a), en groupes de `HERD_START` têtes au plus, d'une
+    /// même espèce choisie selon le biome. Le premier groupe se pose au lieu
+    /// même, les suivants autour, à 25 tuiles (50 m).
+    pub fn spawn_heads(&mut self, x: f64, y: f64, heads: f32) -> Vec<FaunaId> {
+        let species = self.herbivore_here(x, y);
+        let mut ids = vec![self.spawn_herd_species(x, y, heads.min(fauna::HERD_START), species)];
+        let mut left = heads - fauna::HERD_START;
+        let mut k = 1.0f64;
+        while left > 0.0 {
+            let angle = k * 2.399_963;
+            ids.push(self.spawn_herd_species(x + angle.cos() * 25.0, y + angle.sin() * 25.0, left.min(fauna::HERD_START), species));
+            left -= fauna::HERD_START;
+            k += 1.0;
+        }
+        ids
     }
 
     /// Fait naître un troupeau d'une **espèce imposée** — utilisé par la fission,
@@ -1733,9 +1757,10 @@ impl Sim {
             if let Some((x, y)) =
                 fauna::daily_immigration(&human_positions, &herd_positions, &mut self.world, seed, time)
             {
-                let id = self.spawn_herd(x, y, fauna::HERD_START);
-                self.herd_births.insert(id.0, (time.tick, 1));
-                self.fauna_flows.immigrated += f64::from(fauna::HERD_START);
+                for id in self.spawn_heads(x, y, fauna::SITE_HEADS) {
+                    self.herd_births.insert(id.0, (time.tick, 1));
+                }
+                self.fauna_flows.immigrated += f64::from(fauna::SITE_HEADS);
             }
             // Symétrique : sans réensemencement des meutes, une extinction de
             // prédateurs (boom-bust de Lotka-Volterra) est définitive et le
@@ -2463,10 +2488,10 @@ mod tests {
         assert_eq!(placed, agents, "semis incomplet autour de {home:?}");
         for i in 0..herds {
             let angle = i as f64 * 1.7;
-            sim.spawn_herd(
+            sim.spawn_heads(
                 home.0 as f64 + angle.cos() * 300.0,
                 home.1 as f64 + angle.sin() * 300.0,
-                fauna::HERD_START,
+                fauna::SITE_HEADS,
             );
         }
         (sim, home)
@@ -2496,10 +2521,10 @@ mod tests {
         // Le gibier à portée de vue des chasseurs.
         for i in 0..herds {
             let angle = i as f64 * 1.7;
-            sim.spawn_herd(
+            sim.spawn_heads(
                 home.0 as f64 + angle.cos() * 300.0,
                 home.1 as f64 + angle.sin() * 300.0,
-                fauna::HERD_START,
+                fauna::SITE_HEADS,
             );
         }
         (sim, home)
