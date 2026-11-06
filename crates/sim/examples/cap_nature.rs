@@ -110,7 +110,8 @@ fn main() {
     writeln!(
         csv,
         "seed,biome,day,season,heads,herds,predators,packs,sq_heads,sq_density,sq_load,sq_satiation,\
-         occ_zones,occ_density,growth,predation,dissolved,pack_condition,pack_meat_days,pack_young,pack_share,pack_local"
+         occ_zones,occ_density,growth,predation,dissolved,pack_condition,pack_meat_days,pack_young,pack_share,pack_local,\
+         hungry,roaming,held,acq_fresh,acq_winded,attacks,kills"
     )
     .unwrap();
 
@@ -246,12 +247,19 @@ fn main() {
                 writeln!(
                     csv,
                     "{seed},{name},{},{season},{heads:.0},{herds},{predators:.1},{packs},{sq_heads:.0},{sq_density:.2},\
-                     {sq_load:.3},{sq_satiation:.3},{},{occ_density:.2},{:.1},{:.1},{:.1},{pack_condition:.3},{pack_meat_days:.2},{p_young:.2},{pack_share:.3},{pack_local:.1}",
+                     {sq_load:.3},{sq_satiation:.3},{},{occ_density:.2},{:.1},{:.1},{:.1},{pack_condition:.3},{pack_meat_days:.2},{p_young:.2},{pack_share:.3},{pack_local:.1},{},{},{},{},{},{},{}",
                     day + 1,
                     occ.len(),
                     f.growth,
                     f.predation,
-                    f.dissolved
+                    f.dissolved,
+                    f.hunt.hungry,
+                    f.hunt.roaming,
+                    f.hunt.held,
+                    f.hunt.acquired_fresh,
+                    f.hunt.acquired_winded,
+                    f.hunt.attacks,
+                    f.hunt.kills
                 )
                 .unwrap();
                 csv.flush().unwrap();

@@ -2028,6 +2028,7 @@ pub fn update_packs(
     world: &World,
     herds: &[HerdView],
     stats: &mut FaunaStats,
+    hunt: &mut HuntFlows,
     range: &mut Rangeland,
     climate: &Climate,
     time: SimTime,
@@ -2058,6 +2059,9 @@ pub fn update_packs(
         let d2 = (home.0 - h.0).powi(2) + (home.1 - h.1).powi(2);
         homes.iter().all(|&(e, o)| e == me || (o.0 - h.0).powi(2) + (o.1 - h.1).powi(2) >= d2)
     };
+    // Les troupeaux à bout de souffle, pour le partage des acquisitions.
+    let winded: std::collections::BTreeSet<hecs::Entity> =
+        fauna.query::<&Herd>().iter().filter(|(_, h)| h.flee_ticks > 0).map(|(e, _)| e).collect();
 
     for (entity, (id, pack, pos)) in fauna.query_mut::<(&FaunaId, &mut Pack, &mut Position)>() {
         // — Les meutes restent en simulation FINE, toujours.
@@ -2114,6 +2118,13 @@ pub fn update_packs(
                 }
                 best
             });
+            hunt.hungry += 1;
+            match (held.is_some(), nearest) {
+                (true, _) => hunt.held += 1,
+                (false, None) => hunt.roaming += 1,
+                (false, Some((_, h))) if winded.contains(&h.entity) => hunt.acquired_winded += 1,
+                (false, Some(_)) => hunt.acquired_fresh += 1,
+            }
             pack.quarry = nearest.map(|(_, h)| h.entity);
             if nearest.is_none() {
                 // — Rien en vue : la meute erre dans son domaine (1b), au pas
@@ -2149,7 +2160,9 @@ pub fn update_packs(
                     // Une attaque : elle réussit ou elle échoue, et une
                     // réussite tue une bête entière (CAP 3.3).
                     let mut rng = Pcg32::new(tick_seed, id.0);
+                    hunt.attacks += 1;
                     if rng.next_f32() < attack_success(pack.population, herd.species) {
+                        hunt.kills += 1;
                         let taken = herd.population.min(1.0);
                         pack.last_kills = taken;
                         meat_kg += taken * herd.species.edible_kcal() / 1_200.0;
@@ -2248,6 +2261,25 @@ pub struct FaunaFlows {
     /// Têtes arrivées par l'immigration, et prédateurs arrivés de même.
     pub immigrated: f64,
     pub predators_immigrated: f64,
+    /// Ce que font les meutes affamées (CAP 3.3, piste n° 1).
+    pub hunt: HuntFlows,
+}
+
+/// Les heures de faim des meutes, en meute-ticks (CAP 3.3, observation
+/// seule) : errer sans rien sentir, suivre une proie déjà prise, en
+/// **acquérir** une nouvelle — fraîche ou essoufflée (`flee_ticks > 0`) —, et
+/// ce que donnent les attaques. Le partage frais/essoufflé dit si une meute
+/// peut surprendre un troupeau, ou seulement ramasser ceux qu'une fuite a
+/// laissés à bout de souffle.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct HuntFlows {
+    pub hungry: u64,
+    pub roaming: u64,
+    pub held: u64,
+    pub acquired_fresh: u64,
+    pub acquired_winded: u64,
+    pub attacks: u64,
+    pub kills: u64,
 }
 
 /// Un troupeau retiré parce que les humains l'ont laissé au-delà de
@@ -2891,6 +2923,7 @@ mod tests {
             &sim.world,
             herds,
             &mut sim.fauna_stats,
+            &mut HuntFlows::default(),
             &mut sim.rangeland,
             &sim.climate,
             time,

@@ -1503,6 +1503,7 @@ impl Sim {
                 &self.world,
                 &herds,
                 &mut self.fauna_stats,
+                &mut self.fauna_flows.hunt,
                 &mut self.rangeland,
                 &self.climate,
                 time,

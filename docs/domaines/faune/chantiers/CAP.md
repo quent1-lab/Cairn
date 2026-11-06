@@ -1102,6 +1102,51 @@ le départ (5 meutes de 5, posées le même jour, sans réserves de viande, en �
 transitoire plus dur que le régime ; aucun arrêt anticipé du banc quand les loups sont éteints
 (le reste de la run ne mesure plus que le témoin) ; le coût de la grande scène (PERF).
 
+### Reprise, piste n° 1 : lecture (2026-11-06)
+
+Ordre d'un tick (`sim.rs`) : les meutes agissent sur la photo des troupeaux, **puis** les
+troupeaux lisent la position des meutes **après** leur pas. Toute meute fait fuir, affamée ou
+non. Une meute qui sent un troupeau (≤ 0,4 km) l'attaque dans le même tick (rayon de chasse
+0,5 km ≥ odorat). Conséquence, par construction : pour qu'un troupeau soit à ≤ 0,4 km d'une
+meute au moment où elle regarde, il faut qu'il ait été à ≤ 0,7 km (cerf) d'elle au tour des
+troupeaux précédent — il a donc **détalé de 2 km**, sauf s'il était à bout de souffle
+(`flee_ticks > 0`, figé deux ticks après une fuite). La pâture (80 m par tick) ne peut pas le
+rapprocher de 0,3 km. Une meute ne peut donc **acquérir** (prendre pour proie un troupeau
+qu'elle ne suivait pas) qu'un troupeau **essoufflé**, ou un troupeau qui vient d'apparaître
+(placement, fission). Une fois la proie acquise, la poursuite marche (1,5 km/tick contre 2 km
+tous les 3 ticks).
+
+**Prédiction de la mesure** (`hunt` dans `FaunaFlows`, grande scène, forêt, 4 seeds, 1 an) :
+parmi les acquisitions, plus de 90 % portent sur un troupeau essoufflé ; plus de 80 % des
+heures de faim se passent à errer sans rien sentir. **Réfutée** si plus de 10 % des
+acquisitions portent sur un troupeau frais hors placement : alors le défaut n'est pas là.
+
+### Reprise, piste n° 1 : mesure (binaire `out/bin/cap33e/`, `out/cap/piste1/`)
+
+Régime : grande scène (1 024 km², boîte), forêt, sans humains, départ jour 135, 1 an,
+seeds 42, 7, 1337, 2024. Compteurs `HuntFlows` (meute-ticks de faim, toutes meutes).
+
+| seed | faim | errance | suivie | acquises fraîches | essoufflées | attaques | prises | loups j90 / j360 |
+|---|---|---|---|---|---|---|---|---|
+| 42 | 9 590 | 96 % | 378 | 5 | 3 | 320 | 61 | 14 / 0 |
+| 7 | 10 970 | 87 % | 1 382 | 22 | 3 | 833 | 104 | 10,6 / 4 |
+| 1337 | 8 658 | 76 % | 2 083 | 2 | 9 | 2 079 | 295 | 20,3 / 8,9 |
+| 2024 | 9 237 | 81 % | 1 773 | 19 | 5 | 1 180 | 33 | 4,7 / 8,4 |
+
+- **Prédiction « > 90 % d'essoufflés » réfutée** : 18 à 88 % de fraîches, réparties sur
+  l'année (pas seulement au placement). La lecture par construction a manqué un chemin
+  (fission d'un troupeau près d'une meute, fuite bloquée par le relief, ou autre : non
+  identifié).
+- **Prédiction « > 80 % d'errance » tenue sur 3 seeds sur 4** (76 % pour 1337).
+- **Ce qui compte** : **8 à 25 acquisitions par an pour toute la scène** (4-5 meutes), soit
+  1 à 6 rencontres par meute et par an. Le réel compte une douzaine de rencontres par prise
+  (Mech 1966 : 77 orignaux testés, 6 tués). Et chaque rencontre, ici, ne finit pas :
+  la meute suit sa proie et l'attaque **à chaque tick** (attaques ≈ ticks de suivi), jusqu'à
+  27 prises par acquisition (1337 : 295 prises pour 11 rencontres) — le réel en donne
+  ~0,08. **Le défaut est aux deux bouts** : des rencontres cent fois trop rares, et une
+  rencontre qui vaut un troupeau entier. Une meute qui tombe sur une harde vit (1337, 2024) ;
+  celle qui n'en trouve pas meurt (42).
+
 ## Étape 3 — corriger règle par règle
 
 Dans l'ordre de l'amont à l'aval, un changement à la fois, chacun mesuré contre la référence de

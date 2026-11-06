@@ -114,3 +114,10 @@ par (moi, sous-agent `sourceur`) · lu en entier ou de seconde main.
 - Coût du transport : 0,88 kcal/kg/km (mâles ~44 kg), 0,95 (femelles ~37 kg), 1,1 (juvéniles ~25 kg) · Tucker 1975 (citation secondaire) ; dépense quotidienne ~22 MJ pour 18 km (Alaska)
 - Territoire : 953 km² (meute Fishtrap, Minnesota, 2005) ; ~10 jours pour en faire le tour (source non identifiée) ; 4-6 sites de rendez-vous l'été
 - Conflits : malnutrition et luttes entre loups font à parts égales 58 % des morts d'adultes (Superior National Forest 1968-76, Mech 1977, J. Mammal.) ; 41 adultes tués par d'autres loups 1968-2014 ; pic en février ; Yellowstone (Cubaynes et al. 2014, 280 loups, 13 ans) : l'agression densité-dépendante régule la survie adulte (pourcentage non trouvé)
+
+## Loup et proie : qui voit l'autre d'abord (CAP 3.3, piste n° 1, 2026-11-06, `sourceur`, de seconde main)
+- Détection par l'odorat : ~300 yards (≈ 274 m) à bon vent, distance **typique** ; le « 2,4 km » est un cas unique et exceptionnel de la même source, pas la norme · Mech 1966, *The Wolves of Isle Royale* (extraits)
+- Distance d'évitement de la proie : caribou face au loup (GPS) — évitement marqué sous ~2,5 km, abandon du fourrage sous ~1 km · Basille et al. 2015, *Ecology* (extraits). Pas de distance de fuite chiffrée trouvée pour wapiti, cerf ou bison face au loup
+- Issue des rencontres (orignal, Isle Royale) : 77 « testés », 6 tués (7,8 %) ; 36 tiennent tête (0 tué), 41 fuient (5 tués, 12 %) · Mech 1966. Un loup seul : ~2 % de chances sur un wapiti adulte seul (NPS Yellowstone, secondaire)
+- Poursuites : de quelques mètres à 4-4,8 km (cas individuels, Isle Royale) ; aucune moyenne trouvée
+- Non trouvé : proportions des étapes de la chasse au wapiti (MacNulty et al. 2007, PDF illisible) ; données GPS de la phase de recherche et d'approche (Mech, Smith & MacNulty 2015)
