@@ -192,7 +192,7 @@ fn main() {
                 #[cfg(feature = "profile")]
                 if (day + 1) % 30 == 0 {
                     let h: Vec<u64> = fauna::HERD_PROF.iter().map(|a| a.load(std::sync::atomic::Ordering::Relaxed) / 1_000_000).collect();
-                    eprintln!("jour {} :\n{}troupeaux (ms) : menace {} pâture {} - {} demande {}", day + 1, sim.prof.report(), h[0], h[1], h[2], h[3]);
+                    eprintln!("jour {} :\n{}troupeaux (ms) : menace {} pâture {} - {} demande {} ; chunks générés {}", day + 1, sim.prof.report(), h[0], h[1], h[2], h[3], sim.world.generated);
                 }
                 if (day + 1) % SAMPLE_DAYS != 0 {
                     continue;
