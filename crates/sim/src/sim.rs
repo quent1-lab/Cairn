@@ -2881,8 +2881,11 @@ mod tests {
         sim.allow_fauna_immigration = true;
         let (nx, ny) = land_near(&mut sim, home, cairn_core::km_to_tiles(2.0));
         let (fx, fy) = land_near(&mut sim, home, cairn_core::km_to_tiles(20.0));
-        let proche = sim.spawn_herd(nx, ny, 40.0);
-        let lointain = sim.spawn_herd(fx, fy, 40.0);
+        // Des bêtes seules : un groupe de 40 se scinde dans la journée (GRP-1b)
+        // et son identifiant peut disparaître dans une fusion ; le test ne
+        // regarde que la sortie de la simulation.
+        let proche = sim.spawn_herd(nx, ny, 1.0);
+        let lointain = sim.spawn_herd(fx, fy, 1.0);
         for _ in 0..TICKS_PER_DAY + 1 {
             sim.step();
         }
