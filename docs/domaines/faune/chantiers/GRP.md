@@ -91,3 +91,16 @@ identiques (407 356) — **prédiction tenue** (un second banc tournait en même
 estimé). Reste dominant : la génération des chunks (`best_pasture`, 100 s sur 150).
 Ce que j'ai pu manquer : le gain dans le jeu réel n'est pas mesuré (là, presque aucune
 éviction : le cache couvre le périmètre).
+
+## État au 2026-11-06 au soir (consigné avant un redémarrage)
+
+Ordre décidé par l'utilisateur : PERF → GRP-1 → VEN → clôture de CAP 3.3.
+**Questions en attente de l'utilisateur** :
+1. GRP-1 et l'immigration : la compter en têtes (recommandé : même flux de têtes, en groupes
+   de taille réelle ; CHA-5 la remplacera) ou avancer CHA-5.
+2. Arrêter PERF au gain du LRU (banc estimé à ~25-40 min par an de jeu, non mesuré sur un an
+   entier ; le jeu réel n'est pas touché).
+Modèle GRP-1 proposé (non validé) : scission avec une probabilité ∝ taille² (échelle à tirer
+de la durée de vie des groupes de chevreuil, Pays et al. 2012), fusion de deux groupes qui se
+croisent à courte portée, `HERD_MIN` 1. Variante GRP-0 : branche locale `grp-mesure`
+(binaires `out/bin/grp0/`, sorties `out/cap/grp0/`, `out/perf/`).
