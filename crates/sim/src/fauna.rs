@@ -40,12 +40,12 @@ const DT_DAYS: f32 = 1.0 / 24.0;
 // — Démographie des herbivores —
 
 /// Effectif d'un troupeau à sa création.
-pub const HERD_START: f32 = 25.0;
+pub const HERD_START: f32 = 5.0;
 /// Sous cet effectif, le troupeau n'est plus viable : il disparaît (les
 /// survivants sont réputés dispersés).
-pub const HERD_MIN: f32 = 4.0;
+pub const HERD_MIN: f32 = 1.0;
 /// Au-dessus, le troupeau devient ingérable et **fissionne** en deux.
-pub const HERD_FISSION: f32 = 90.0;
+pub const HERD_FISSION: f32 = 10.0;
 // Natalité et mortalité de fond : propres à chaque espèce depuis CAP 3.2
 // (`Species::vital`). Elles valaient 0,020 et 0,010 par jour pour toutes —
 // r max = 3,6 /an, dix à vingt fois celui d'un ongulé réel.
@@ -1618,6 +1618,10 @@ pub type MergeView = (u64, (f64, f64), f32, Species, bool);
 /// troupeau et par passe. Renvoie des couples (absorbeur, absorbé), en indices
 /// de `herds` ; l'absorbeur est le plus gros (à égalité, le plus petit id).
 pub fn merge_plan(herds: &[MergeView]) -> Vec<(usize, usize)> {
+    // GRP-0 (variante de mesure) : aucune fusion.
+    if !herds.is_empty() {
+        return Vec::new();
+    }
     let mut order: Vec<usize> = (0..herds.len()).collect();
     order.sort_by_key(|&i| herds[i].0);
     let mut taken = vec![false; herds.len()];
