@@ -34,3 +34,36 @@ Prédictions (écrites avant) :
 - coût ×5 au moins par année de jeu (~5 min → ≥ 25 min).
 **Réfutée** si les acquisitions montent de moins de ×2 : la taille des groupes ne serait pas
 le goulot des rencontres (ce serait la vigilance parfaite, VEN).
+
+### GRP-0 — mesure (binaire `out/bin/grp0/`, branche `grp-mesure`, `out/cap/grp0/`, 2026-11-06)
+
+Témoin `out/cap/r1/` (`b79e719`) → variante, an 1 :
+
+| seed | troupeaux j5 | têtes/troupeau fin | acquisitions | prises | loups j90 | loups j180 | durée de l'an |
+|---|---|---|---|---|---|---|---|
+| 42 | 307 → 2 208 | 58,7 → 7,1 | 27 → 246 | 9 → 43 | 5,1 → 10,2 | 0 → 0 | ~5 → 74 min |
+| 7 | 330 → 2 304 | 60,0 → 6,7 | 28 → 221 | 4 → 16 | 1,0 → 3,1 | 0 → 0 | ~5 → 51 min |
+| 1337 | 242 → 1 739 | 58,2 → 7,1 | 36 → 901 | 4 → 147 | 4,7 → 15,2 | 0 → 8,7 | ~5 → 45 min |
+| 2024 | 319 → 2 304 | 59,7 → 6,6 | 36 → 276 | 3 → 15 | 0 → 5,8 | 0 → 1,8 | ~6 → 48 min |
+
+- Troupeaux ×8 (×7 à ×9), 6,6-7,1 têtes en fin d'an : **tenue**.
+- Acquisitions ×5 au moins : **tenue** (×8 à ×25). Prises ×3 au moins : **tenue** (×4 à ×37).
+- Loups vivants au jour 180 sur 2 seeds sur 4 au moins : **tenue de justesse** (1337 : 8,7 ;
+  2024 : 1,8) ; à l'an 1, une seule meute résiduelle (1337 : 1,3 loup).
+- Coût ×5 au moins : **tenue** (×9 à ×15) — la grande scène passe à ~45-75 min par an de jeu.
+- Densité de têtes inchangée (carré 11-15 /km² des deux côtés). Aucun troupeau n'a dépassé
+  10 têtes ni ne s'est dissous dans l'année : la dynamique de scission n'est pas mesurée ici.
+
+**Conclusion** : la taille des groupes est bien un goulot des rencontres — ×8 à ×25 —, mais
+pas le seul : les meutes errent encore 91-98 % de leurs heures de faim et s'éteignent quand
+même. Ordre de grandeur réel (déduit, non mesuré) : une meute de 5 mange ~22 kg/j, un cerf
+tous les 3-4 jours, ~100 prises par an, soit ~1 000 rencontres à 8-12 % de succès ; la
+variante en donne 50 à 200 par meute. L'écart restant (×5-20) est l'objet de **VEN** (la proie
+voit toute meute à 0,7 km).
+
+**Ce que j'ai pu manquer** : la variante fige les groupes (scission à 10, sans fusion) — elle
+ne dit rien de la taille qu'une vraie dynamique fission-fusion produirait, ni de la saison
+(groupes d'hiver ×2,5). Elle ne touche pas la chasse humaine (non mesurée). Un an, forêt seule.
+Le coût ×10 rend la correction dépendante d'un travail de performance (grille spatiale des
+requêtes de voisinage : `nearest_threat`, `owns`, la recherche de proie, `merge_plan` sont
+linéaires en troupeaux, par meute ou par troupeau).
